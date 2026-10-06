@@ -1,0 +1,38 @@
+# ★personal data — this never goes into the repository★
+#
+# This tool gets installed and used by many people, each on their own computer. The files below are
+# ★that person's own★ and must not be shared. Scoring against someone else's gold makes it impossible
+# to tell whether a failure is the engine or a different corpus, and config's paths are that person's own folder layout.
+
+# install.sh detects and builds this per environment (config.example.json is the template)
+config.json
+
+# eval set — the queries come from your own conversation history and gold is your own memory names.
+# build your own set with `bin/brain eval-init`. Only the format examples are shared.
+#
+# ⛔⛔ ★don't block this by extension — on 2026-09-03, `short.json.bak` slipped past that rule and
+#      14KB (90 real queries + 34 gold) stayed ★tracked★.★ Backup and temp copies show up
+#      under any extension. So ★the whole folder is blocked and only the examples are opened★.
+#   ⛔ And `.gitignore` only ignores ★untracked★ files — anything already added keeps following
+#      you even after the rule is fixed (`git rm --cached` is required).
+tests/eval/*
+!tests/eval/*.example.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# local artifacts
+*.db
+*.db-shm
+*.db-wal
+
+# packaging artifacts — ★never goes into the repository★ (leftovers here poison the next install with stale package-data)
+build/
+dist/
+*.egg-info/
+
+# the ★internal-name list★ the scrub check looks for — if this file goes into the repository,
+# the checker itself becomes a leak (the thing it searches for ends up carrying it). Everyone builds their own.
+tests/scrub_terms.txt

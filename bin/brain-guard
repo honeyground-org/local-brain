@@ -1,0 +1,46 @@
+#!/bin/sh
+# PreToolUse hook — attaches an action-bound instruction right before that action.
+#
+# ⛔ filters in the shell first — shell calls are most of all tool calls, and spinning up Python on
+#    every one of them would accumulate that cost. Only calls it when the filter below catches something.
+#
+# ★the filter list is data, never code★
+#   The only list is the signal file `<home>/guard-signals`, written by `brain rules` (§ruledisc.sync_shell)
+#   from the person's own rules. As rules grow, ★this script is never edited★ — if code rewrote the
+#   shell, one syntax slip would block every shell call, including the one that could fix the hook
+#   (this actually happened on 2026-08-19).
+#   ⛔ ★No file → no rules → exit at once★. brain ships with no rules of its own (§guard.RULES), so a
+#   fresh install never reaches Python here. There used to be a fallback list in this file — a copy of
+#   one person's stack (`.blade.php`, `artisan`, `terraform` …) that fired on every other machine.
+#
+# ★where the home is★ — the installer writes `--home <path>` into the hook line (§store.adopt_home_from_argv),
+#   because this script cannot ask Python. `BRAIN_HOME` still wins. Hook lines from before `--home`
+#   existed fall back to the old default home.
+# A failure here never blocks the tool call.
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+PAYLOAD=$(cat)
+
+HOME_ARG=""
+prev=""
+for a in "$@"; do
+  case "$a" in
+    --home=*) HOME_ARG="${a#--home=}" ;;
+  esac
+  [ "$prev" = "--home" ] && HOME_ARG="$a"
+  prev="$a"
+done
+SIGNALS="${BRAIN_HOME:-${HOME_ARG:-$HOME/.claude/brain}}/guard-signals"
+
+# ⛔ tool_name is never inspected in the shell — a check like '"tool_name":"Bash"' ★depends on JSON
+#    formatting★, and a single space difference silently stops catching, with no error (a 2026-08-18 verification caught this).
+#    Judging the tool is Python's job, which actually parses the JSON. The shell only ever looks at ★the command string★.
+[ -r "$SIGNALS" ] || exit 0
+hit=0
+while IFS= read -r pat; do
+  [ -z "$pat" ] && continue
+  case "$PAYLOAD" in *"$pat"*) hit=1; break ;; esac
+done < "$SIGNALS"
+[ "$hit" = 0 ] && exit 0
+
+printf '%s' "$PAYLOAD" | env PYTHONPATH="$DIR" python3 -m brain.guard "$@" 2>/dev/null || true
+exit 0

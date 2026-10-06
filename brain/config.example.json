@@ -1,0 +1,76 @@
+{
+ "_comment": [
+  "The single source of truth for what brain remembers. Adding a new corpus = one entry here.",
+  "install.sh builds config.json in this shape for you. You can also edit it by hand.",
+  "⛔ Don't write a path that doesn't exist — that's not an error, it's a silently empty index nobody notices."
+ ],
+ "language": "",
+ "_embed_note": [
+  "★embed★ — a source with \"embed\": false is ★never sent out★ (no embedding, no judge); word search still covers it.",
+  "The default is true: once an embedding engine is chosen (\"engines\" below, or `brain engines --set`), every source may be embedded.",
+  "⛔ A key that is merely present chooses nothing — GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY are often another tool's. `brain privacy` prints what is blocked."
+ ],
+ "_language_note": "en · de · es · fr · ja · ko. English if left empty (BRAIN_LANG shows another one once; the OS locale is not used). The settings UI writes here.",
+ "_graph_kinds_note": "graph_kinds (optional) — the kinds the connection graph colours, up to three, e.g. [\"decision\", \"note\"]. Leave it out and the graph colours this corpus's three most common kinds.",
+ "_engines_note": [
+  "★engines★ — which outside AI model fills each role. Nothing is used until it is named here (or with `brain engines --set`).",
+  "embed: gemini · openai · none   judge: gemini · openai · anthropic · none   (openai + base_url = any OpenAI-compatible server, e.g. a local Ollama)",
+  "Optional per role: model, base_url, effort. `brain engines` shows what each role sends and where."
+ ],
+ "engines": {
+  "embed": {
+   "provider": "none"
+  },
+  "judge": {
+   "provider": "none"
+  }
+ },
+ "sources": [
+  {
+   "name": "memory",
+   "path": "<the folder your notes live in — `brain detect` lists the candidates on this machine>",
+   "include": [
+    "*.md"
+   ],
+   "max_depth": 1,
+   "prior": 1.45,
+   "note": "personal memory — the axis a person edits by hand. Heaviest weight."
+  },
+  {
+   "name": "guide",
+   "path": "~/work",
+   "include": [
+    "CLAUDE.md",
+    "AGENTS.md"
+   ],
+   "max_depth": 2,
+   "exclude": [
+    "/node_modules/",
+    "/vendor/"
+   ],
+   "prior": 1.25,
+   "note": "per-project rules (⛔ things not to do). A rule outweighs reference material."
+  },
+  {
+   "name": "docs",
+   "path": "~/work/docs",
+   "include": [
+    "*.md"
+   ],
+   "exclude": [
+    "/node_modules/"
+   ],
+   "prior": 1.0,
+   "note": "documentation corpus — the baseline"
+  },
+  {
+   "name": "wiki",
+   "path": "~/my-obsidian-vault",
+   "include": [
+    "*.md"
+   ],
+   "prior": 0.85,
+   "note": "wiki/notes. Lower this if it duplicates docs a lot, so the duplicate doesn't outrank the original."
+  }
+ ]
+}

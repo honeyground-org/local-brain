@@ -1,0 +1,24 @@
+{
+  "_": [
+    "format example. The real set is short.json, and it is gitignored.",
+    "A_memory_needed  = a short query that needs memory + gold",
+    "C_no_memory_needed = a query that needs no memory (★the false-fire control group★ — without it a rise in noise goes unseen)"
+  ],
+  "meta": {
+    "corpus_docs_at_build": 918,
+    "threshold_at_build": 12.45,
+    "short_share_pct": 25.6
+  },
+  "A_memory_needed": [
+    {
+      "q": "(a short real query)",
+      "gold": "(a fragment of a memory name)",
+      "terms": [
+        "synonym"
+      ]
+    }
+  ],
+  "C_no_memory_needed": [
+    "(a real query needing no memory)"
+  ]
+}

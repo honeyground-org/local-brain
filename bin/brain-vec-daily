@@ -1,0 +1,18 @@
+#!/bin/sh
+# Daily semantic-search ingest — ★a thin wrapper, like every other script here★.
+#
+# ⛔ This file used to carry ★its own copy★ of the job as an inline heredoc. `brain/jobs.py` took that
+#    role on 2026-09-02, but this script was never retired and the scheduler kept pointing at it — so
+#    for 26 days the scheduled run executed code nobody was editing. Two fixes written into `jobs.py`
+#    (a non-zero exit on failure, and a grace period for a network that has not woken up yet) never
+#    ran once in production, and the liveness axis kept reporting 100 while the job died.
+#    ★A script under bin/ dispatches to a module. It never holds logic.★
+#    `tests/verify_liveness.py` now checks that, so this cannot come back quietly.
+#
+#   ./bin/brain-vec-daily        fills today's share of the free tier, then stops cleanly
+#   BRAIN_VEC_LOG=<path>         where the log goes (default <brain home>/vec-daily.log — `brain help` shows the home)
+#
+# ⛔ Exit code is ★meaningful★: 0 = it did its work (or the daily quota is simply spent),
+#    3 = it ran and did not. The liveness verdict reads it.
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+exec env PYTHONPATH="$DIR" python3 -m brain.jobs vec "$@"

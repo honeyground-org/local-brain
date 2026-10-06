@@ -1,0 +1,9 @@
+#!/bin/sh
+# SessionStart hook — ① incremental index (up through modified files) ② notify if the last session ended with nothing remembered.
+# A failure never blocks the session. ① keeps stdout empty; only ② goes out into the context.
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+PAYLOAD=$(cat)
+printf '%s' "$PAYLOAD" | env PYTHONPATH="$DIR" python3 -m brain.cli index >/dev/null 2>&1 || true
+# ⛔ only the notice call takes the flags — `brain.cli index` parses argv with argparse and would reject them
+printf '%s' "$PAYLOAD" | env PYTHONPATH="$DIR" python3 -m brain.tail notice "$@" 2>/dev/null || true
+exit 0

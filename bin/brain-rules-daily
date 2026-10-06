@@ -1,0 +1,14 @@
+#!/bin/sh
+# Daily behaviour-rule discovery + the layers that calibrate themselves — ★a thin wrapper★.
+#
+# ⛔ See the note in `bin/brain-vec-daily`: this file also used to hold an inline copy of the job,
+#    and the scheduler ran that copy instead of `brain/jobs.py`. Logic lives in the module.
+#
+#   ./bin/brain-rules-daily      judges today's share of candidates, then stops cleanly
+#   BRAIN_RULES_DAILY_LIMIT=300  how many candidates at most (read by brain/jobs.py)
+#   BRAIN_RULES_LOG=<path>       where the log goes (default <brain home>/rules-daily.log — `brain help` shows the home)
+#
+# ⛔ Exit code: 0 = it did its work (the judge's daily budget wall counts as done — it lifts at
+#    Pacific midnight), 3 = it ran and did not.
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+exec env PYTHONPATH="$DIR" python3 -m brain.jobs rules "$@"

@@ -1,0 +1,52 @@
+# ★minimal packaging to ship this as installable★ (2026-09-02)
+#
+# ⛔ this file existing doesn't ★create a runtime dependency★ — `dependencies` stays empty,
+#    and setuptools is used ★only at install time★. brain still runs on nothing but the python3 standard
+#    library alone. This repository's pride (0 dependencies) stays intact.
+#
+# ★why this is needed★ — right now the entry points are POSIX shell scripts under `bin/*`. Windows has
+#    no `sh`, so ★not a single line runs.★ Made into console_scripts, pip/pipx plants a shell shim on Mac
+#    and a `brain.exe` shim on Windows on its own — ★one set covers both platforms★.
+#
+#    install:  pipx install .        (recommended — it's isolated)
+#           pip install --user .
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-brain"
+version = "0.1.0"
+description = "Local memory and search brain for LLM coding hosts (Claude Code, Codex)"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = []                     # ★empty — uses only the standard library★
+license = { text = "Apache-2.0" }   # ★2026-09-14 user decision★ — open-source release (plan §9-A).
+                                      # ⛔ keep the table form, not the PEP 639 SPDX string: that needs
+                                      #    setuptools>=77, which does not install on Python 3.8 (see requires-python).
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+]
+
+[project.scripts]
+# ⛔ the names stay ★the same as the current shell scripts★ — hook config, docs, and people's fingers already know them.
+brain = "brain.cli:main"
+brain-hook = "brain.hook:main"
+brain-guard = "brain.guard:main"
+brain-mcp = "brain.server:serve"
+brain-stop = "brain.tail:cli_stop"
+brain-end = "brain.tail:cli_end"
+brain-session = "brain.tail:cli_notice"
+brain-vec-daily = "brain.jobs:vec_daily"
+brain-rules-daily = "brain.jobs:rules_daily"
+# ⛔ the installer is an entry point too — Windows has no `sh`, so it can't use install.sh
+brain-install = "brain.install:main"
+
+[tool.setuptools]
+packages = ["brain"]
+
+# ⛔ ★only goes inside the package★ — something like `../i18n/*.json` that climbs upward makes pip unpack it
+#    at ★the top of site-packages★, polluting someone else's namespace.
+[tool.setuptools.package-data]
+brain = ["locales/*.json", "config.example.json", "templates/*.md"]

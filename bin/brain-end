@@ -1,0 +1,6 @@
+#!/bin/sh
+# SessionEnd hook — marks the session as definitely ended (so it doesn't have to wait for the idle threshold).
+# ⚠️ Whether this hook actually fires is unmeasured — the design doesn't depend on it.
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+env PYTHONPATH="$DIR" python3 -m brain.tail end "$@" >/dev/null 2>&1 || true
+exit 0

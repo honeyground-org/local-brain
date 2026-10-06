@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stop hook — ★no output · no block★. Quietly records only the session's "unsaved tail".
+# Why it doesn't ask here: see brain/tail.py's header (interrupting hits the first half of a session 99% of the time, 15~28% precision).
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+env PYTHONPATH="$DIR" python3 -m brain.tail stop "$@" >/dev/null 2>&1 || true
+exit 0

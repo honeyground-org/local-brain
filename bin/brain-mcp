@@ -1,0 +1,4 @@
+#!/bin/sh
+# MCP stdio server. stdout is protocol-only — nothing else ever prints here.
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+exec env PYTHONPATH="$DIR" python3 -m brain.server

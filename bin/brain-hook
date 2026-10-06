@@ -1,0 +1,5 @@
+#!/bin/sh
+# UserPromptSubmit hook — brain recalls on its own.
+# stdout goes into the session context. No failure ever blocks the session (always exit 0).
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+exec env PYTHONPATH="$DIR" python3 -m brain.hook "$@"

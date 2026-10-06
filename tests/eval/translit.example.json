@@ -1,0 +1,14 @@
+{
+ "_": "The shape of the transliteration-bridge eval set. ⛔ Don't invent words — pull them by frequency from your own prompts (skip this and false-bridges stay invisible: on 2026-08-19, 10 hand-picked words were logged as '0 false-bridges', but the real top 400 words had 38). How to pull them: count [가-힣]{2,} in the user's own utterances across ~/.claude/projects/*/*.jsonl and split the top 200 into loan/native.",
+ "loan": {
+  "세션": "session",
+  "도메인": "domain",
+  "프로젝트": "project"
+ },
+ "native": [
+  "그리고",
+  "항상",
+  "해서",
+  "경우"
+ ]
+}

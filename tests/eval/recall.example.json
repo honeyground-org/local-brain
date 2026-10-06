@@ -1,0 +1,18 @@
+{
+  "_": [
+    "format example. The real set is recall.json, and it is gitignored.",
+    "q     = a question taken verbatim from your own conversation history (do not invent one)",
+    "terms = 5~10 synonyms·English spellings·identifiers for that topic (measures the B contract)",
+    "gold  = a fragment of the name of your own memory file that answers that question"
+  ],
+  "cases": [
+    {
+      "q": "(a question from your own history)",
+      "terms": [
+        "keyword",
+        "synonym"
+      ],
+      "gold": "(a fragment of your own memory name)"
+    }
+  ]
+}

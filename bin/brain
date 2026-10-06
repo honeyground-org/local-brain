@@ -1,0 +1,17 @@
+#!/bin/sh
+# brain CLI — 0 dependencies. Runs as-is on the system python3.
+#
+# ⛔ ★must follow the symlink★ (2026-08-31) — once linked as `~/.local/bin/brain`,
+#    `dirname $0` pointed at ★the folder holding the link★ (~/.local/bin) and it
+#    died with `No module named 'brain'`. Finding the repository means looking at ★where the link points★.
+#    ⛔ `readlink -f` isn't in macOS's default readlink (coreutils-only) — follow it by hand.
+SELF=$0
+while [ -L "$SELF" ]; do
+  LINK=$(readlink "$SELF")
+  case "$LINK" in
+    /*) SELF=$LINK ;;
+    *)  SELF=$(dirname "$SELF")/$LINK ;;
+  esac
+done
+DIR=$(cd "$(dirname "$SELF")/.." && pwd)
+exec env PYTHONPATH="$DIR" python3 -m brain.cli "$@"
