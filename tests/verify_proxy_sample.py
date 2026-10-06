@@ -35,6 +35,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+# ⛔ This check calibrates ★the real index★ with forced or broken samples — it must never teach the live
+#    margin filter (§brain/adaptive.step). Inherited by every child process it starts.
+os.environ["BRAIN_ADAPTIVE_LEARN"] = "0"
 
 from brain import calibrate, evalinit as ei, proxy, store  # noqa: E402
 from tests import _needs  # noqa: E402

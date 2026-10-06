@@ -141,11 +141,11 @@ def neutral_probes(db: sqlite3.Connection) -> List[str]:
                 out.append(val)
     return out + [q for q in _NEUTRAL_EN if q not in out]
 
-# Margin placed above the noise floor — ★a method setting, chosen once on a reference corpus★ (the author's
-# notes: floor 7.41 → 10.0 adopted). It is a ratio, so it carries across corpora; the floor under it is
-# measured on each person's own corpus. ⛔ Never re-fit per person from their sample — that is choosing a
-# threshold with the sample (§_calibrate_locked: overfitting); their sample only ★refuses★ a regression.
-# A person who wants another can say so: BRAIN_CALIB_MARGIN.
+# Margin placed above the noise floor — ★the prior★ of a per-person filter (§brain/adaptive.py). Chosen once on
+# a reference corpus (the author's notes: floor 7.41 → 10.0 adopted); each person's own sample then moves it,
+# measure-only at first, weighted by how much each observation can be trusted (a Kalman filter — not a sweep
+# that keeps the best, which would be choosing a threshold with the sample it is judged on). A person who
+# wants a fixed one can say so: BRAIN_CALIB_MARGIN.
 MARGIN = float(os.environ.get("BRAIN_CALIB_MARGIN", "") or 1.35)
 
 # However small the corpus, the threshold never goes below this — near 0 it becomes
@@ -340,7 +340,10 @@ def measure(db: sqlite3.Connection) -> dict:
     common = [top(q) for q in common_qs]
 
     floor = max([0.0] + neutral + common)
-    threshold = max(FLOOR_MIN, round(floor * MARGIN, 2))
+    # ★The margin is learned per person★ (§brain/adaptive.py) — the prior 1.35 until enough observations
+    from brain import adaptive
+    margin = adaptive.current(db)
+    threshold = max(FLOOR_MIN, round(floor * margin, 2))
 
     # ★The positive control — what share of real prompts fires at this threshold★
     # ⛔ A calibration measuring only noise **cannot disprove itself**. However precisely the
@@ -358,7 +361,8 @@ def measure(db: sqlite3.Connection) -> dict:
         "noise_floor": round(floor, 2),
         "neutral_max": round(max(neutral) if neutral else 0.0, 2),
         "common_word_max": round(max(common) if common else 0.0, 2),
-        "margin": MARGIN,
+        "margin": margin,
+        "_floor": floor,
         "docs": n_docs,
         "common_control_used": bool(common_qs),
         "control_languages": corpus_languages(db),
@@ -434,7 +438,9 @@ def measure(db: sqlite3.Connection) -> dict:
 #       from the person's prompts. ★Numbers can move★ — measure after this, not before.
 #   12 (2026-10-06)  the fingerprint rule ignores blank lines (deleting a comment-only line no longer moves
 #       it). The only code change in the ruler modules; no measurement path changed.
-CODE_GENERATION = 12
+#   13 (2026-10-06)  ★the margin is learned per person★ (§brain/adaptive.py — a Kalman filter, measure-only for
+#       the first observations, then used). The threshold can move once the filter deploys.
+CODE_GENERATION = 13
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·
@@ -442,7 +448,7 @@ CODE_GENERATION = 12
 # ⚠️ Known gap, on purpose: the noise-control sentences live in the message catalogs (`calib.noise.*`),
 #    so editing those moves the floor without moving this fingerprint. They are frozen control
 #    text that nobody edits casually, and `_bench` still guards the deployment.
-RULER_MODULES = ("calibrate", "evalinit", "hook", "langdata", "lexicon", "search",
+RULER_MODULES = ("adaptive", "calibrate", "evalinit", "hook", "langdata", "lexicon", "search",
                  "store", "textindex", "translit")
 
 
@@ -623,7 +629,8 @@ def bench_sample(db: sqlite3.Connection):
     return [], [], "none"
 
 
-def _bench(db: sqlite3.Connection, thresholds, pairs=None, ctrl=None) -> dict:
+def _bench(db: sqlite3.Connection, thresholds, pairs=None, ctrl=None,
+           min_a: int = 0, min_c: int = 0) -> dict:
     """Measure (hits · false firings · automatic) at each threshold on a fixed sample. ⛔ No remote calls.
 
     ★Recall is independent of the threshold★, so each query runs once and only the threshold is swapped (91 runs ≈ 2.3s).
@@ -635,7 +642,7 @@ def _bench(db: sqlite3.Connection, thresholds, pairs=None, ctrl=None) -> dict:
         A, C, _kind = bench_sample(db)
     else:
         A, C = pairs, ctrl
-    if len(A) < MIN_A or len(C) < MIN_C:
+    if len(A) < (min_a or MIN_A) or len(C) < (min_c or MIN_C):
         return {}                                     # ★with no sample, make no judgement★
     ra = [(g, search.recall(db, q, k=hook.MAX_ITEMS + 2, log=False)) for q, g in A]
     rc = [search.recall(db, q, k=hook.MAX_ITEMS + 2, log=False) for q in C]
@@ -743,6 +750,9 @@ def _calibrate_locked(db: sqlite3.Connection, force: bool = False) -> dict:
     """The actual measurement — only ever called with `_CALIBRATING` held (see `calibrate` above)."""
     result = measure(db)
     real_tops = result.pop("_real_tops", [])         # ⛔ never stored — see `measure`
+    floor_exact = result.pop("_floor", None)
+    if floor_exact is None:
+        floor_exact = result.get("noise_floor")
     mine = code_identity()
     # ⛔ ★`code` stays the mtime★ — a process still running pre-2026-09-09 code reads this field and
     #    compares it the old way. Give it what it expects; the decision below uses `code_id`.
@@ -757,6 +767,18 @@ def _calibrate_locked(db: sqlite3.Connection, force: bool = False) -> dict:
               file=sys.stderr)
         result["not_saved"] = True
         return result
+    # ── ★The adaptive margin★ (2026-10-06 · §brain/adaptive.py) ─────────────────
+    # One observation per calibration, on half the sample, then a Kalman update. ⛔ After the stale-code
+    # check: an older process must not write the filter either. If the update changed the margin in use,
+    # the threshold is recomputed here — and the guard below judges ★that★ threshold as usual.
+    from brain import adaptive
+    filt = adaptive.step(db, floor_exact or 0.0)
+    result["margin_filter"] = filt
+    # ⛔ only a result that says which floor and margin it used can be re-derived (a stub may not)
+    if floor_exact and "margin" in result and abs(filt["in_use"] - result["margin"]) > 1e-9:
+        result["margin"] = filt["in_use"]
+        result["threshold"] = max(FLOOR_MIN, round(floor_exact * filt["in_use"], 2))
+        result["fire_rate_pct"] = fire_rate_at(real_tops, result["threshold"])
     # ── ⛔ ★Never deploy a worse ruler★ (2026-09-01) ────────────────────────
     #
     # This repository set the same rule for ★the judge★ threshold on 08-31 ("an untrustworthy

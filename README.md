@@ -255,14 +255,18 @@ Nothing here is one person's setting. Every number comes from one of four places
 | Owner | Examples | Where you change it |
 |---|---|---|
 | **You** | which kinds the graph colours · how fast each kind goes stale · which sections of your index are standing rules · which kinds count as rules | `config.json`: `graph_kinds` · `stale_days` · `index_sections` · `directive_kinds` (or `<!-- brain: … -->` after a heading) |
-| **Your data** | the hook threshold (noise floor of *your* corpus) · which filename prefixes are kinds · what "short" means (your shortest 30% of prompts) · the corpus's languages | measured — `brain calibrate`, `brain status` |
+| **Your data** | the hook threshold (noise floor of *your* corpus × a margin **learned from your sample**) · which filename prefixes are kinds · what "short" means (your shortest 30% of prompts) · the corpus's languages | measured — `brain calibrate`, `brain status` |
 | **Your host / engine** | which index the host loads by itself and its measured read limit · its memory folders, rule files and command prefixes · a provider's rate limits (only Gemini's are known; any other provider is unpaced until it refuses, and the refusal teaches the real limit) | the host adapter (`brain/hosts.py`) and `brain engines` |
-| **The method** | the margin over the noise floor (1.35) · the expected hook firing band (15–75 %) · the regression guard (1.5 hits) · the identity bonus · lexicon and proxy settings | environment variables — `BRAIN_CALIB_MARGIN`, `BRAIN_FIRE_RATE_OK="15,75"`, `BRAIN_ID_BOOST`, `BRAIN_LEXICON_*`, `BRAIN_PROXY_*`, `BRAIN_RULE_*` |
+| **The method** | the expected hook firing band (15–75 %) · the regression guard (1.5 hits) · the identity bonus · lexicon and proxy settings · the margin's *starting point* (1.35) | environment variables — `BRAIN_CALIB_MARGIN` (fixes the margin), `BRAIN_FIRE_RATE_OK="15,75"`, `BRAIN_ID_BOOST`, `BRAIN_LEXICON_*`, `BRAIN_PROXY_*`, `BRAIN_RULE_*` |
 
-The method settings were chosen once on a reference corpus and are **not re-fitted to your sample**:
-choosing a threshold with the sample you then judge it on is overfitting. Your own sample is used the
-other way round — it can only *refuse* a calibration that does worse than the one in place. When
-there is no ruler at all (a corpus too small to measure), the hook stays silent rather than guess.
+**The margin learns.** It starts at 1.35 with a wide uncertainty and, every calibration, measures which
+margin your own sample likes best — resampled 200 times, so a best value that jumps around counts as a weak
+observation. A one-dimensional Kalman filter weighs each observation by how much it can be trusted: for the
+first three it only measures, then it uses its estimate, and a small or flat sample barely moves it. The
+same evidence is never counted twice, a label-free proxy sample may only push it up, and the regression
+guard still refuses any threshold that does worse than the one in place. `brain calibrate` shows the
+estimate, its uncertainty and whether it is still measuring. When there is no ruler at all (a corpus too
+small to measure), the hook stays silent rather than guess.
 
 ---
 
@@ -275,7 +279,7 @@ Two kinds live side by side. Most run anywhere on fixtures (`verify_host_neutral
 `verify_corpus_kinds`, `verify_index_roles`, `verify_first_day`, `verify_engines`…). Others measure
 **your own** notes, labelled questions or session history — on a machine without them they stop with
 **exit code 77 (skipped)** and say what is missing, rather than pass on nothing or fail for no reason.
-A fresh clone with an empty home runs 32 green, 13 skipped, 0 red (measured 2026-10-06).
+A fresh clone with an empty home runs 33 green, 13 skipped, 0 red (measured 2026-10-06).
 
 ```bash
 python3 tests/verify_recall.py          # recall quality regression
