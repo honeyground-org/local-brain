@@ -16,7 +16,7 @@ Deleting it from the current file still ships it.
 | history | commit messages + past diffs | ★push sends history★ |
 | private | is personal data being tracked | `.gitignore` is ★a rule only — it cannot un-track what is already tracked★ |
 | secret | secret-shaped strings | GitHub push protection ★refuses the push★ |
-| identity | author email · a human's own path | baked into every single commit |
+| identity | a human's own path · emails inside files · authors (listed, not blocked) | baked into every single commit |
 
 ## ⛔ This file ★holds no internal names of its own★
 
@@ -183,10 +183,14 @@ def scan_history(tl, cwd=ROOT, skips=()):
     if not tl:
         return hits
 
-    def keep(text: str) -> str:
-        return "\n".join(l for l in text.splitlines() if not any(p.search(l) for p in skips)).lower()
+    def keep(text: str, diff: bool = False) -> str:
+        # ⛔ In a diff the same line carries a `+`, `-` or ` ` in front, so `^…` exclusions never matched
+        #    there — a line allowed in the file was still counted in history (CODEOWNERS, 2026-10-07).
+        def bare(l):
+            return l[1:] if diff and l[:1] in "+- " and not l.startswith(("+++", "---")) else l
+        return "\n".join(l for l in text.splitlines() if not any(p.search(bare(l)) for p in skips)).lower()
     msgs = keep(_git(["log", "--all", "--format=%s%n%b"], cwd))
-    diff = keep(_git(["log", "--all", "-p", "--format="], cwd))
+    diff = keep(_git(["log", "--all", "-p", "--format="], cwd), diff=True)
     for t in tl:
         t_low = t.lower()
         m, d = msgs.count(t_low), diff.count(t_low)
@@ -301,6 +305,10 @@ def selftest():
             fails.append("axis2 history did not see ★the commit message★")
         if not h.get(CANARY, {}).get("diff"):
             fails.append("axis2 history did not see ★the past diff of a deleted file★")
+        # an exclusion declared for a line holds for that same line in a past diff — and only for it
+        ex = scan_history([CANARY], d, skips=[re.compile("^" + re.escape(CANARY) + " project$")])
+        if not 0 < ex.get(CANARY, {}).get("diff", 0) < h.get(CANARY, {}).get("diff", 0):
+            fails.append("axis2 an exclusion did not hold for the same line in a past diff (+/- in front)")
         if not any(f.startswith("tests/eval/") for f, _, _ in scan_private(d)):
             fails.append("axis3 private missed the personal evaluation set")
         s = scan_secret(d)
@@ -426,17 +434,12 @@ def main():
     print("   ── commit authors (★decided once — a GitHub noreply address names an account, not a mailbox★):")
     for a, n in sorted(ident["authors"].items(), key=lambda x: -x[1]):
         print(f"      {a}  {n} commits")
-    # ⛔ a published history carries every author line — only a GitHub noreply address is safe by itself;
-    #    anything else is a person's real mailbox shipping in every commit
-    exposed = [a for a in ident["authors"] if "@users.noreply.github.com>" not in a]
-    # `--contributors` (CI): once others contribute, an author's address is ★theirs★ to publish — it is
-    #   listed above, not blocked. Without it this stays the publisher's own gate before a push.
-    if inplace and exposed and "--contributors" in sys.argv:
-        print("   (--contributors: %d author address(es) listed, not blocked — each is its owner's choice)"
-              % len(exposed))
-    elif inplace and exposed:
-        blockers.append(f"{len(exposed)} commit-author identities with a real address ship as-is: "
-                        + ", ".join(exposed[:3]))
+    # Author addresses are ★listed, never blocked★ (the maintainers' decision, 2026-10-07: "an email in a
+    #   commit is not a problem"). A squash merge on GitHub stamps the merging account's own address, and a
+    #   contributor's address is theirs to publish. An email ★inside a file★ is still blocked above.
+    real = [a for a in ident["authors"] if "@users.noreply.github.com>" not in a]
+    if real:
+        print("   (%d author address(es) are real mailboxes — listed, not blocked)" % len(real))
 
     print("\n" + "=" * 74)
     if blockers == ["could not measure the internal-name axis (no term list)"]:

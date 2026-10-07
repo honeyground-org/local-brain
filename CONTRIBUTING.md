@@ -79,7 +79,7 @@ PR report works out from the files you touched:
 |---|---|---|---|
 | low | docs, translations | Purpose · Checks | 1 |
 | medium | the command line, pages, retrieval code outside the measurement modules, checks | Purpose · Effect · Risks and rollback · Checks | 1 + the code owners |
-| high | measurement code, storage, privacy, the behaviour layer, installing, CI and governance, removing a check | all five, with numbers in Effect | 2, at least one maintainer + the code owners; a deep review |
+| high | measurement code, storage, privacy, the behaviour layer, installing, CI and governance, removing a check | all five, with numbers in Effect | 2, at least one maintainer + the code owners; a summary for reviewers in the PR report |
 
 Write for a reviewer who has five minutes:
 
@@ -102,8 +102,10 @@ Open it as a **draft** while you are still working; the checks run, nobody is as
 | **release gates** | every push | measurement code bumped, no secrets (gitleaks), no personal data, history included | the step says which file and line |
 | **PR rules** | title, description, push | title format, description sections, sign-off, standard-library imports | the summary lists each problem |
 | **review gate** | push, every review | enough of the right approvals for the impact | waits until they arrive — not something you fix |
-| **PR report** | title, description, push | one comment: impact and why, areas, what is missing, reviewers requested; labels | — |
-| **deep review** | high impact, or the `deep-review` label | a written assessment of purpose, effect, extensibility, risk, security and checks for the reviewers | — |
+| **PR report** | title, description, push | one comment: impact and why, areas, what is missing, reviewers requested; labels. For high impact, a summary for reviewers: each of your five answers beside what the diff shows | — |
+
+All of it runs on GitHub's free runners and calls no paid service — CI costs nothing, and
+`tests/verify_pr_report.py` fails if a workflow ever adds a paid API, action or runner.
 
 ## Review and merge
 
