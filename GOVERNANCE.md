@@ -38,7 +38,7 @@ or raises the English-only ratchet.
 |---|---|---|
 | low | 1 | code owners of the areas touched |
 | medium | 1 | code owners; Purpose, Effect, Risks and rollback, Checks in the description |
-| high | 2, at least 1 maintainer | code owners; all five sections with measured numbers; a deep review |
+| high | 2, at least 1 maintainer | code owners; all five sections with measured numbers; the summary for reviewers |
 
 What the branch ruleset on `main` enforces: changes arrive by pull request only; the required checks
 pass (clean room on Linux and macOS, live databases, databases in Docker, release gates, PR rules,
@@ -68,19 +68,27 @@ before the code.
 | **Checks** — how do we know? | each new behaviour has a check with a control case that must be red; measurement code → `CODE_GENERATION` bumped |
 
 **3. The automation summarises it for the reviewers.** The PR report states the impact and the reasons,
-the areas and what is still missing. The **deep review** reads the change against this document and
-posts one assessment — purpose, effect, extensibility, risks, security and privacy, checks — with a
-verdict (*ready for approval · needs changes · needs a design discussion*) and the blocking points with
-file and line. It starts by itself when a collaborator opens a high-impact change; any maintainer can
-start it with the `deep-review` label. It informs the reviewers; it never approves.
+the areas and what is still missing. For a high-impact change it adds a **summary for reviewers**: each
+of the five answers from the description, side by side with what the diff itself shows — the areas
+touched, whether Effect gives numbers, new and removed files, imports outside the standard library,
+measurement code and its generation, which tests changed. Several reviewers can see in one table where
+the description and the change disagree. It is computed from the change alone and calls no paid
+service: CI costs nothing (see below).
 
 **4. Reviewers decide.** Each reviewer checks the five answers against the diff — *purpose matches the
 diff · the effect is measured, not asserted · it extends an existing seam · the risk has a rollback ·
 new checks can fail* — and approves, or requests changes with the reason. Two approvals including a
 maintainer, and no open request for changes, merge it.
 
-**5. The record stays.** The proposal, the description, the PR report and the deep review remain on the
+**5. The record stays.** The proposal, the description, the PR report and the reviews remain on the
 pull request: why it was done, what it changed, and who agreed.
+
+## CI costs nothing
+
+Every check runs on GitHub's standard runners, which are free for public repositories, and no step calls
+a paid API (an AI service, for example) or a larger, paid runner. `tests/verify_pr_report.py` reads the
+workflows and fails when one would cost money, and the clean room passes no paid key to any check. Changing
+this rule is a governance change.
 
 ## Decisions
 

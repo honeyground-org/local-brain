@@ -25,6 +25,7 @@ A memory for coding agents that is **more efficient and performs better than the
 | Zero dependencies | Standard library only, on the system `python3` (3.8+). Each adapter speaks its service's HTTP API. |
 | English in the repository | Code, comments, docs and commit messages. User-facing text goes through `brain/locales/` (six languages). |
 | Silence is not success | A layer that stops working must say so in `brain status`, not fall quiet. |
+| CI costs nothing | Every check runs on free runners and no step calls a paid service; `verify_pr_report` enforces it. |
 
 ## Where it stands (2026-10-07)
 
@@ -59,7 +60,8 @@ A memory for coding agents that is **more efficient and performs better than the
   3.13), the live store checks against Qdrant and Neo4j, the Docker check and the release gates on every
   pull request. The PR rules check the title, the description, the sign-off (DCO) and imports; the PR
   report classifies the impact and asks the right reviewers; high-impact changes need two approvals
-  including a maintainer and get a deep review. `main` is protected and merges through a merge queue.
+  including a maintainer, and the PR report sets each of the five answers beside what the diff shows.
+  `main` is protected and merges through a merge queue. CI costs nothing — no paid API, action or runner.
   See CONTRIBUTING.md and GOVERNANCE.md; the roster is `.github/governance.json`.
 
 ## What comes next

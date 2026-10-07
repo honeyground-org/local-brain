@@ -486,7 +486,8 @@ proposal issue ──► pull request ──► automatic checks ──► PR re
  (behaviour       (template:         (clean room on       (impact,       (code owners;   (re-checked on
   changes)         purpose, effect,    3 OSes, live DBs,    what is         high impact:    the latest main,
                    extensibility,      Docker, release      missing,        2 incl. a       squash merge)
-                   risks, checks)      gates, PR rules)     deep review)    maintainer)
+                   risks, checks)      gates, PR rules)     reviewer        maintainer)
+                                                            summary)
 ```
 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — set up, the rules every change follows, how to write the pull

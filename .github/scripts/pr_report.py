@@ -401,11 +401,17 @@ def build(base: str, head: str, title: str, body: str, gov: dict, bot: bool = Fa
     tests = any(f["path"].startswith("tests/") for f in cls["files"])
     if code and not tests:
         notes.append("code in `brain/` changed and no file in `tests/` did — say in **Checks** what covers it")
-    if cls["impact"] == "high":
-        effect = {k.lower(): v for k, v in parse_sections(body).items()}.get("effect", "")
-        if not re.search(r"\d", effect):
-            notes.append("high impact and **Effect** has no numbers — before → after, measured the same way")
-    return {"class": cls, "problems": problems, "notes": notes, "merge_base": merge_base}
+    sections = {k.lower(): v for k, v in parse_sections(body).items()}
+    numbers = bool(re.search(r"\d", sections.get("effect", "")))
+    if cls["impact"] == "high" and not numbers:
+        notes.append("high impact and **Effect** has no numbers — before → after, measured the same way")
+    facts = {"added": [f["path"] for f in cls["files"] if f["status"].startswith("A")],
+             "removed": [f["path"] for f in cls["files"] if f["status"].startswith("D")],
+             "tests": [f["path"] for f in cls["files"] if f["path"].startswith("tests/")],
+             "rulers": touched_rulers, "generation": (generation(cal_b), generation(cal_h)),
+             "numbers": numbers, "stdlib": not any("standard library" in p for p in problems)}
+    return {"class": cls, "problems": problems, "notes": notes, "merge_base": merge_base,
+            "sections": sections, "facts": facts}
 
 
 # ─── the report ──────────────────────────────────────────────────────────────
@@ -428,9 +434,6 @@ def render(rep: dict, gov: dict, author: str, gate_result=None, requested=()) ->
         need += ", at least %d from a maintainer" % rule["maintainers"]
     lines.append("**Review:** %s, plus the code owners of every area touched (`.github/governance.json`)" % need
                  + (" · requested " + " ".join("@" + r for r in requested) if requested else ""))
-    if imp == "high":
-        lines.append("**Deep review:** a written assessment of purpose, effect, extensibility and risk runs for "
-                     "collaborators; a maintainer can start it with the `deep-review` label.")
     lines += ["", "| Check | |", "|---|---|"]
     probs = rep["problems"]
     groups = [("Title `area: what changed`", [p for p in probs if p.startswith("the title")]),
@@ -448,6 +451,11 @@ def render(rep: dict, gov: dict, author: str, gate_result=None, requested=()) ->
             "✅" if g["ok"] else "⏳", len(g["approved"]), g["need"],
             ", maintainer %d/%d" % (g["maintainers_approved"], g["need_maintainers"]) if g["need_maintainers"] else "",
             "<br>" + "<br>".join(g["lines"]) if g["lines"] else ""))
+    if imp == "high" and rep.get("facts") is not None:
+        lines += ["", "#### Summary for reviewers", "",
+                  "| | The description says | The diff shows |", "|---|---|---|"]
+        for name, seen in reviewer_rows(rep):
+            lines.append("| %s | %s | %s |" % (name, quote(rep["sections"].get(name.lower(), "")), seen))
     lines += ["", "<details><summary>%d file(s) by area</summary>" % len(cls["files"]), "",
               "| File | Area | Impact |", "|---|---|---|"]
     for f in sorted(cls["files"], key=lambda f: (-LEVELS.index(f["impact"]), f["area"], f["path"])):
@@ -461,6 +469,63 @@ def render(rep: dict, gov: dict, author: str, gate_result=None, requested=()) ->
     lines.append("<sub>Updated on every push by `.github/scripts/pr_report.py`. Rules: CONTRIBUTING.md · "
                  "GOVERNANCE.md. Run it yourself: `python3 .github/scripts/pr_report.py --local`.</sub>")
     return "\n".join(lines) + "\n"
+
+
+def quote(text: str, limit: int = 280) -> str:
+    """One table cell from a description section: lists flattened, ticks kept, nothing that breaks the table."""
+    t = re.sub(r"^\s*[-*]\s*\[[xX]\]\s*", "✓ ", text or "", flags=re.M)
+    t = re.sub(r"^\s*[-*]\s*\[ \]\s*", "☐ ", t, flags=re.M)
+    t = re.sub(r"^\s*[-*]\s+", "", t, flags=re.M)
+    t = " · ".join(line.strip() for line in t.splitlines() if line.strip())
+    t = t.replace("|", "\\|").replace("<", "&lt;")
+    return (t[:limit - 1] + "…") if len(t) > limit else (t or "—")
+
+
+def reviewer_rows(rep: dict) -> list:
+    """The five questions, each beside what the diff itself shows — so several reviewers can judge the
+    author's answer against the change in one look, with no service to pay for."""
+    f, cls = rep["facts"], rep["class"]
+
+    def few(paths):
+        return ", ".join("`%s`" % p.rsplit("/", 1)[-1] for p in paths[:3]) + (" +%d" % (len(paths) - 3)
+                                                                              if len(paths) > 3 else "")
+    gen = ""
+    if f["rulers"]:
+        a, b = f["generation"]
+        gen = " · measurement code changed, generation %s → %s" % (a, b)
+    return [
+        ("Purpose", "areas: " + (" · ".join(cls["areas"]) or "none")),
+        ("Effect", "numbers given ✅" if f["numbers"] else "⚠️ no numbers"),
+        ("Scalability and extensibility",
+         ("%d new file(s): %s" % (len(f["added"]), few(f["added"])) if f["added"] else "no new files")
+         + (" · standard library only ✅" if f["stdlib"] else " · ❌ a new import outside the standard library")),
+        ("Risks and rollback",
+         ("%d file(s) removed: %s" % (len(f["removed"]), few(f["removed"])) if f["removed"] else "nothing removed")
+         + gen),
+        ("Checks", "%d test file(s) changed" % len(f["tests"]) if f["tests"] else "⚠️ no file in `tests/` changed"),
+    ]
+
+
+# ─── CI costs nothing ────────────────────────────────────────────────────────
+# The maintainers' decision (2026-10-07): no CI step may cost money. Public repositories run on GitHub's
+# standard runners for free; what would cost is a paid API (an AI service) or a larger runner.
+PAID_SECRET = re.compile(r"secrets\.(\w*(?:ANTHROPIC|OPENAI|GEMINI|GOOGLE_API|CLAUDE|COHERE|VOYAGE|MISTRAL|GROQ"
+                         r"|TOGETHER|HUGGING|HF_TOKEN|AZURE|BEDROCK|VERTEX|AWS_SECRET)\w*)", re.I)
+PAID_ACTION = re.compile(r"uses:\s*['\"]?((?:anthropics/claude-code[\w-]*|openai/[\w.-]+|google-github-actions/"
+                         r"run-gemini[\w-]*)(?:@[\w.-]+)?)", re.I)
+FREE_RUNNER = re.compile(r"^(?:ubuntu|windows|macos)-(?:latest|\d+(?:\.\d+)?)(?:-arm)?$")
+
+
+def paid_steps(workflow: str) -> list:
+    """What in one workflow file would cost money · [] when nothing does."""
+    out = ["uses the secret `%s` — a paid API key" % m.group(1) for m in PAID_SECRET.finditer(workflow)]
+    out += ["uses `%s` — it calls a paid API" % m.group(1) for m in PAID_ACTION.finditer(workflow)]
+    labels = re.findall(r"runs-on:\s*([^\s#]+)", workflow) + re.findall(r"\bos:\s*([^\s,}#]+)", workflow)
+    for label in labels:
+        label = label.strip("'\"")
+        if not label.startswith("${{") and not FREE_RUNNER.match(label):
+            out.append("runs on `%s` — not a free standard runner" % label)
+    return out
 
 
 def doc_url(name: str) -> str:
@@ -497,14 +562,6 @@ def api_all(path: str) -> list:
 def event() -> dict:
     with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as fh:
         return json.load(fh)
-
-
-def output(**kv) -> None:
-    path = os.environ.get("GITHUB_OUTPUT")
-    if path:
-        with open(path, "a", encoding="utf-8") as fh:
-            for k, v in kv.items():
-                fh.write("%s=%s\n" % (k, v))
 
 
 def summary(text: str) -> None:
@@ -623,8 +680,6 @@ def main(argv: list) -> int:
         text = render(rep, gov, author, requested=requested)
         upsert_comment(repo, pr["number"], text)
         sync_labels(repo, pr["number"], [l["name"] for l in pr.get("labels", [])], rep["class"])
-        trusted = pr.get("author_association") in ("OWNER", "MEMBER", "COLLABORATOR")
-        output(impact=rep["class"]["impact"], trusted=str(trusted).lower())
         summary(text)
         return 0
     print(__doc__)

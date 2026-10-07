@@ -11,6 +11,8 @@ must be green.
   ③ the description: the bare template fails, a filled one passes, the bar rises with the impact
   ④ the title · ⑤ the sign-off (DCO) · ⑥ standard-library imports
   ⑦ the review gate: who counts, what blocks, what happens when the roster is too small
+  ⑧ CI costs nothing: no workflow uses a paid API, a paid action or a paid runner, and the clean room
+     never hands a check a paid key (the maintainers' decision, 2026-10-07)
 
     PYTHONPATH=. python3 tests/verify_pr_report.py
 """
@@ -188,6 +190,28 @@ solo = {"maintainers": ["m1"], "approvals": GOV["approvals"], "areas": {}}
 res = r.gate("high", [], solo, "m1")
 check("⛔ a roster too small for the rule fails and says why (no quiet lowering)",
       not res["ok"] and any("roster" in l for l in res["lines"]), " / ".join(res["lines"]))
+
+print("\n⑧ CI costs nothing")
+WF = os.path.join(ROOT, ".github", "workflows")
+flows = sorted(f for f in os.listdir(WF) if f.endswith((".yml", ".yaml")))
+for name in flows:
+    with open(os.path.join(WF, name), encoding="utf-8") as fh:
+        found = r.paid_steps(fh.read())
+    check("%s calls nothing that costs money" % name, not found, "; ".join(found))
+check("there are workflows to look at", bool(flows), " · ".join(flows))
+from tests import clean_room  # noqa: E402
+leak = [k for k in clean_room.PASS_THROUGH if r.PAID_SECRET.search("secrets." + k)]
+check("the clean room passes no paid key to a check", not leak, ", ".join(leak))
+for label, text in [
+        ("⛔ an AI review action", "    - uses: anthropics/claude-code-action@v1\n"),
+        ("⛔ a paid key", "      api_key: ${{ secrets.ANTHROPIC_API_KEY }}\n"),
+        ("⛔ another provider's key", "      env:\n        KEY: ${{ secrets.OPENAI_API_KEY }}\n"),
+        ("⛔ a larger, paid runner", "    runs-on: ubuntu-latest-8-cores\n"),
+        ("⛔ a paid runner in a matrix", "          - { os: macos-latest-xlarge, python: \"3.13\" }\n")]:
+    check("control: %s is caught" % label, bool(r.paid_steps(text)))
+check("free runners and other secrets pass",
+      not r.paid_steps("    runs-on: ubuntu-22.04\n    runs-on: ${{ matrix.os }}\n          - { os: windows-latest }\n"
+                       "      T: ${{ secrets.BRAIN_SCRUB_TERMS }}\n    runs-on: ubuntu-24.04-arm\n"))
 
 print("\n" + "=" * 78)
 if FAILS:
