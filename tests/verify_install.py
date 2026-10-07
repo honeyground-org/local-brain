@@ -82,8 +82,14 @@ def main():
         check("`--dry-run` ★says what it would do★",
               "would" in r.stdout and "DRY RUN" in r.stdout,
               "%d 'would' line(s)" % r.stdout.count("would"))
+        # `claude` on PATH → the dry run names the command it would run; absent → the installer hands the
+        # command to a human. ⛔ It asserted the first only, so on a machine without Claude Code (a clean
+        # room, 2026-10-07) it went red while the installer did the right thing.
+        has_claude = bool(shutil.which("claude"))
         check("★`--dry-run` never calls an outbound command either★ (only says so)",
-              "would run: claude mcp add" in r.stdout)
+              ("would run: claude mcp add" in r.stdout) if has_claude
+              else ("claude mcp add" in r.stdout and "would run: claude mcp add" not in r.stdout),
+              "claude on PATH" if has_claude else "no claude on PATH — the command is handed to a human")
         shutil.rmtree(home, ignore_errors=True)
 
         # ── ①②: does the real install run to completion · does someone else's hook survive ────────────

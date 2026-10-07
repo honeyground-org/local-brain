@@ -488,7 +488,7 @@
  "install.step6_title": "6. 일일 자가개선 작업",
  "install.windows_slower": "{host}: 윈도우에선 모든 툴 호출마다 행동층용 파이썬이 뜬다(셸 사전필터 없음). 동작은 하지만 더 느리다.",
  "install.would_backup": "{file} 을 백업하고 병합한다",
- "install.would_create_memory": "메모리 폴더 {path} 를 만들고 시작용 색인을 심을 것",
+ "install.would_create_memory": "메모리 폴더 {path} 를 만들고 시작용 색인을 심는다",
  "install.would_index": "모든 소스를 색인한다(전체 재구축)",
  "install.would_mcp_add": "실행: claude mcp add brain --scope user -- {cmd}",
  "install.would_register_job": "{label} 을 {time} 에 {scheduler} 경유로 등록한다: {argv}",

@@ -488,7 +488,7 @@
  "install.step6_title": "6. Tägliche Selbstverbesserungs-Jobs",
  "install.windows_slower": "{host}: unter Windows startet jeder Toolaufruf Python für die Verhaltensschicht (kein Shell-Vorfilter). Es funktioniert, ist aber langsamer.",
  "install.would_backup": "{file} sichern und darin einfügen",
- "install.would_create_memory": "würde den Gedächtnisordner {path} mit einem Start-Index anlegen",
+ "install.would_create_memory": "den Gedächtnisordner {path} mit einem Start-Index anlegen",
  "install.would_index": "jede Quelle indizieren (vollständiger Neuaufbau)",
  "install.would_mcp_add": "ausführen: claude mcp add brain --scope user -- {cmd}",
  "install.would_register_job": "{label} um {time} über {scheduler} registrieren: {argv}",

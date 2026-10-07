@@ -490,7 +490,7 @@
  "install.step6_title": "6. Daily self-improvement jobs",
  "install.windows_slower": "{host}: on Windows every tool call starts Python for the behaviour layer (no shell prefilter). It works, but it is slower.",
  "install.would_backup": "back up {file} and merge into it",
- "install.would_create_memory": "would create the memory folder {path} with a starter index",
+ "install.would_create_memory": "create the memory folder {path} with a starter index",
  "install.would_index": "index every source (full rebuild)",
  "install.would_mcp_add": "run: claude mcp add brain --scope user -- {cmd}",
  "install.would_register_job": "register {label} at {time} via {scheduler}: {argv}",

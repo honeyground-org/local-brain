@@ -488,7 +488,7 @@
  "install.step6_title": "6. Tâches quotidiennes d'auto-amélioration",
  "install.windows_slower": "{host} : sous Windows, chaque appel d'outil démarre Python pour la couche de comportement (pas de préfiltre shell). Ça fonctionne, mais c'est plus lent.",
  "install.would_backup": "sauvegarder {file} et fusionner dedans",
- "install.would_create_memory": "créerait le dossier mémoire {path} avec un index de départ",
+ "install.would_create_memory": "créer le dossier mémoire {path} avec un index de départ",
  "install.would_index": "indexer chaque source (reconstruction complète)",
  "install.would_mcp_add": "exécuter : claude mcp add brain --scope user -- {cmd}",
  "install.would_register_job": "enregistrer {label} à {time} via {scheduler} : {argv}",

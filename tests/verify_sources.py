@@ -37,6 +37,10 @@ def check(label, cond, detail=""):
 
 CONFIG = store.default_config_path()
 BACKUP = CONFIG + ".verify-backup"
+if not os.path.exists(CONFIG):
+    # ⛔ A first day has no config yet — it crashed here in a clean room (2026-10-07). Say what is missing.
+    from tests import _needs
+    _needs.skip("no config yet at %s" % CONFIG, "run `bin/brain install` (or `bin/brain index`) first")
 shutil.copyfile(CONFIG, BACKUP)
 
 try:
@@ -58,10 +62,16 @@ try:
 
     print()
     print("② shape conditions — does it filter out a copy and a code repo")
-    # a worktree: a checkout where `.git` is ★a file★. This machine actually has several.
-    wt = [p for p in (os.path.join(os.path.expanduser("~/development"), d)
-                      for d in os.listdir(os.path.expanduser("~/development")))
-          if os.path.isfile(os.path.join(p, ".git"))]
+    # a worktree: a checkout where `.git` is ★a file★ — looked for under the roots detection itself walks.
+    # ⛔ It used to open the author's `~/development` by name and crash on any machine without one (2026-10-07).
+    wt = []
+    for root in discover.candidate_roots():
+        try:
+            names = sorted(os.listdir(root))
+        except OSError:
+            continue
+        wt += [p for p in (os.path.join(root, d) for d in names)
+               if os.path.isfile(os.path.join(p, ".git"))]
     if wt:
         check("judges a worktree copy as a copy", discover.is_worktree_copy(wt[0]),
               os.path.basename(wt[0]))

@@ -488,7 +488,7 @@
  "install.step6_title": "6. 1日1回の自己改善ジョブ",
  "install.windows_slower": "{host}: Windowsではツール呼び出しのたびに行動層用Pythonが起動する(シェル事前フィルタ無し)。動作はするが遅い。",
  "install.would_backup": "{file}をバックアップして統合する",
- "install.would_create_memory": "メモリフォルダ {path} を作り、初期インデックスを置く予定",
+ "install.would_create_memory": "メモリフォルダ {path} を作り、初期インデックスを置く",
  "install.would_index": "すべてのソースを索引する(全面再構築)",
  "install.would_mcp_add": "実行: claude mcp add brain --scope user -- {cmd}",
  "install.would_register_job": "{label}を{time}に{scheduler}経由で登録する: {argv}",
