@@ -71,7 +71,8 @@ A memory for coding agents that is **more efficient and performs better than the
   shareable corpus with labelled questions lets CI catch a change that lowers recall,
   and lets the PR report show a recall number for every pull request.
 - **More reviewers** — area owners for storage, retrieval, privacy and the behaviour layer, so a
-  high-impact change no longer needs an admin bypass.
+  high-impact change no longer needs an admin bypass (GOVERNANCE.md → *Adding a maintainer or an area
+  owner — how*; the `Bypass: roster` record narrows by itself as the roster grows).
 - **Windows required** — the Windows clean room runs in CI and is shown, not required. First run
   (2026-10-07): 32 green, 15 skipped, 7 red — `verify_docker_stores`, `verify_first_day`, `verify_guard`,
   `verify_help`, `verify_host_neutral`, `verify_package`, `verify_public_scrub`. Make it required once they

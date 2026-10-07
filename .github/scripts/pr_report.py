@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """The pull-request report — what a change touches, how much review it needs, and whether it is ready.
 
-One script, five modes, so a rule lives in exactly one place:
+One script, six modes, so a rule lives in exactly one place:
 
     --check      (CI, `pull_request`)          the hard rules; exit 1 when one is broken
     --comment    (CI, `pull_request_target`)   one sticky comment, labels, review requests — never fails
     --gate       (CI, reviews)                 enough of the right approvals for the change's impact?
+    --audit      (CI, push to main)            reviewed per the rule, or a valid `Bypass:` record?
     --codeowners [--write]                     CODEOWNERS, generated from .github/governance.json
     --local [--base origin/main] [--title T] [--body FILE]
                                                the same report on your machine, before you push
@@ -41,6 +42,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 GOVERNANCE = os.path.join(ROOT, ".github", "governance.json")
 CODEOWNERS = os.path.join(ROOT, ".github", "CODEOWNERS")
 MARKER = "<!-- pr-report -->"
+MERGE_MARKER = "<!-- merge-audit -->"
 LEVELS = ("low", "medium", "high")
 RATCHET = "tests/english_only_ratchet.txt"
 
@@ -330,7 +332,51 @@ def gate(impact: str, reviews: list, gov: dict, author: str) -> dict:
     if blocked:
         lines.append("changes requested by " + ", ".join("@" + w for w in blocked))
     return {"ok": ok, "need": need, "need_maintainers": need_m, "approved": approved,
-            "maintainers_approved": got_m, "lines": lines}
+            "maintainers_approved": got_m, "lines": lines, "people": sorted(people), "blocked": blocked}
+
+
+# ─── the merge audit: reviewed, or a valid bypass ────────────────────────────
+BYPASS = re.compile(r"^\s*Bypass:\s*([A-Za-z-]+)", re.I | re.M)
+REASONS = ("roster", "security")
+
+
+def audit(impact: str, reviews: list, comments: list, gov: dict, author: str) -> dict:
+    """Did a change reach `main` the way GOVERNANCE.md says? → {ok, how, why}.
+
+    Either the review rule was met, or a maintainer recorded a bypass on the pull request:
+      · `Bypass: roster`   — valid only when ★everyone★ who could have reviewed approved and there were
+                             still too few of them. So the bypass covers only the gap, and stops being
+                             possible by itself once the roster is large enough — no rule to change later.
+      · `Bypass: security` — an urgent fix; valid, and a normal review is still owed after the merge.
+    Anything else — no record, a record by someone who is not a maintainer, an unknown reason, a
+    reviewer who was available and did not approve, an open request for changes — fails.
+    """
+    g = gate(impact, reviews, gov, author)
+    if g["ok"]:
+        return {"ok": True, "how": "reviewed", "why": "approvals %d/%d" % (len(g["approved"]), g["need"])}
+    maint = {m.lower() for m in gov["maintainers"]}
+    records = [m.group(1).lower() for c in comments
+               for m in [BYPASS.search(c.get("body") or "")]
+               if m and ((c.get("user") or {}).get("login") or "").lower() in maint]
+    if not records:
+        return {"ok": False, "how": "unrecorded",
+                "why": "merged with %d/%d approvals and no `Bypass:` record from a maintainer"
+                       % (len(g["approved"]), g["need"])}
+    reason = records[-1]
+    if reason not in REASONS:
+        return {"ok": False, "how": "unknown reason", "why": "`Bypass: %s` — the reasons are %s"
+                % (reason, " · ".join(REASONS))}
+    if reason == "security":
+        return {"ok": True, "how": "security bypass", "why": "urgent fix — a normal review is still owed"}
+    if g["blocked"]:
+        return {"ok": False, "how": "roster bypass refused",
+                "why": "changes were requested by " + ", ".join("@" + w for w in g["blocked"])}
+    missing = [w for w in g["people"] if w not in g["approved"]]
+    if missing:
+        return {"ok": False, "how": "roster bypass refused",
+                "why": "reviewers were available and did not approve: " + ", ".join("@" + w for w in missing)}
+    return {"ok": True, "how": "roster bypass",
+            "why": "all %d eligible reviewer(s) approved; the rule needs %d" % (len(g["people"]), g["need"])}
 
 
 # ─── reading the change (git, as data) ───────────────────────────────────────
@@ -644,6 +690,9 @@ def main(argv: list) -> int:
             print("(no --body FILE given, so the description rows show what the template still needs)")
         return 1 if rep["problems"] else 0
 
+    if "--audit" in argv:
+        return run_audit(os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_SHA"])
+
     ev = event()
     if "merge_group" in ev:
         print("merge queue: the pull request passed this before it was queued")
@@ -653,10 +702,7 @@ def main(argv: list) -> int:
     author = (pr.get("user") or {}).get("login", "")
 
     if "--gate" in argv:
-        # impact from the API's file list; ruler modules from both sides' calibrate.py, read as data
-        rulers = (ruler_modules(fetch_text(repo, "brain/calibrate.py", pr["base"]["sha"]))
-                  | ruler_modules(fetch_text(repo, "brain/calibrate.py", pr["head"]["sha"])))
-        impact = classify(changed_via_api(repo, pr["number"]), gov, rulers)["impact"]
+        impact = impact_via_api(repo, pr)
         g = gate(impact, api_all("/repos/%s/pulls/%d/reviews" % (repo, pr["number"])), gov, author)
         msg = "impact %s · approvals %d/%d%s" % (
             impact, len(g["approved"]), g["need"],
@@ -684,6 +730,54 @@ def main(argv: list) -> int:
         return 0
     print(__doc__)
     return 2
+
+
+def impact_via_api(repo: str, pr: dict) -> str:
+    """Impact from the API's file list; ruler modules from both sides' calibrate.py, read as data."""
+    rulers = (ruler_modules(fetch_text(repo, "brain/calibrate.py", pr["base"]["sha"]))
+              | ruler_modules(fetch_text(repo, "brain/calibrate.py", pr["head"]["sha"])))
+    return classify(changed_via_api(repo, pr["number"]), load_governance(), rulers)["impact"]
+
+
+def run_audit(repo: str, sha: str) -> int:
+    """After a push to `main`: find its pull request, judge it with `audit`, and check that GitHub
+    accepts every owner in CODEOWNERS (an owner without write access is ignored without a word)."""
+    gov = load_governance()
+    lines, ok, pr = [], True, None
+    prs = [p for p in api_all("/repos/%s/commits/%s/pulls" % (repo, sha))
+           if p.get("merged_at") and p.get("merge_commit_sha") == sha]
+    if not prs:
+        ok = False
+        lines.append("❌ `%s` reached main without a pull request" % sha[:7])
+    else:
+        pr = prs[0]
+        impact = impact_via_api(repo, pr)
+        res = audit(impact, api_all("/repos/%s/pulls/%d/reviews" % (repo, pr["number"])),
+                    api_all("/repos/%s/issues/%d/comments" % (repo, pr["number"])), gov,
+                    (pr.get("user") or {}).get("login", ""))
+        ok = res["ok"]
+        lines.append("%s #%d · impact %s · %s — %s" % ("✅" if ok else "❌", pr["number"], impact,
+                                                       res["how"], res["why"]))
+    try:
+        errs = (api("GET", "/repos/%s/codeowners/errors?ref=%s" % (repo, sha))[0] or {}).get("errors", [])
+    except urllib.error.HTTPError as exc:
+        errs = [{"message": "could not read CODEOWNERS errors: %s" % exc}]
+    if errs:
+        ok = False
+        lines += ["❌ CODEOWNERS: " + ((e.get("message") or "").splitlines() or [""])[0] for e in errs]
+    else:
+        lines.append("✅ CODEOWNERS: every owner is accepted by GitHub")
+    text = "\n".join(lines)
+    print(text)
+    summary("**Merge audit**\n\n" + text.replace("\n", "\n\n"))
+    if not ok and pr is not None:
+        body = (MERGE_MARKER + "\n### Merge audit · ⚠️\n\n" + text + "\n\nGOVERNANCE.md → *Admin bypass — how*: "
+                "record `Bypass: roster` or `Bypass: security` before merging, or revert this change.")
+        try:
+            api("POST", "/repos/%s/issues/%d/comments" % (repo, pr["number"]), {"body": body})
+        except urllib.error.HTTPError as exc:
+            print("could not comment: %s" % exc)
+    return 0 if ok else 1
 
 
 def changed_via_api(repo: str, number: int) -> list:

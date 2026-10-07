@@ -28,6 +28,34 @@ seven days.
 area owner is moved to an *emeritus* list in the roster — thanked, no longer asked for reviews — and
 can return by asking.
 
+**A role lives in two places, and both are needed.** The roster says whose approval the rules count;
+the repository's permissions on GitHub say whose approval GitHub accepts at all.
+
+| Role | GitHub repository role | Why that one |
+|---|---|---|
+| Area owner | Write | a code owner's approval only counts from someone with write access |
+| Maintainer | Maintain | approve, queue merges, manage labels and releases — without changing settings or bypassing rules |
+| Repository admin | Admin | settings, rulesets and the bypass; kept to the repository's owners |
+
+### Adding a maintainer or an area owner — how
+
+1. **Propose it in a pull request.** Edit `.github/governance.json` — add the login to `maintainers`, or
+   to an area's `owners` — and run `python3 .github/scripts/pr_report.py --codeowners --write`. Title:
+   `governance: add @login as maintainer` (or `… as owner of storage`). It is a high-impact change.
+2. **Give them the GitHub role** from the table: Settings → Collaborators and teams → Add people, or
+   `gh api -X PUT repos/honeyground-org/local-brain/collaborators/LOGIN -f permission=maintain`
+   (`push` for an area owner).
+3. **They accept the invitation.** Until they do, GitHub ignores them as a code owner — and the pull
+   request does not say so.
+4. **Merge it** with the existing maintainers' approval (while the roster is short, with a
+   `Bypass: roster` record — see below).
+5. **The merge audit confirms it**: after the merge it asks GitHub whether it accepts every owner in
+   CODEOWNERS, and fails when someone has no write access or has not accepted yet.
+
+From then on GitHub asks them to review their areas automatically and the review gate counts their
+approvals. The rules themselves do not change as the roster grows. Removing someone is the same pull
+request in reverse, then lowering or removing their GitHub role.
+
 ## Impact decides the review
 
 The PR report classifies every pull request from the files it touches (`.github/governance.json` →
@@ -98,8 +126,34 @@ this rule is a governance change.
   resolved or withdrawn.
 - **No consensus.** If maintainers disagree after discussion, they vote in the pull request; a simple
   majority of maintainers decides, and the reasons are written down there.
-- **Admin bypass** is for two cases only: the roster cannot yet supply the reviewers a rule asks for, or
-  an urgent security fix. The pull request says which, and the bypass is recorded by GitHub.
+- **Admin bypass** is for two cases only, recorded in a fixed form — see the next section.
+
+## Admin bypass — how
+
+A repository admin can merge a pull request whose approvals are incomplete. That power is used in two
+cases only, each recorded on the pull request in a fixed form that the merge audit checks:
+
+| Record | Valid when |
+|---|---|
+| `Bypass: roster` | everyone on the roster who could review (everyone but the author) has approved, and that is still fewer than the rule needs. It covers the gap — never a reviewer who has not looked yet. |
+| `Bypass: security` | an urgent security fix that cannot wait. A normal review is still owed after the merge. |
+
+Never to get past a red check other than the review gate, and never because reviewers are slow.
+
+1. Every required check is green except `review gate`, and the PR report shows no ❌.
+2. Review the change as you would anyone's — for a high-impact change, the five questions above.
+3. Comment on the pull request with a line `Bypass: roster` or `Bypass: security` and one sentence on
+   why (for example: *the only maintainer is the author; every required check is green*).
+4. Merge: in the merge box tick *Merge without waiting for requirements to be met (bypass rules)* and
+   squash-merge, or run `gh pr merge <number> --squash --admin`.
+5. The **merge audit** (`.github/workflows/merge-audit.yml`) runs on every push to `main`. It passes when
+   the pull request met the review rule or carries a valid record; otherwise it fails and comments on
+   the pull request. GitHub also logs every bypass (Settings → Rules → Insights).
+
+**It retires itself.** Because `roster` is valid only when everyone eligible has approved, it narrows as
+people join: with a second maintainer, a high-impact change needs their approval and the bypass covers
+only the missing one; with three, it is no longer possible and every change is reviewed in full. Nothing
+has to be edited when that happens.
 
 ## Releases
 
