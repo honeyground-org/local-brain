@@ -52,7 +52,8 @@ def main() -> int:
     #    giving it 200 words at once processes only the first seven and stops (measured: only 8 came back).
     #    Then "1 false-bridge" becomes a measurement of ★a timeout★, not of precision.
     translit.BUDGET_MS = 0
-    db.execute("DELETE FROM translit_cache")   # so a judgement measured on the old corpus doesn't mix in
+    translit._ensure_cache(db)
+    db.execute("DELETE FROM translit_cache_gen")   # so a judgement measured on the old corpus doesn't mix in
     db.commit()
 
     got_native = translit.bridge(db, native, n_docs)

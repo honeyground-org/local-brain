@@ -440,7 +440,19 @@ def measure(db: sqlite3.Connection) -> dict:
 #       it). The only code change in the ruler modules; no measurement path changed.
 #   13 (2026-10-06)  ★the margin is learned per person★ (§brain/adaptive.py — a Kalman filter, measure-only for
 #       the first observations, then used). The threshold can move once the filter deploys.
-CODE_GENERATION = 13
+#   14 (2026-10-07)  a measurement no longer changes the index under everyone else: `lexicon.decide`
+#       tries its settings in its own process (§lexicon._TRIAL) instead of the shared meta, and
+#       `store._init` replaces `name_map` only when its definition changed, inside one transaction.
+#       The decision's own result is unchanged (not turned on · off 28/15/3 on the author's copy) and
+#       no number is expected to move; bumped because ruler modules changed.
+#   15 (2026-10-07)  the margin filter weighs an observation by its ★novelty★ — the share of questions that
+#       answered differently from the last observation it used (§adaptive). Three observations in seven
+#       minutes on almost the same notes had each counted in full; a state without the novelty total
+#       goes back to measuring only. ★The threshold can move★ (back towards the prior until warmed up).
+#   16 (2026-10-07)  the bridge cache is keyed by (word, generation) in a new table — a long-running process
+#       of another generation could replace the current generation's row of a word. No bridge rule changed;
+#       bumped because `translit` changed (and the new table starts empty either way).
+CODE_GENERATION = 16
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

@@ -241,23 +241,22 @@ def _ensure_cache(db: sqlite3.Connection) -> None:
     """Persist bridge results in the DB — ★the hook is a new process every prompt★, so there is no in-memory cache.
     Bridge results change with the corpus, so the document count at the time is stored and a mismatch is ignored.
     (Absences are stored too — generating and scanning candidates for a native word every time is the most expensive part.)
+
+    ★Put the code age in the cache key★ (2026-08-20) — the old key was (word, document count).
+    So ★fixing the bridge rules still used the old results★: in one session the rules were changed,
+    the measurement would not move, and only clearing the cache by hand revealed the real value.
+
+    ⛔ ★One row per word ★and★ generation★ (2026-10-07) — `code` used to be a column of a table keyed by
+       the word alone, so a write from ★any★ generation replaced the row of every other. A long-running MCP
+       server holds the code it started with (§lesson: a running MCP holds the old code): on 2026-10-07,
+       21 of them (the oldest from 9/28) were alive, and each recall they served overwrote the current
+       generation's row with theirs — the current code then found the word missing and recomputed it
+       under the hook's time budget. Keyed by (word, generation), an old process writes only its own rows.
+       The old `translit_cache` table is left to the old processes that still write it; this code never reads it.
     """
-    db.execute("CREATE TABLE IF NOT EXISTS translit_cache("
-               "ko TEXT PRIMARY KEY, en TEXT, docs INTEGER,"
-               " code INTEGER NOT NULL DEFAULT 0)")
-    # ★Put the code age in the cache key★ (2026-08-20) — the old key was (word, document count).
-    # So ★fixing the bridge rules still used the old results★: in one session the rules were changed,
-    # the measurement would not move, and only clearing the cache by hand revealed the real value.
-    # The same disease already happened with the threshold
-    #
-    # ⛔ Why `DEFAULT 0`: an old long-running MCP process that does not know `code` can still INSERT
-    #    without breaking, and its rows stay 0 so ★new code ignores them automatically★.
-    try:
-        cols = {r[1] for r in db.execute("PRAGMA table_info(translit_cache)")}
-        if "code" not in cols:
-            db.execute("ALTER TABLE translit_cache ADD COLUMN code INTEGER NOT NULL DEFAULT 0")
-    except sqlite3.Error:
-        pass
+    db.execute("CREATE TABLE IF NOT EXISTS translit_cache_gen("
+               "ko TEXT NOT NULL, code INTEGER NOT NULL, en TEXT, docs INTEGER,"
+               " PRIMARY KEY(ko, code)) WITHOUT ROWID")
 
 
 def _docs_of_term(db: sqlite3.Connection, term: str) -> set:
@@ -340,9 +339,9 @@ def bridge(db: sqlite3.Connection, words: Sequence[str],
         # tolerance★ is allowed — the same axis as the threshold calibration's "measured on another corpus" guard (§calibrate).
         tol = max(1, int((n_docs or 1) * CACHE_DOC_TOL))
         cached = {r["ko"]: r["en"] for r in db.execute(
-            "SELECT ko, en FROM translit_cache "
-            "WHERE docs BETWEEN ? AND ? AND code=?",
-            (n_docs - tol, n_docs + tol, _code_stamp()))}
+            "SELECT ko, en FROM translit_cache_gen "
+            "WHERE code=? AND docs BETWEEN ? AND ?",
+            (_code_stamp(), n_docs - tol, n_docs + tol))}
     except sqlite3.Error:
         cached = {}
     fresh: List[tuple] = []
@@ -414,10 +413,13 @@ def bridge(db: sqlite3.Connection, words: Sequence[str],
         fresh.append((w, best or "", n_docs))
     if fresh:
         try:
+            gen = _code_stamp()
             with db:
                 db.executemany(
-                    "INSERT OR REPLACE INTO translit_cache(ko,en,docs,code) "
-                    "VALUES(?,?,?,?)", [(k, v, d, _code_stamp()) for k, v, d in fresh])
+                    "INSERT OR REPLACE INTO translit_cache_gen(ko,code,en,docs) "
+                    "VALUES(?,?,?,?)", [(k, gen, v, d) for k, v, d in fresh])
+                # older generations go — ★never a newer one★ (a newer process may be running beside this one)
+                db.execute("DELETE FROM translit_cache_gen WHERE code < ?", (gen,))
         except sqlite3.Error:
             pass                                        # a cache failure must not block recall
     return out

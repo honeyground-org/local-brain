@@ -11,6 +11,7 @@ stops being used, and a brain nobody uses is no brain at all.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import traceback
@@ -298,9 +299,93 @@ def _error(mid, code: int, message: str) -> None:
     _send({"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": message}})
 
 
+# ── ★a long-running server answers with the code on disk★ (2026-10-07) ─────────────────────
+#
+# ⛔ A host keeps this process for the whole session — days, on a busy machine. It held the code it
+#    started with: on 2026-10-07 21 of them were alive, the oldest from 9/28, sixteen code generations
+#    behind. Each recall they served wrote that old code's answers into the shared index (the bridge
+#    cache, the margin filter), and every fix to the brain reached a session only when a human restarted it.
+#    So before answering, the server compares its modules on disk with the ones it loaded; if they changed,
+#    it checks that the new code imports, then ★becomes it★ (`exec` keeps the PID and the host's pipes).
+#    Whatever it had already read from the host is handed over, so no request is lost.
+#    ⛔ Not on Windows — there `exec` starts a new process and ends this one, which the host sees as a crash.
+_PENDING_ENV = "BRAIN_SERVER_PENDING"
+_PENDING_MAX = 256 * 1024
+
+
+def _code_on_disk() -> tuple:
+    """(name, mtime, size) of every module beside this one — "has my code changed since I started"."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    out = []
+    try:
+        for n in sorted(os.listdir(here)):
+            if n.endswith(".py"):
+                st = os.stat(os.path.join(here, n))
+                out.append((n, st.st_mtime_ns, st.st_size))
+    except OSError:
+        return ()
+    return tuple(out)
+
+
+def _package_parent() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _new_code_loads() -> bool:
+    """Does the code on disk import — a half-saved file must not take the session's brain down."""
+    import subprocess
+    try:
+        p = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, %r); import brain.server"
+                            % _package_parent()], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return p.returncode == 0
+
+
+def _become_new_code(pending: bytes) -> None:
+    import base64
+    env = dict(os.environ)
+    env[_PENDING_ENV] = base64.b64encode(pending).decode("ascii")
+    env["PYTHONPATH"] = os.pathsep.join(x for x in (_package_parent(), env.get("PYTHONPATH", "")) if x)
+    sys.stderr.write("brain: the code on disk changed — continuing as it (pid %d)\n" % os.getpid())
+    sys.stderr.flush()
+    try:
+        os.execve(sys.executable, [sys.executable, "-m", "brain.server"] + sys.argv[1:], env)
+    except OSError as exc:                               # keep answering with the code in hand
+        sys.stderr.write("brain: could not switch to the new code (%s) — staying on the old\n" % exc)
+
+
+def _requests():
+    """Request lines from the host, read ★without a hidden buffer★ — so the bytes not yet answered are
+    always known and can be handed to the new code (§_become_new_code)."""
+    import base64
+    pending = base64.b64decode(os.environ.pop(_PENDING_ENV, "") or b"")
+    loaded = tried = _code_on_disk()
+    fd = sys.stdin.fileno()
+    while True:
+        while b"\n" not in pending:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                return
+            pending += chunk
+        now = _code_on_disk()
+        if now != tried and os.name != "nt" and len(pending) <= _PENDING_MAX:
+            tried = now                                  # a broken save is tried once, not on every request
+            if now != loaded and _new_code_loads():
+                yield None                               # the caller closes what it holds
+                _become_new_code(pending)
+        raw, pending = pending.split(b"\n", 1)
+        yield raw.decode("utf-8", "replace")
+
+
 def serve() -> int:
     db = None
-    for line in sys.stdin:
+    for line in _requests():
+        if line is None:                              # about to become the new code (§_requests)
+            if db is not None:
+                db.close()
+                db = None
+            continue
         line = line.strip()
         if not line:
             continue

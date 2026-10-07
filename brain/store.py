@@ -616,17 +616,29 @@ def _init(db: sqlite3.Connection) -> None:
                    " PRIMARY KEY(alias, doc_id)) WITHOUT ROWID")
         # The single door for name resolution — links, neighbours and diagnostics all pass here.
         # However many spelling rules accumulate, there is exactly one place to fix (extensibility).
-        db.execute("DROP VIEW IF EXISTS name_map")
-        db.execute("CREATE VIEW name_map AS "
-                   " SELECT name AS key, id AS doc_id FROM docs"
-                   " UNION ALL SELECT alias AS key, doc_id FROM aliases"
-                   # ⛔ ★Never shadow a name that really exists★ — if a declaration covers a
-                   #    real document name, the path to that document is cut. `NOT EXISTS` prevents it.
-                   " UNION ALL SELECT a.alias AS key, d.id AS doc_id"
-                   "   FROM alias_decl a JOIN docs d ON d.name = a.target"
-                   "  WHERE NOT EXISTS (SELECT 1 FROM docs x WHERE x.name = a.alias)"
-                   " UNION ALL SELECT k.alias AS key, k.doc_id FROM kind_aliases k"
-                   "  WHERE NOT EXISTS (SELECT 1 FROM docs x WHERE x.name = k.alias)")
+        view = ("CREATE VIEW name_map AS "
+                " SELECT name AS key, id AS doc_id FROM docs"
+                " UNION ALL SELECT alias AS key, doc_id FROM aliases"
+                # ⛔ ★Never shadow a name that really exists★ — if a declaration covers a
+                #    real document name, the path to that document is cut. `NOT EXISTS` prevents it.
+                " UNION ALL SELECT a.alias AS key, d.id AS doc_id"
+                "   FROM alias_decl a JOIN docs d ON d.name = a.target"
+                "  WHERE NOT EXISTS (SELECT 1 FROM docs x WHERE x.name = a.alias)"
+                " UNION ALL SELECT k.alias AS key, k.doc_id FROM kind_aliases k"
+                "  WHERE NOT EXISTS (SELECT 1 FROM docs x WHERE x.name = k.alias)")
+        # ★Replace it only when the definition changed, and inside one transaction★ (2026-10-07)
+        # ⛔ It was dropped and re-created on ★every connect★. Python's sqlite3 opens no transaction
+        #    before DDL, so the DROP committed on its own and every other process on the index could
+        #    land in the gap: "no such table: name_map". Measured on a copy of the index: a reader next
+        #    to a process that only connects hit it 66,833 times in 6 seconds, and on 2026-10-07 the
+        #    daily job's lexicon decision died on it. Every hook and guard call connects.
+        have = db.execute("SELECT sql FROM sqlite_master "
+                          "WHERE type='view' AND name='name_map'").fetchone()
+        if not have or have[0] != view:
+            if not db.in_transaction:
+                db.execute("BEGIN IMMEDIATE")            # DROP + CREATE commit together at `with db` exit
+            db.execute("DROP VIEW IF EXISTS name_map")
+            db.execute(view)
         # The persistence surface for self-improvement — what actually got used.
         # ★The key is the path, not the rowid★ — `docs` is a **derivative** that can be rebuilt
         # from files at any time, but this table is **earned** and cannot be. Hang it on a

@@ -58,15 +58,28 @@ MIN_SEEN = int(os.environ.get("BRAIN_LEXICON_MIN_SEEN", "2") or 2)
 #    survives only as a ★forced override★ (1 = on · 0 = off · absent = the measurement decides).
 _ENV = os.environ.get("BRAIN_LEXICON", "")
 
+# ★The setting `decide()` is trying — held by ★this process only★★ (2026-10-07) · (on, knobs) or None.
+# ⛔ `decide()` used to try each setting by ★writing it to the shared meta★ and restoring it after.
+#    Every other process on the same index — the hook, the MCP servers, a person's own measurement —
+#    read those trial settings as the real one for as long as the sweep ran (37 settings × 91 queries).
+#    Measured: the daily job swept while a bench ran three times in a row and the bench read
+#    19/12 · 18/7 · 16/11 (hits/false fires) where the real setting gives 15/3 every time; switching
+#    the lexicon on with the sweep's knobs on a copy of the index reproduces 15–21 / 5–15.
+#    A trial is a question this process asks, so the answer must stay in this process.
+_TRIAL: Optional[tuple] = None
+
 
 def enabled(db=None) -> bool:
     """Is the bridge in use right now. ⛔ Not a value but a ★measured decision★.
 
-    Priority: environment variable (a human nailing it down) → measured decision (meta) → off by default.
+    Priority: environment variable (a human nailing it down) → the setting `decide()` is trying in this
+    process → measured decision (meta) → off by default.
     A design where a human must remember "turn it on once it accumulates" ★never gets turned on★ — that is what happened.
     """
     if _ENV in ("1", "0"):
         return _ENV == "1"
+    if _TRIAL is not None:
+        return bool(_TRIAL[0])
     if db is None:
         return False                                     # asked without a db → answer conservatively
     try:
@@ -399,6 +412,8 @@ def knobs(db) -> "tuple":
     differ per person, so one set of constants cannot fit everyone — so the values are not nailed down,
     ★the way of choosing them★ is (the same choice §calibrate made for the word threshold).
     """
+    if _TRIAL is not None and _TRIAL[1]:
+        return tuple(int(x) for x in _TRIAL[1])         # §_TRIAL — a trial, never the shared meta
     try:
         from . import store
         raw = store.get_meta(db, "lexicon_knobs", "")
@@ -512,12 +527,8 @@ def decide(db, force: bool = False) -> dict:
     thr = _cal.threshold(db)
 
     def run(on: bool, k=None) -> dict:
-        prev = store.get_meta(db, "lexicon_enabled", "")
-        prevk = store.get_meta(db, "lexicon_knobs", "")
-        with db:
-            store.set_meta(db, "lexicon_enabled", "1" if on else "0")
-            if k:
-                store.set_meta(db, "lexicon_knobs", json.dumps(list(k)))
+        global _TRIAL
+        _TRIAL = (on, tuple(k) if k else None)          # §_TRIAL — ⛔ never the shared meta
         try:
             hit = gold3 = 0
             for q, gold in A:
@@ -532,9 +543,7 @@ def decide(db, force: bool = False) -> dict:
                                                        log=False), thr))
             return {"fire": hit, "gold3": gold3, "noise": noise}
         finally:
-            with db:                                     # ⛔ do not leave the real setting changed
-                store.set_meta(db, "lexicon_enabled", prev)
-                store.set_meta(db, "lexicon_knobs", prevk)
+            _TRIAL = None
 
     # ⛔ With the environment variable at 1, `enabled()` ignores meta, so the measurement returns the
     #    same value twice. In that state it must not claim to have "measured" anything.

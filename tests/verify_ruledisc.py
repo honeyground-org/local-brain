@@ -331,6 +331,52 @@ finally:
         os.environ["BRAIN_LANG"] = _saved_env
     i18n._lang = _saved_lang
 
+head("⑨-c ★firing is measured the way guard fires — guard's matcher, in the log's host★")
+# ⛔ 2026-10-07: rules moved to canonical tool names (`run_shell`) on 2026-09-02, and both measurements
+#    kept comparing them with the log's raw names (`Bash`). Every call counted 0 for a month: real rates 0,
+#    per-session median 0 — the breadth gate and the session budget both stood open, and the daily report
+#    called all 43 rules rare. A synthetic log in a temp home: no real data is read or written here.
+import json as _json                                        # noqa: E402
+from brain import hosts as _hosts                           # noqa: E402
+_tdir = tempfile.mkdtemp(prefix="brain-fire-")
+_home_before = os.environ.get("BRAIN_HOME")
+try:
+    os.environ["BRAIN_HOME"] = _tdir
+    _log = os.path.join(_tdir, "session.jsonl")
+    _shell = _hosts.tool_names("run_shell")[0]
+    _edit = _hosts.tool_names("edit_file")[0]
+    with open(_log, "w", encoding="utf-8") as fh:
+        for i in range(30):
+            cmd = "echo zzfire-%d" % i if i % 3 == 0 else "ls -la"
+            fh.write(_json.dumps({"message": {"content": [
+                {"type": "tool_use", "name": _shell, "input": {"command": cmd}}]}}) + "\n")
+        fh.write(_json.dumps({"message": {"content": [
+            {"type": "tool_use", "name": _edit, "input": {"file_path": "/x/zzfire.py"}}]}}) + "\n")
+    rd.save({"version": 1, "learned": [
+        {"id": "auto-zzfire", "why": "for testing", "tools": ["run_shell"], "match": ["zzfire"],
+         "memories": [], "once": "session", "enabled": True},
+        {"id": "auto-zzedit", "why": "for testing", "tools": ["edit_file"], "match": ["zzfire"],
+         "memories": [], "once": "session", "enabled": True}], "disabled": [], "dismissed": []})
+    fm = rd.measure_fire([{"signal": "zzfire", "origin": {"bash": 1, "path": 0}}], pattern=_log)
+    _s = fm["signals"]["zzfire"]
+    check(_s["calls"] == 30 and _s["fires"] == 10,
+          "★a canonical shell rule is counted over the log host's shell calls★ (it counted 0 of 0)", str(_s))
+    check(fm["sessions"] == 1 and fm["median"] == 2,
+          "the per-session count sees the live rules firing (it saw 0)", "median %s" % fm["median"])
+    _rates = rd.measure_active(pattern=_log)["rates"]
+    check(abs(_rates.get("auto-zzfire", 0) - 100.0 * 10 / 30) < 0.01,
+          "★the daily rate table measures a canonical rule★ (it wrote 0 — 'rare' — for all of them)",
+          str(_rates))
+    check(_rates.get("auto-zzedit") == 100.0,
+          "(control) an edit rule counts only the edit call — the shell calls are not its denominator",
+          str(_rates.get("auto-zzedit")))
+finally:
+    if _home_before is None:
+        os.environ.pop("BRAIN_HOME", None)
+    else:
+        os.environ["BRAIN_HOME"] = _home_before
+    shutil.rmtree(_tdir, ignore_errors=True)
+
 head("⑩ ★a source declared not-for-export never reaches the judge★")
 from brain import vectors                                   # noqa: E402
 _orig = vectors.no_embed_sources

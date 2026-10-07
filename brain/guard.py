@@ -181,16 +181,16 @@ def match_rules(tool_name: str, tool_input: Dict) -> List[dict]:
     return hit
 
 
-def _host_tools(canonical: str) -> List[str]:
-    """A canonical action name → the tool names of ★the current host★. An empty list if the adapter does not know it."""
+def _host_tools(canonical: str, host=None) -> List[str]:
+    """A canonical action name → the tool names of ★the current host★ (or of `host`). An empty list if the adapter does not know it."""
     try:
         from brain import hosts
-        return hosts.tool_names(canonical)
+        return hosts.tool_names(canonical, host)
     except Exception:                                    # noqa: BLE001
         return []
 
 
-def _tool_matches(tool_name: str, wanted: List[str]) -> bool:
+def _tool_matches(tool_name: str, wanted: List[str], host=None) -> bool:
     """Is this tool call the action a rule is aiming at.
 
     ⛔ ★Write a host's own tool name straight into a rule and it goes entirely silent on another host★
@@ -199,11 +199,13 @@ def _tool_matches(tool_name: str, wanted: List[str]) -> bool:
 
     ⚠️ Anything that is not a canonical name (an old hand-written rule · a learned rule) is compared
     ★literally★. The worst outcome is a rule going silently dark mid-migration.
+    `host` — whose tool names `tool_name` is in. A hook call is the current host's; a call read back from
+    a log is the host that wrote that log (§ruledisc.measure_fire · measure_active measure with this).
     """
     from brain import hosts
     for w in wanted:
         if w in hosts.CANONICAL:
-            if tool_name in _host_tools(w):
+            if tool_name in _host_tools(w, host):
                 return True
         elif tool_name == w:                             # the old way — literal comparison
             return True

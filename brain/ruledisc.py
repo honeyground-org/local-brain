@@ -797,7 +797,15 @@ def measure_fire(cands: "Sequence[dict]", pattern: str = "") -> dict:
     threshold while the total does not, and then the whole layer becomes background. Measured: as
     rules went 12 → 33, the per-session median doubled exactly, ★8 → 16★. The design had written
     its own warning about this — *"guidance pouring out every session makes people ignore the layer"*.
+
+    ⛔⛔ ★The tool name is matched by guard's own function, in the log's host★ (2026-10-07). Since rules
+       moved to canonical names (`run_shell`, 2026-09-02) this compared them with the log's raw names
+       (`Bash`) and ★counted 0 calls for every signal and every rule★: real rates 0, per-session median
+       0. Both gates stood open for a month — `all`, `lines`, `await`, `next`, `queue` were auto-approved
+       on the counted rate alone, and the daily report said all 43 rules were rare. The disease this
+       docstring opens with, back under a new name: the place it measured had drifted from the place it fires.
     """
+    from . import guard
     live = [r for r in all_rules() if r.get("enabled", True)]
     probes = [{"id": "?" + c["signal"], "match": [c["signal"]],
                "tools": _tools_for(c["signal"], c.get("origin"))} for c in cands]
@@ -816,14 +824,14 @@ def measure_fire(cands: "Sequence[dict]", pattern: str = "") -> dict:
                 for name, blob in host.hook_calls(line):
                     n_calls += 1
                     for pr in probes:
-                        if name in pr["tools"]:
+                        if guard._tool_matches(name, pr["tools"], host):
                             calls[pr["id"]] += 1
                             if any(m in blob for m in pr["match"]):
                                 fired[pr["id"]] += 1
                     for r in live:                        # firings per session in the current layer
                         if r["id"] in seen_live:
                             continue
-                        if name in r["tools"] and any(m in blob for m in r["match"]):
+                        if guard._tool_matches(name, r["tools"], host) and any(m in blob for m in r["match"]):
                             seen_live.add(r["id"])
         if n_calls >= MIN_SESSION_CALLS:
             per_session.append(len(seen_live))
@@ -864,7 +872,12 @@ def auto_approve(proposals: Optional[List[dict]] = None,
     d = load()
     # ★If the layer as a whole is already full, add nothing★ (2026-08-28) — each rule may clear the
     # threshold while the total does not, and then ★it is not read at the moment it matters★ either.
-    fm = measure_fire([p for p in props[:12]])
+    # ⛔ ★Measure every proposal that could be approved★, not the first 12 (2026-10-07) — past the 12th
+    #    the gate below fell back to the ★counted★ rate, the one this measurement exists to replace
+    #    (up to 21× low). `scout` and `all` sat past it and went through on 54 and 59 counted uses.
+    lo_score = min_score or AUTO_MIN_SCORE
+    fm = measure_fire([p for p in props if p["top"] >= lo_score and p["uses"] >= AUTO_MIN_USES]
+                      or props[:12])
     if fm["median"] >= SESSION_BUDGET:
         return {"added": [], "min_score": min_score or AUTO_MIN_SCORE,
                 "cap": limit or AUTO_MAX_PER_RUN, "fire": fm,
@@ -999,9 +1012,10 @@ def measure_active(pattern: str = "") -> dict:
     ⛔ The measuring must be ★identical to guard's★ — substring, within that rule's tools.
        (A gate once spun uselessly because the counting and the firing differed · 2026-08-28)
     """
+    from . import guard
     rules = [r for r in all_rules() if r.get("enabled", True)]
     fire = collections.Counter()
-    bytool = collections.Counter()
+    calls = collections.Counter()
     for host, f in transcript_pairs(pattern):
         try:
             fh = open(f, errors="replace")
@@ -1010,13 +1024,16 @@ def measure_active(pattern: str = "") -> dict:
         with fh:
             for line in fh:
                 for name, blob in host.hook_calls(line):
-                    bytool[name] += 1
                     for r in rules:
-                        if name in r["tools"] and any(m in blob for m in r["match"]):
-                            fire[r["id"]] += 1
+                        # ⛔ guard's matcher, in the log's host — a raw `name in r["tools"]` counted 0 for
+                        #    every canonical rule and wrote "rare" for all of them (§measure_fire, 2026-10-07)
+                        if guard._tool_matches(name, r["tools"], host):
+                            calls[r["id"]] += 1
+                            if any(m in blob for m in r["match"]):
+                                fire[r["id"]] += 1
     rates = {}
     for r in rules:
-        den = sum(bytool[t] for t in r["tools"]) or 1
+        den = calls[r["id"]] or 1
         rates[r["id"]] = round(100.0 * fire[r["id"]] / den, 3)
     path = os.path.join(store.brain_home(), "guard-rates.json")
     with open(path, "w", encoding="utf-8") as fh:

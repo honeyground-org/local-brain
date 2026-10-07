@@ -29,11 +29,23 @@ and only a consistent, sharp signal does. That shrinkage toward what is already 
             ⛔ ★The same evidence is not new evidence★ — an observation is used only when the sample or
             the corpus changed since the last one; otherwise the filter would grow sure of itself by
             re-reading the same questions.
-  predict   P += DRIFT² — the corpus grows, so yesterday's best may move a little.
-  update    K = P / (P + R) · x += K·(z − x) · P = (1 − K)·P.
-  deploy    ★only after WARMUP observations★ — until then it measures and records, and the ruler keeps
-            using the prior. After that, the threshold uses x — and the regression guard still refuses
-            any threshold that does worse on the full sample than the one in place.
+  novelty   ν = the share of the sample's questions whose answer row (hit/fire at every margin) differs
+            from the last observation the filter used — new questions count as different.
+            ⛔ Measured on the author's notes (2026-10-07): "the corpus changed" was the whole test, so one
+            edited note made the next calibration a ★full, independent★ observation. Every session start
+            calibrates — three observations landed within seven minutes, the same 91 questions on almost
+            the same notes, each z = 1.30, and the filter's uncertainty fell 0.129 → 0.068 as if three
+            separate samples had agreed. Two measurements that share most of their answers carry the
+            information of the part that differs, so that part is all the filter takes: R/ν, and ν
+            towards the warm-up. ν = 0 (nothing answered differently) is skipped. ν = 1 is exactly the
+            old arithmetic.
+  predict   P += DRIFT²·ν — the corpus grows, so yesterday's best may move a little (as far as it changed).
+  update    K = P / (P + R/ν) · x += K·(z − x) · P = (1 − K)·P.
+  deploy    ★only after WARMUP observations' worth of novelty (Σν)★ — until then it measures and records,
+            and the ruler keeps using the prior. After that, the threshold uses x — and the regression
+            guard still refuses any threshold that does worse on the full sample than the one in place.
+            ⛔ A state from before novelty (no Σν) counts as ★not yet warmed up★: its count was the
+               one that over-counted.
 
   ⛔ A label-free proxy sample is trusted only upward (measured: it agrees with gold above the incumbent,
      not below — §proxy.may_judge). So with a proxy, an observation that would lower the margin is not used.
@@ -71,7 +83,13 @@ def state(db: sqlite3.Connection) -> dict:
     except (ValueError, TypeError):
         s = {}
     if not isinstance(s, dict) or "x" not in s:
-        s = {"x": PRIOR, "P": PRIOR_SD ** 2, "n": 0, "tries": 0, "history": []}
+        s = {"x": PRIOR, "P": PRIOR_SD ** 2, "n": 0, "n_eff": 0.0, "tries": 0, "history": []}
+    elif "n_eff" not in s:
+        # §novelty — a state built before novelty counted near-repeats in full, so its x and P are not
+        # evidence. It starts over from the prior; its history stays as the record of what it saw.
+        s.update({"x": PRIOR, "P": PRIOR_SD ** 2, "n": 0, "n_eff": 0.0,
+                  "restarted": "counted before novelty (CODE_GENERATION 15) — started over from the prior"})
+        s.pop("last_evidence", None)
     return s
 
 
@@ -85,7 +103,7 @@ def human_margin() -> Optional[float]:
 
 def deployed(s: dict) -> bool:
     """Past the measure-only phase. (A human's margin still wins in `current` — it is checked there.)"""
-    return int(s.get("n", 0)) >= WARMUP
+    return float(s.get("n_eff", 0.0)) >= WARMUP - 1e-9
 
 
 def current(db: sqlite3.Connection) -> float:
@@ -100,11 +118,13 @@ def current(db: sqlite3.Connection) -> float:
 def summary(db: sqlite3.Connection) -> dict:
     s = state(db)
     last = (s.get("history") or [None])[-1]
+    n_eff = float(s.get("n_eff", 0.0))
     mode = ("fixed by BRAIN_CALIB_MARGIN" if human_margin() is not None
-            else "adaptive" if deployed(s) else "measuring only (%d of %d observations)" % (s["n"], WARMUP))
+            else "adaptive" if deployed(s)
+            else "measuring only (%.2f of %d observations' worth of novelty)" % (n_eff, WARMUP))
     return {"in_use": current(db), "estimate": round(float(s["x"]), 3),
-            "sd": round(float(s["P"]) ** 0.5, 3), "observations": int(s["n"]), "mode": mode,
-            "last": last}
+            "sd": round(float(s["P"]) ** 0.5, 3), "observations": int(s["n"]),
+            "novelty_total": round(n_eff, 3), "mode": mode, "last": last}
 
 
 def evidence_id(db: sqlite3.Connection, pairs: list, ctrl: list, kind: str) -> str:
@@ -155,9 +175,31 @@ def observe(db: sqlite3.Connection, floor: float, pairs: list, ctrl: list, kind:
     zs = [_best(H, F, [rnd.randrange(na) for _ in range(na)], [rnd.randrange(nc) for _ in range(nc)])
           for _ in range(BOOTSTRAP)]
     sd = statistics.pstdev(zs)
+    rows = {}
+    for (q, g), row in zip(pairs, H):
+        rows[_qkey("A", q, g)] = "".join(map(str, row))
+    for q, row in zip(ctrl, F):
+        rows[_qkey("C", q)] = "".join(map(str, row))
     return {"z": round(statistics.median(zs), 3), "R": max(sd, OBS_SD_MIN) ** 2,
             "obs_sd": round(sd, 3), "full_best": _best(H, F, range(na), range(nc)),
-            "n_a": na, "n_c": nc, "kind": kind, "evidence": eid}
+            "n_a": na, "n_c": nc, "kind": kind, "evidence": eid, "rows": rows}
+
+
+def _qkey(part: str, q: str, gold=None) -> str:
+    """A question's identity in the stored answer rows — its text (and gold), not its position."""
+    raw = "%s\0%s\0%s" % (part, q, json.dumps(gold, ensure_ascii=False, sort_keys=True))
+    return hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def novelty(prev: Optional[dict], rows: Optional[dict]) -> float:
+    """§novelty — the share of this observation's questions that answered differently from `prev`.
+
+    1.0 when there is nothing to compare with (the first observation, or one made without its rows):
+    with no overlap known, it is treated as independent — the arithmetic before novelty existed.
+    """
+    if not prev or not rows:
+        return 1.0
+    return sum(1 for k, v in rows.items() if prev.get(k) != v) / float(len(rows))
 
 
 def update(db: sqlite3.Connection, obs: Optional[dict]) -> dict:
@@ -167,20 +209,30 @@ def update(db: sqlite3.Connection, obs: Optional[dict]) -> dict:
     s["tries"] = int(s.get("tries", 0)) + 1
     entry = {"at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     x, P = float(s["x"]), float(s["P"])
+    rows = (obs or {}).get("rows")
+    shown = {k: v for k, v in (obs or {}).items() if k != "rows"}   # the rows stay out of the history
+    nu = novelty(s.get("last_rows"), rows) if obs else 0.0
     if obs is None:
         entry["skipped"] = "no sample to learn from"
     elif obs.get("evidence") and obs["evidence"] == s.get("last_evidence"):
-        entry.update(obs, skipped="the same evidence as the last observation")
+        entry.update(shown, skipped="the same evidence as the last observation")
     elif obs["kind"] == "proxy" and obs["z"] < x:
-        entry.update(obs, skipped="a proxy sample may only argue upward")
+        entry.update(shown, skipped="a proxy sample may only argue upward")
+    elif nu <= 0:
+        entry.update(shown, novelty=0.0,
+                     skipped="every question answered as in the last observation — nothing new")
+        s["last_evidence"] = obs.get("evidence")
     else:
-        P += DRIFT_SD ** 2
-        K = P / (P + obs["R"])
+        P += DRIFT_SD ** 2 * nu
+        K = P / (P + obs["R"] / nu)
         x = min(HI, max(LO, x + K * (obs["z"] - x)))
         P = (1.0 - K) * P
         s["x"], s["P"], s["n"] = round(x, 4), P, int(s.get("n", 0)) + 1
+        s["n_eff"] = round(float(s.get("n_eff", 0.0)) + nu, 4)
         s["last_evidence"] = obs.get("evidence")
-        entry.update(obs, K=round(K, 3), x=round(x, 3), sd=round(P ** 0.5, 3))
+        if rows:
+            s["last_rows"] = rows
+        entry.update(shown, novelty=round(nu, 3), K=round(K, 3), x=round(x, 3), sd=round(P ** 0.5, 3))
     s["history"] = (list(s.get("history") or []) + [entry])[-HISTORY_KEEP:]
     store.set_meta(db, _META, json.dumps(s, ensure_ascii=False))
     return s

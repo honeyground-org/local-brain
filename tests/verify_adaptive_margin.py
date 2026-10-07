@@ -154,6 +154,60 @@ def main() -> int:
     check("a flat curve → the middle of the tie", ad._best(flat_h, flat_f, range(10), range(10))
           == ad.GRID[len(ad.GRID) // 2])
 
+    print("\n★⑨ an observation counts for what it adds — its novelty★")
+    # the morning of 2026-10-07: every session start calibrated, the corpus had changed by a note, so each
+    # observation had new evidence — but the same 91 questions answered the same way
+    base = {"A%02d" % i: "1" * 10 + "0" * 21 for i in range(57)}
+    base.update({"C%02d" % i: "1" * 4 + "0" * 27 for i in range(34)})
+    fresh(db)
+    for _ in range(3):
+        o = obs(1.30, 0.13)
+        o["rows"] = dict(base)
+        ad.update(db, o)
+    s = ad.state(db)
+    n_eff = s.get("n_eff", s.get("n", 0))
+    check("the same answers three times are one observation's worth", abs(n_eff - 1.0) < 1e-9
+          and ad.current(db) == ad.PRIOR, "Σν %.2f · %s" % (n_eff, ad.summary(db)["mode"]))
+    check("the repeats are recorded as skipped, with the reason",
+          "nothing new" in (s["history"][-1].get("skipped") or ""), str(s["history"][-1].get("skipped")))
+    sd_after_repeats = ad.summary(db)["sd"]
+    fresh(db)
+    for _ in range(3):
+        ad.update(db, obs(1.30, 0.13))             # control: no rows → each one counted in full (the old rule)
+    check("control: counted in full, the same three would have collapsed the uncertainty and deployed",
+          ad.summary(db)["sd"] < sd_after_repeats - 0.02 and ad.state(db).get("n_eff", ad.state(db)["n"]) >= ad.WARMUP,
+          "sd %.3f (full) vs %.3f (novelty)" % (ad.summary(db)["sd"], sd_after_repeats))
+    fresh(db)
+    o = obs(1.30, 0.10)
+    o["rows"] = dict(base)
+    ad.update(db, o)
+    moved = dict(base)
+    for i in range(0, 57, 2):
+        moved["A%02d" % i] = "1" * 12 + "0" * 19   # half the questions now answer differently
+    o = obs(1.50, 0.10)
+    o["rows"] = moved
+    x1 = ad.state(db)["x"]
+    ad.update(db, o)
+    s = ad.state(db)
+    nu = s["history"][-1].get("novelty", 1.0)
+    n_eff = s.get("n_eff", s.get("n", 0))
+    check("a partly new observation counts as its changed share", abs(nu - 29 / 91.0) < 1e-3
+          and abs(n_eff - (1 + 29 / 91.0)) < 1e-3, "ν %.3f · Σν %.3f" % (nu, n_eff))
+    full = ad.state(db)
+    fresh(db)
+    o = obs(1.30, 0.10)
+    o["rows"] = dict(base)
+    ad.update(db, o)
+    ad.update(db, obs(1.50, 0.10))                  # the same move, counted in full
+    check("…and moves the estimate less than a fully new one would",
+          0 < full["x"] - x1 < ad.state(db)["x"] - x1,
+          "+%.3f vs +%.3f" % (full["x"] - x1, ad.state(db)["x"] - x1))
+    store.set_meta(db, ad._META, json.dumps({"x": 1.31, "P": 0.0047, "n": 5, "tries": 9, "history": []}))
+    s = ad.summary(db)
+    check("a state from before novelty starts over from the prior — its count over-counted",
+          ad.current(db) == ad.PRIOR and s["estimate"] == ad.PRIOR and s["sd"] == ad.PRIOR_SD,
+          "%s · %.3f ± %.3f" % (s["mode"], s["estimate"], s["sd"]))
+
     print("\n★⑧ control — the fixed 1.35★")
     fresh(db)
     for _ in range(10):
