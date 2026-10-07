@@ -1,0 +1,33 @@
+# The rules a pull request must meet before review: title, description, sign-off, imports.
+# Runs the pull request's own copy of the script — changing it needs a maintainer's review (CODEOWNERS).
+name: PR rules
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  rules:
+    name: PR rules · title, description, sign-off, imports
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        if: github.event_name == 'pull_request'
+        with:
+          python-version: "3.13"
+      - name: check
+        if: github.event_name == 'pull_request'
+        run: python .github/scripts/pr_report.py --check
+      - name: in the merge queue
+        if: github.event_name == 'merge_group'
+        run: echo "checked on the pull request before it was queued"

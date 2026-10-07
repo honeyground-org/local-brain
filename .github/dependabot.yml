@@ -1,0 +1,9 @@
+# brain has no package dependencies; the only versions to keep fresh are the CI actions.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"

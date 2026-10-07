@@ -1,0 +1,89 @@
+{
+  "_about": "The one place that says who reviews what and how many approvals a change needs. CODEOWNERS is generated from it (python3 .github/scripts/pr_report.py --codeowners --write) and tests/verify_pr_report.py fails when the two differ. GOVERNANCE.md explains the roles and the process.",
+  "maintainers": ["wangjacsi"],
+  "emeritus": [],
+  "approvals": {
+    "low":    {"count": 1, "maintainers": 0},
+    "medium": {"count": 1, "maintainers": 0},
+    "high":   {"count": 2, "maintainers": 1}
+  },
+  "areas": {
+    "calibration": {
+      "impact": "high",
+      "summary": "the threshold, the margin filter, the scorecard",
+      "paths": ["brain/calibrate.py", "brain/adaptive.py", "brain/evalinit.py", "brain/scorecard.py"],
+      "owners": []
+    },
+    "retrieval": {
+      "impact": "medium",
+      "summary": "search, the text index, the language bridge, vectors, triggers, the recall hook",
+      "paths": ["brain/search.py", "brain/textindex.py", "brain/translit.py", "brain/lexicon.py", "brain/langdata.py",
+                "brain/rerank.py", "brain/vectors.py", "brain/triggers.py", "brain/hook.py"],
+      "owners": []
+    },
+    "storage": {
+      "impact": "high",
+      "summary": "the SQLite index and the swappable vector and graph databases",
+      "paths": ["brain/store.py", "brain/stores.py", "brain/vecstore.py", "brain/graphstore.py", "brain/dockerstores.py"],
+      "owners": []
+    },
+    "behaviour": {
+      "impact": "high",
+      "summary": "the behaviour layer: rules learned from tool history and when they fire",
+      "paths": ["brain/guard.py", "brain/ruledisc.py", "brain/tail.py"],
+      "owners": []
+    },
+    "privacy": {
+      "impact": "high",
+      "summary": "what leaves the machine: AI engines, the proxy, scrubbing",
+      "paths": ["brain/privacy.py", "brain/engines.py", "brain/proxy.py"],
+      "owners": []
+    },
+    "install": {
+      "impact": "high",
+      "summary": "installing, the hosts it wires into, the MCP server, corpus discovery",
+      "paths": ["brain/install.py", "brain/hosts.py", "brain/server.py", "brain/portable.py", "brain/discover.py",
+                "install.sh", "install/", "bin/", "pyproject.toml", "SETUP-PROMPT.md", "config.example.json",
+                "brain/config.example.json", "brain/__init__.py"],
+      "owners": []
+    },
+    "dashboard": {
+      "impact": "medium",
+      "summary": "the pages brain renders",
+      "paths": ["brain/dashboard.py", "brain/dashstyle.py", "brain/dashview.py", "brain/graphview.py", "brain/templates/"],
+      "owners": []
+    },
+    "cli": {
+      "impact": "medium",
+      "summary": "the command line, status, timeline, background jobs",
+      "paths": ["brain/cli.py", "brain/health.py", "brain/timeline.py", "brain/jobs.py", "brain/scheduler.py",
+                "brain/deadline.py", "brain/indexaudit.py", "brain/i18n.py"],
+      "owners": []
+    },
+    "i18n": {
+      "impact": "low",
+      "summary": "translations of user-facing text",
+      "paths": ["brain/locales/"],
+      "owners": []
+    },
+    "tests": {
+      "impact": "medium",
+      "summary": "the checks",
+      "paths": ["tests/"],
+      "owners": []
+    },
+    "docs": {
+      "impact": "low",
+      "summary": "documentation",
+      "paths": ["docs/", "README.md"],
+      "owners": []
+    },
+    "governance": {
+      "impact": "high",
+      "summary": "how the project is run: CI, review rules, licence, conduct",
+      "paths": [".github/", "GOVERNANCE.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md", "LICENSE",
+                ".gitignore"],
+      "owners": []
+    }
+  }
+}

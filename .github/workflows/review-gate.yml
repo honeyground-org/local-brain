@@ -1,0 +1,33 @@
+# Enough of the right approvals for the change's impact (.github/governance.json → approvals).
+# The branch ruleset already requires one approval and the code owners; this adds what it cannot say:
+# a high-impact change needs two people, one of them a maintainer. Re-evaluated on every review.
+# ⛔ One job, no `if:` on it — a skipped job reports success and would overwrite a red result.
+name: Review gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gate:
+    name: review gate · approvals for the impact
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: approvals
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .github/scripts/pr_report.py --gate

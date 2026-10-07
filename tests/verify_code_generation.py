@@ -33,6 +33,12 @@ identity, and it is what makes the discipline checkable.
    stay free of a corpus so it runs anywhere.
 
 How to run:  PYTHONPATH=. python3 tests/verify_code_generation.py
+             PYTHONPATH=. python3 tests/verify_code_generation.py --base origin/main    # a pull request
+
+★In a pull request, HEAD is the pull request itself★, so "compared with HEAD" is always a match there.
+`--base REF` compares with ★where the change started★ — `git merge-base REF HEAD` — so the whole pull
+request must carry one bump, however many commits it has. A base that git cannot resolve is a failure,
+not a skip: CI asked for the comparison, and a check that quietly does less than asked says "fine".
 
 ★There is no flag that makes §3 green.★ Either the measurement code matches HEAD, or
 `CODE_GENERATION` is higher than HEAD's. A switch that silences a check is the thing this file
@@ -65,8 +71,8 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 
 VERDICTS = {
-    "match":      "the measurement code is unchanged since HEAD",
-    "baseline":   "HEAD predates generations — this commit sets the baseline",
+    "match":      "the measurement code is unchanged since the base",
+    "baseline":   "the base predates generations — this commit sets the baseline",
     "bumped":     "measurement code changed ★and the generation was bumped★",
     "not-bumped": "★measurement code changed but CODE_GENERATION did not★",
     "gen-alone":  "★the generation moved without the code moving★",
@@ -83,8 +89,8 @@ def _git(*args):
     return p.returncode == 0, p.stdout
 
 
-def head_state():
-    """(generation, fingerprint) of the committed version · (None, None) when git cannot answer.
+def head_state(ref: str = "HEAD"):
+    """(generation, fingerprint) of the committed version `ref` · (None, None) when git cannot answer.
 
     ⛔ The fingerprint is built with `calibrate.fingerprint_of` — ★the same rule the live one uses★,
     never a second copy of the hashing logic.
@@ -94,7 +100,7 @@ def head_state():
         return None, None
     sources = {}
     for name in calibrate.RULER_MODULES:
-        got, text = _git("show", "HEAD:brain/%s.py" % name)
+        got, text = _git("show", "%s:brain/%s.py" % (ref, name))
         sources[name] = text if got else ""          # absent at HEAD = a new module, a real difference
     import re
     m = re.search(r"^CODE_GENERATION\s*=\s*(\d+)", sources.get("calibrate") or "", re.M)
@@ -105,15 +111,15 @@ def verdict(head_gen, head_fp, gen, fp):
     """(tag, ok, detail) — ★the whole discipline rule, as one pure function★ so it can be driven
     through every branch by a control group (§3b). Nothing here reads the disk or calls git."""
     if head_gen is None:
-        return "baseline", True, "HEAD predates CODE_GENERATION — this commit introduces %s" % gen
+        return "baseline", True, "the base predates CODE_GENERATION — this commit introduces %s" % gen
     if head_fp == fp:
         if head_gen == gen:
-            return "match", True, "generation %s, unchanged since HEAD" % gen
-        return "gen-alone", False, "HEAD gen %s · working gen %s, but no code changed" % (head_gen, gen)
+            return "match", True, "generation %s, unchanged since the base" % gen
+        return "gen-alone", False, "base gen %s · working gen %s, but no code changed" % (head_gen, gen)
     if isinstance(head_gen, int) and isinstance(gen, int) and gen > head_gen:
         return "bumped", True, "measurement code changed · gen %s → %s" % (head_gen, gen)
     return ("not-bumped", False,
-            "HEAD gen %s · working gen %s — bump `calibrate.CODE_GENERATION` before committing"
+            "base gen %s · working gen %s — bump `calibrate.CODE_GENERATION` in this change"
             % (head_gen, gen))
 
 
@@ -125,7 +131,21 @@ def _put(db, code_id) -> None:
     store.set_meta(db, "hook_threshold_detail", json.dumps(rec, ensure_ascii=False))
 
 
-def main() -> int:
+def base_ref(argv):
+    """The commit to compare with · ("HEAD", label) by default · (None, why) when `--base` cannot resolve."""
+    if "--base" not in argv:
+        return "HEAD", "HEAD"
+    i = argv.index("--base")
+    if i + 1 >= len(argv):
+        return None, "--base needs a ref (for example origin/main)"
+    want = argv[i + 1]
+    ok, out = _git("merge-base", want, "HEAD")
+    if not ok or not out.strip():
+        return None, "git cannot find a merge base between %s and HEAD — fetch it first (fetch-depth: 0)" % want
+    return out.strip(), "merge-base(%s, HEAD) = %s" % (want, out.strip()[:12])
+
+
+def main(argv=()) -> int:
     db = store.connect()
     mine = calibrate.code_identity()
     print("=" * 78)
@@ -190,10 +210,14 @@ def main() -> int:
           all(os.path.exists(os.path.join(ROOT, "brain", m + ".py")) for m in calibrate.RULER_MODULES),
           " · ".join(calibrate.RULER_MODULES))
 
-    head_gen, head_fp = head_state()
-    if head_fp is None and head_gen is None:
+    ref, label = base_ref(list(argv))
+    head_gen, head_fp = (None, None) if ref is None else head_state(ref)
+    if ref is None:
+        check("the base to compare with resolves", False, label)
+    elif head_fp is None and head_gen is None:
         print("⏭  skipped — not a git repository (this rule is checked where changes are made)")
     else:
+        print("  compared with %s" % label)
         tag, ok, detail = verdict(head_gen, head_fp, mine["gen"], mine["fp"])
         check(VERDICTS[tag], ok, detail)
 
@@ -230,7 +254,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     try:
-        code = main()
+        code = main(sys.argv[1:])
     finally:
         shutil.rmtree(_TMP, ignore_errors=True)
         if _HOME_BEFORE is None:

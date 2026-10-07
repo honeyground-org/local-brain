@@ -1,0 +1,4 @@
+# Lines of Korean allowed in shipping files — all of them data, not prose (judge prompts, real control
+# queries, patterns, test fixtures). verify_english_only fails when the count rises above this number.
+# When a change lowers the count, lower this number in the same change. It only goes down.
+112

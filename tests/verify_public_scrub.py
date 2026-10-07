@@ -429,7 +429,12 @@ def main():
     # ⛔ a published history carries every author line — only a GitHub noreply address is safe by itself;
     #    anything else is a person's real mailbox shipping in every commit
     exposed = [a for a in ident["authors"] if "@users.noreply.github.com>" not in a]
-    if inplace and exposed:
+    # `--contributors` (CI): once others contribute, an author's address is ★theirs★ to publish — it is
+    #   listed above, not blocked. Without it this stays the publisher's own gate before a push.
+    if inplace and exposed and "--contributors" in sys.argv:
+        print("   (--contributors: %d author address(es) listed, not blocked — each is its owner's choice)"
+              % len(exposed))
+    elif inplace and exposed:
         blockers.append(f"{len(exposed)} commit-author identities with a real address ship as-is: "
                         + ", ".join(exposed[:3]))
 

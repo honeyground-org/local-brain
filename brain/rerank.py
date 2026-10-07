@@ -160,13 +160,33 @@ def _pt_day(now: float = 0.0) -> str:
     Measured in Korean time the day is off, so a wall already lifted looks 'still blocked' or the reverse
     (a 16~17 hour error). Only the standard library `zoneinfo` is used.
     """
+    from datetime import datetime
     t = now or time.time()
+    return datetime.fromtimestamp(t, _pacific(t)).strftime("%Y-%m-%d")
+
+
+def _pacific(t: float):
+    """The Pacific time zone at instant `t` · `zoneinfo` when it can answer, otherwise the US rule.
+
+    ⛔ `zoneinfo` is Python 3.9+, and on Windows it also needs the `tzdata` package — without either,
+       `brain dashboard` crashed (CI on Python 3.8, 2026-10-07). The fallback is the rule itself: daylight
+       time from the second Sunday of March, 02:00 PST, to the first Sunday of November, 02:00 PDT. It is
+       a fixed offset for that instant, so a span across a switch can be an hour off twice a year.
+    """
+    from datetime import datetime, timedelta, timezone
     try:
-        from datetime import datetime
         from zoneinfo import ZoneInfo
-        return datetime.fromtimestamp(t, ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d")
-    except Exception:                                    # noqa: BLE001
-        return time.strftime("%Y-%m-%d", time.gmtime(t - 8 * 3600))
+        return ZoneInfo("America/Los_Angeles")
+    except Exception:                                    # noqa: BLE001 — ImportError or no tz database
+        pass
+    u = datetime.fromtimestamp(t, timezone.utc)
+
+    def sunday(month: int, nth: int):
+        first = datetime(u.year, month, 1, tzinfo=timezone.utc)
+        return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (nth - 1))
+
+    summer = sunday(3, 2) + timedelta(hours=10) <= u < sunday(11, 1) + timedelta(hours=9)
+    return timezone(timedelta(hours=-7 if summer else -8))
 
 
 def next_reset(now: float = 0.0):
@@ -180,9 +200,8 @@ def next_reset(now: float = 0.0):
     ★The tool did not say this, so a human computed it by hand and got it wrong.★ So now it says it.
     """
     from datetime import datetime, timedelta
-    from zoneinfo import ZoneInfo
     t = now or time.time()
-    pt = ZoneInfo("America/Los_Angeles")
+    pt = _pacific(t)
     here = datetime.fromtimestamp(t).astimezone()
     nxt = (datetime.fromtimestamp(t, pt) + timedelta(days=1)).replace(
         hour=0, minute=0, second=0, microsecond=0)

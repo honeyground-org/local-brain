@@ -197,7 +197,10 @@ def main():
 
     # ── ★the two halves actually meet★ — the exit code above, read by the verdict ──────
     #    This is the row that was missing. Each half was right on its own.
-    fresh = _write_log(log, [NOW - 3600])
+    # ⛔ At the scheduled time itself, not "an hour ago" — that only lands after 09:00 when the clock
+    #    reads 10:00 or later, so this row was red in CI at 05:00 UTC and green on the author's afternoon
+    #    (2026-10-07). A check whose verdict depends on the time of day it runs is measuring the clock.
+    fresh = _write_log(log, [at_nine])
     green = _run(fresh, _probe(runs=1, stdout=ld_log, last_exit="0"))
     red = _run(fresh, _probe(runs=1, stdout=ld_log, last_exit=str(jobs.FAILED)))
     check("★a job that exits FAILED is not green★ — end to end",
