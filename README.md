@@ -492,8 +492,9 @@ proposal issue ──► pull request ──► automatic checks ──► PR re
 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — set up, the rules every change follows, how to write the pull
   request, what each automatic check does and how to fix it.
-- **[GOVERNANCE.md](GOVERNANCE.md)** — maintainers and area owners, how impact decides the review, and
-  what an important change has to show before it merges.
+- **[GOVERNANCE.md](GOVERNANCE.md)** — maintainers and area owners (and how to add one), how impact
+  decides the review, what an important change has to show before it merges, and when and how an admin
+  may bypass review.
 - **[SECURITY.md](SECURITY.md)** — report security problems privately.
 - **[docs/ROADMAP.md](docs/ROADMAP.md)** — where the project is going and the principles behind it.
 

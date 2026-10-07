@@ -13,6 +13,8 @@ must be green.
   ⑦ the review gate: who counts, what blocks, what happens when the roster is too small
   ⑧ CI costs nothing: no workflow uses a paid API, a paid action or a paid runner, and the clean room
      never hands a check a paid key (the maintainers' decision, 2026-10-07)
+  ⑨ the merge audit: reviewed per the rule, or a valid bypass record — and `Bypass: roster` covers only
+     the gap, so it stops being possible by itself as the roster grows
 
     PYTHONPATH=. python3 tests/verify_pr_report.py
 """
@@ -212,6 +214,39 @@ for label, text in [
 check("free runners and other secrets pass",
       not r.paid_steps("    runs-on: ubuntu-22.04\n    runs-on: ${{ matrix.os }}\n          - { os: windows-latest }\n"
                        "      T: ${{ secrets.BRAIN_SCRUB_TERMS }}\n    runs-on: ubuntu-24.04-arm\n"))
+
+print("\n⑨ the merge audit")
+
+
+def note(who, text):
+    return {"user": {"login": who}, "body": text}
+
+
+SOLO = {"maintainers": ["m1"], "approvals": GOV["approvals"], "areas": {}}
+DUO = {"maintainers": ["m1", "m2"], "approvals": GOV["approvals"], "areas": {}}
+TRIO = {"maintainers": ["m1", "m2", "m3"], "approvals": GOV["approvals"], "areas": {}}
+AUDIT = [
+    ("reviewed per the rule needs no record", ("high", [rv("m2", "APPROVED", 1), rv("m3", "APPROVED", 2)], [], TRIO), True),
+    ("today: the only maintainer authored it, `Bypass: roster` is valid",
+     ("high", [], [note("m1", "Bypass: roster\nall checks green")], SOLO), True),
+    ("⛔ no record at all fails", ("high", [], [], SOLO), False),
+    ("⛔ a record by someone who is not a maintainer fails",
+     ("high", [], [note("stranger", "Bypass: roster")], SOLO), False),
+    ("⛔ an unknown reason fails", ("high", [], [note("m1", "Bypass: in a hurry")], SOLO), False),
+    ("⛔ a second maintainer who did not approve makes `roster` invalid",
+     ("high", [], [note("m1", "Bypass: roster")], DUO), False),
+    ("…once they approve, `roster` covers only the missing second approval",
+     ("high", [rv("m2", "APPROVED", 1)], [note("m1", "Bypass: roster")], DUO), True),
+    ("⛔ with three maintainers `roster` can no longer cover a high-impact change",
+     ("high", [rv("m2", "APPROVED", 1)], [note("m1", "Bypass: roster")], TRIO), False),
+    ("⛔ an open request for changes is never bypassed as `roster`",
+     ("high", [rv("m2", "CHANGES_REQUESTED", 1)], [note("m1", "Bypass: roster")], DUO), False),
+    ("`Bypass: security` is valid (a review is still owed)", ("high", [], [note("m1", "Bypass: security")], DUO), True),
+    ("the record can sit under other text, any case", ("low", [], [note("m1", "self-reviewed.\nbypass: Roster")], SOLO), True),
+]
+for label, (imp, reviews, comments, gov), want in AUDIT:
+    got = r.audit(imp, reviews, comments, gov, "m1")
+    check(label, got["ok"] == want, "%s — %s" % (got["how"], got["why"]))
 
 print("\n" + "=" * 78)
 if FAILS:
