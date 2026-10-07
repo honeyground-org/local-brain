@@ -142,7 +142,7 @@ jobs:
           BRAIN_SCRUB_TERMS: ${{ secrets.BRAIN_SCRUB_TERMS }}
         run: |
           set +e
-          python tests/verify_public_scrub.py --contributors
+          python tests/verify_public_scrub.py
           rc=$?
           if [ "$rc" = "77" ]; then
             echo "::notice::internal-name axes not measured — no BRAIN_SCRUB_TERMS here (normal for a fork); every other axis was"
