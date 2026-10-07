@@ -78,9 +78,13 @@ def main():
               not missing, ", ".join(missing) or "all")
 
         # ── ③ ★does it avoid polluting someone else's namespace★ ──────────────────────
+        # ⛔ without PYTHONPATH — run as documented (`PYTHONPATH=. …`) it imported the ★repository★, called
+        #    the repository root "site-packages" and reported every top-level file as pollution (2026-10-07)
+        clean_env = dict(os.environ)
+        clean_env.pop("PYTHONPATH", None)
         sp = subprocess.run(
             [py, "-c", "import brain,os;print(os.path.dirname(os.path.dirname(brain.__file__)))"],
-            capture_output=True, text=True, cwd=tmp).stdout.strip()
+            capture_output=True, text=True, cwd=tmp, env=clean_env).stdout.strip()
         allowed = ("brain", "pip", "setuptools", "wheel", "pkg_resources",
                    "_distutils_hack", "distutils-precedence.pth", "__pycache__")
         junk = [n for n in os.listdir(sp)

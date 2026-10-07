@@ -21,7 +21,11 @@ If loading is incomplete or before calibration, ④ reports ★can't measure★ 
 """
 from __future__ import annotations
 
-from brain import evalinit as _ei  # ★gold verdicts live in exactly one place★
+import os as _os
+import sys as _sys
+
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # runs without PYTHONPATH too
+from brain import evalinit as _ei  # noqa: E402 ★gold verdicts live in exactly one place★
 
 import json
 import os
