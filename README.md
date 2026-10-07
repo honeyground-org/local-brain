@@ -1,11 +1,18 @@
+<div align="center">
+
 # local-brain
 
-A local memory and retrieval layer for coding agents — and, unusually, one that
-**measures whether it actually beats what you had before** instead of assuming it.
+### What does the AI era need? A brain.
 
-**Zero third-party dependencies.** Standard library only, runs on the system
-`python3` (3.8+). No pip install, no build step, nothing phoning home unless you
-choose an AI engine yourself — Gemini, OpenAI, Anthropic, or a local server.
+An open-source memory system for coding agents that lives on your machine.<br>
+The right knowledge at the right moment, so work gets more efficient and your agent performs at its best.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-0a8f5b.svg)](LICENSE)
+![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-0d1117.svg)
+![Dependencies: 0](https://img.shields.io/badge/dependencies-0-0a8f5b.svg)
+![Works with Claude Code, Codex and any MCP client](https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20MCP-0d1117.svg)
+
+</div>
 
 ```bash
 git clone https://github.com/honeyground-org/local-brain ~/tools/local-brain
@@ -14,29 +21,71 @@ cd ~/tools/local-brain && ./install.sh --with-hook --with-guard
 
 ---
 
-## What it does
+## Why the AI era needs a brain
 
-It indexes your notes, memories and project docs into a local SQLite file, and
-surfaces the relevant ones **automatically, as you type** — through a host hook,
-not by you remembering to ask. Two more layers sit on top:
+Models keep getting faster. What they cannot bring by themselves is **your context**: your decisions,
+your lessons, your project. Without it, every session starts from zero. A brain system carries it into
+every session.
 
-- **Behaviour layer** — right before a risky action (a push, a rebase, a
-  migration), the guidance you once wrote about that action is put in front of
-  the agent. The rule matches the tool call; the *wording* lives in your memory
-  file, so editing the memory changes what is said. No rules ship with brain —
-  they are learned from your own tool history (`brain rules --discover`), so on
-  a fresh install this layer stays silent until it has something of yours to say.
-- **Self-calibration** — thresholds are measured against your own corpus, not
-  hardcoded. A score that means "confident" on 900 documents means nothing on 40.
+| | |
+|---|---|
+| **Efficiency** | Stop re-explaining. Decisions, lessons and context come back on their own. |
+| **Performance boost** | Better context, better output. The agent sees what you already learned before it acts. |
+| **Compounding know-how** | Every session adds to it. What you learn grows instead of evaporating. |
 
-### Why "measures itself" is the point
+## How it works: one local index, three moments
 
-Retrieval tools are easy to believe in and hard to verify. This one ships with a
-scorecard that compares it against the alternatives you actually had — a flat
-index file plus `grep`, and the coding agent working alone — on accuracy, recall,
-how much text had to be read, and speed. `brain score --compare` prints that
-table. Every check in `tests/` runs a **control group first**: if a check cannot
-fail, its green result is not evidence.
+```mermaid
+flowchart LR
+  A[Memory files] --> I((Local index))
+  B[Project docs] --> I
+  C[Notes and wikis] --> I
+  I --> T["As you type<br/>related memories attach to the prompt"]
+  I --> R["Before a risky action<br/>your own guidance appears"]
+  I --> M["When the agent asks<br/>8 MCP tools"]
+```
+
+- **As you type.** A host hook reads each prompt and attaches only the memories that clear your
+  calibrated threshold, and stays quiet otherwise. There is no command to remember.
+- **Trigger phrases.** Declare a phrase in a memory's front matter (`triggers: ["payments refactor, continue"]`).
+  Typing it brings that exact thread back, with no score involved. `brain triggers` checks every declaration.
+- **Before a risky action.** The behaviour layer puts the guidance you once wrote in front of the agent
+  right before a push, a rebase or a migration. The rule matches the tool call; the *wording* lives in
+  your memory file, so editing the memory changes what is said. No rules ship with brain: they are
+  learned from your own tool history (`brain rules --discover`).
+- **When the agent asks.** Eight MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
+  `brain_suggest` · `brain_feedback` · `reindex` · `timeline`.
+
+## Adaptable by design
+
+The core stays the same. Everything around it plugs in as an adapter, so you can swap any of them
+without touching your memories.
+
+| Slot | Plugs in today |
+|---|---|
+| **Agent host** | Claude Code · Codex · any MCP client |
+| **AI engine** (optional) | Gemini · OpenAI · Anthropic · any OpenAI-compatible server, such as a local Ollama · none |
+| **Data sources** | memory files · project docs · Obsidian and wikis · any folder (`brain add <path>`) |
+| **Scheduler** | launchd · cron |
+
+**Never locked into a database.** Your memories stay plain Markdown files. The index is one SQLite file
+rebuilt from them at any time (`brain index --full`), and `brain export` / `brain import` carry what you
+earned to another machine.
+
+## Built to be trusted
+
+- **Calibrates to you.** Thresholds are measured against your own corpus, not hardcoded, and the margin
+  above the noise floor is learned from your own sample by a Kalman filter. A score that means
+  "confident" on 900 documents means nothing on 40.
+- **Measured, not assumed.** `brain score --compare` puts it side by side with the alternatives you
+  actually had: a flat index file plus `grep`, and the coding agent working alone. Accuracy, recall,
+  how much text had to be read, and speed. Every check in `tests/` runs a **control group first**, so a
+  green result is evidence, not luck.
+- **Private by default.** Word search never opens a socket. AI engines are opt-in, and secret-shaped
+  values are masked before anything leaves (see [Privacy](#privacy)).
+- **Always current.** The MCP server picks up new code on disk by itself, so an update needs no restart.
+- **Zero third-party dependencies.** Standard library only, on the system `python3` (3.8+). No pip
+  install, no build step.
 
 ---
 
@@ -51,7 +100,7 @@ All commands work from any directory once installed (`brain <command>`).
 |---|---|
 | `brain status` | Health check — what to fix, separated from what to merely watch |
 | `brain dashboard` | Status + performance comparison as a local HTML page, opened in your browser |
-| `brain recall <text> -t <synonyms>` | Recall, right in the terminal. ⛔ Always pass `-t` — see below |
+| `brain recall <text> -t <synonyms>` | Recall, right in the terminal (pass synonyms with `-t`, see below) |
 | `brain recent` | Chronological view — the answer to "what was I doing?", which has no keyword |
 | `brain neighbors <name>` | Graph neighbours — widen from a hit to its related context |
 | `brain why <file>` | Why is this file the way it is — purpose, principles, and what changed |
@@ -62,7 +111,7 @@ All commands work from any directory once installed (`brain <command>`).
 |---|---|
 | `brain score` | Raw comparison table + the 7-axis score |
 | `brain score --compare` | brain ↔ grep ↔ agent-alone: accuracy, recall, text read, speed |
-| `brain score --axes` | The 7 axes only. ⛔ The composite is for comparing *your own* points in time |
+| `brain score --axes` | The 7 axes only. The composite compares *your own* points in time |
 | `brain score --full` | Measures the accuracy axis for real — calls the judge model, spends budget |
 | `brain score --history` | Compare points in time: what moved after you changed something |
 | `brain budget` | Judge-model daily budget, and the three thresholds the tool sets for itself |
@@ -102,7 +151,7 @@ All commands work from any directory once installed (`brain <command>`).
 | `brain rules` | Active rules — learned from your use, or written by you in `rules.json` (none ship) |
 | `brain rules --discover` | Ask the judge model for new rule candidates (incremental, cached) |
 | `brain rules --stale` | Rules whose actions nobody has performed in the period |
-| `brain rules --approve <signal>` / `--disable <id>` | Turn one on / off. ⛔ Disabled stays disabled |
+| `brain rules --approve <signal>` / `--disable <id>` | Turn one on / off. Disabled stays disabled |
 | `brain rules --auto` | Promote candidates over the threshold without a human |
 
 ### Moving between machines
@@ -110,7 +159,7 @@ All commands work from any directory once installed (`brain <command>`).
 | Command | What it does |
 |---|---|
 | `brain export` | What you *earned* in one file — calibration is deliberately excluded |
-| `brain import <bundle>` | Merge another machine's bundle. ⛔ Dry-run by default; `--apply` to commit |
+| `brain import <bundle>` | Merge another machine's bundle. Dry-run by default; `--apply` to commit |
 
 ### Safety and upkeep
 
@@ -119,15 +168,12 @@ All commands work from any directory once installed (`brain <command>`).
 | `brain privacy` | Audit the outbound door — which memories hold secret-shaped values (values never shown) |
 | `brain i18n --check` | Translation catalogs — missing keys, unused keys, placeholder mismatches |
 
-⛔ **Always pass `-t` (synonyms) to `recall`.** Memories are written in different
-words than your question. On the author's own notes (9 questions): 2/9 found without synonyms, 8/9 with.
+**Tip: pass synonyms to `recall` with `-t`.** Memories are often written in different words than your
+question; on the author's own notes, synonyms lifted hits from 2 of 9 questions to 8 of 9.
 
 ---
 
 ## Languages
-
-Two different things are localized, and they are **not** at the same maturity.
-This table says what has been measured, not what was intended.
 
 ### Interface (dashboard, CLI status output)
 
@@ -137,29 +183,23 @@ Six languages ship as JSON catalogs in `brain/locales/`:
 |---|---|---|---|---|---|---|
 | Dashboard | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-English is the source of truth; a missing key falls back to English rather than
-breaking the screen. The language is chosen by, in order: `"language"` in
-`config.json` → `BRAIN_LANG` → English. Your OS locale is deliberately not
-used: another language is something you choose (`./install.sh --lang ko`),
-never something inferred.
-`brain i18n --check` counts missing keys and placeholder mismatches, because a
-translation nobody counts will rot as soon as the code moves.
+English is the source of truth; a missing key falls back to English rather than breaking the screen.
+The language is chosen by, in order: `"language"` in `config.json` → `BRAIN_LANG` → English. Another
+language is something you choose (`./install.sh --lang ko`), never something inferred from your OS.
+`brain i18n --check` counts missing keys and placeholder mismatches, so translations stay in step with the code.
 
 ### Search (tokenizer)
 
-Localizing the screen is not localizing the search. Retrieval quality per language:
-
-| Language | State | What is missing |
+| Language | How it is indexed | Evaluated by |
 |---|---|---|
-| English | 🟢 Works | — |
-| Korean | 🟢 Works | — |
-| German | 🟡 Mostly | Compound splitting (`Donaudampfschifffahrt` stays one token) |
-| Spanish · French | 🟡 Mostly | Inflection; words are space-separated so the damage is limited |
-| Japanese | 🔴 **Not yet** | No spaces, so a document collapses into one token — needs n-gram splitting |
+| English | words | a labelled question set |
+| Korean | 2- and 3-grams, plus a Korean ↔ English loanword bridge | a labelled question set |
+| German · Spanish · French | words, accents kept | tokenizer checks |
+| Japanese | split by script (kanji · hiragana · katakana), then 2- and 3-grams | tokenizer checks |
 
-⛔ Only English and Korean have a labelled evaluation set behind them. The rest
-are marked by inspection of the tokenizer, not by measurement — which is why they
-are not claimed as "supported".
+Every language reaches the index (`tests/verify_tokenizer_langs.py`). English and Korean also have
+labelled evaluation sets behind their quality numbers; `brain eval-init` drafts one from your own history
+for any language.
 
 ---
 
@@ -169,12 +209,9 @@ are not claimed as "supported".
   calibrated threshold.
 - **Index refresh** — at session start, and again just before recall if a new
   memory appeared. Write a memory file by hand and the next recall finds it.
-  ⛔ Without this refresh the brain does not know about the memory you just saved
-  — that gap was found the hard way.
 - **Scheduled jobs** — semantic indexing and rule discovery, once a day.
-  ⛔ Verify them by their **log**, not by whether they are registered:
-  `brain status`. On macOS use `launchd` (`install/launchd.sh`); `cron` silently
-  skips runs that were due while the machine slept.
+  `brain status` reads their logs to show the last run. On macOS the installer uses `launchd`
+  (`install/launchd.sh`), which also catches up on runs that were due while the machine slept.
 
 ---
 
@@ -187,8 +224,8 @@ claude mcp add brain --scope user -- "$(pwd)/bin/brain-mcp"
 Tools: `recall` · `remember` · `neighbors` · `brain_status` · `brain_suggest` ·
 `brain_feedback` · `reindex` · `timeline`
 
-The MCP server and the CLI call the **same core functions** — a rule implemented
-in two places only ever gets fixed in one of them.
+The MCP server and the CLI call the **same core functions**, so a fix lands in both at once.
+The server also picks up new code on disk by itself: after an update there is nothing to restart.
 
 ---
 
@@ -261,9 +298,11 @@ Nothing here is one person's setting. Every number comes from one of four places
 
 **The margin learns.** It starts at 1.35 with a wide uncertainty and, every calibration, measures which
 margin your own sample likes best — resampled 200 times, so a best value that jumps around counts as a weak
-observation. A one-dimensional Kalman filter weighs each observation by how much it can be trusted: for the
-first three it only measures, then it uses its estimate, and a small or flat sample barely moves it. The
-same evidence is never counted twice, a label-free proxy sample may only push it up, and the regression
+observation. A one-dimensional Kalman filter weighs each observation by how much it can be trusted: until it
+has three observations' worth of new evidence it only measures, then it uses its estimate, and a small or
+flat sample barely moves it. Each
+observation counts for what it adds (the share of questions that answered differently from the last one
+used), a label-free proxy sample may only push it up, and the regression
 guard still refuses any threshold that does worse than the one in place. `brain calibrate` shows the
 estimate, its uncertainty and whether it is still measuring. When there is no ruler at all (a corpus too
 small to measure), the hook stays silent rather than guess.
@@ -279,7 +318,7 @@ Two kinds live side by side. Most run anywhere on fixtures (`verify_host_neutral
 `verify_corpus_kinds`, `verify_index_roles`, `verify_first_day`, `verify_engines`…). Others measure
 **your own** notes, labelled questions or session history — on a machine without them they stop with
 **exit code 77 (skipped)** and say what is missing, rather than pass on nothing or fail for no reason.
-A fresh clone with an empty home runs 33 green, 13 skipped, 0 red (measured 2026-10-06).
+A fresh clone with an empty home runs 36 green, 14 skipped, 0 red (measured 2026-10-07).
 
 ```bash
 python3 tests/verify_recall.py          # recall quality regression
@@ -294,6 +333,8 @@ python3 tests/verify_privacy.py         # intercepts HTTP and inspects the real 
 python3 tests/verify_i18n.py            # translations do not rot silently
 python3 tests/verify_english_only.py    # no Korean left in any shipping file
 python3 tests/verify_first_day.py       # someone else's first day: install, index, every screen renders
+python3 tests/verify_measure_isolation.py  # a measurement never changes the index under anyone else
+python3 tests/verify_server_refresh.py  # a long-running MCP server answers with the code on disk
 ```
 
 ---
@@ -311,7 +352,7 @@ python3 tests/verify_first_day.py       # someone else's first day: install, ind
 | `brain/ruledisc.py` | Discovers behaviour rules from use: transcripts × memories → judge |
 | `brain/hosts.py` | Host adapters — Claude Code, Codex, generic |
 | `brain/i18n.py` | Message catalogs, English-first |
-| `brain/server.py` | MCP over stdio (JSON-RPC, no SDK) |
+| `brain/server.py` | MCP over stdio (JSON-RPC, no SDK); refreshes itself when the code on disk changes |
 | `brain/cli.py` | Terminal entry point — same core as the server |
 | `config.json` | Single source of truth for what gets indexed. A new corpus is one entry |
 
@@ -324,7 +365,7 @@ credential-shaped **values** while keeping key names searchable. Per-source
 should never be sent at all. `brain privacy` audits what is still exposed —
 and never prints the values themselves.
 
-### What a key turns on ⛔ read this before you set one
+### What a key turns on
 
 Word search is **always local** — it never needs a key and never opens a socket.
 Two things can leave, and only through an engine you chose (`brain engines`):
@@ -336,7 +377,7 @@ Two things can leave, and only through an engine you chose (`brain engines`):
 | what does **not** go out | anything a source or a document marked `embed: false`; and everything, always, while no engine is chosen. A local OpenAI-compatible server (`--base-url http://localhost…`) keeps both on the machine |
 | who sends it | `brain vec build` and the daily `brain-vec-daily` job (embed); recall when word search is silent, `brain score --full` and the daily `brain-rules-daily` job (judge) |
 
-⛔ **A key that is merely present is never used.** `GEMINI_API_KEY`,
+**A key that is merely present is never used.** `GEMINI_API_KEY`,
 `OPENAI_API_KEY` and especially `ANTHROPIC_API_KEY` are often another tool's —
 your coding agent's own, say. Choosing an engine because its key happened to be
 set would be the one path where content leaves a machine whose owner never
@@ -352,9 +393,8 @@ brain add ~/work/secret-docs --no-embed    # or "embed": false in config.json
 brain privacy                              # → blocked per source: [...]
 ```
 
-Once an embedder is chosen, the default is "everything may be embedded" — deliberately
-(2026-09-14): the alternative is a brain whose semantic half is silently off,
-which is the failure this project keeps measuring for. Until one is chosen,
+Once an embedder is chosen, the default is "everything may be embedded", so meaning-based search
+covers all of your notes; opt out per source or per document as shown above. Until one is chosen,
 `brain engines` and the installer say plainly that it is off and how to turn it on.
 
 ## License
