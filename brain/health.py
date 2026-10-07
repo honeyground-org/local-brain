@@ -38,10 +38,10 @@ def _rows(db: sqlite3.Connection, sql: str, args=()) -> List[sqlite3.Row]:
 def orphans(db: sqlite3.Connection, source: str = "memory") -> List[str]:
     """Memories nothing points at. ★It now means "no connection", not "invisible"★ —
     search still reaches them. So this list is not an incident but **a list of linking candidates**."""
-    return [r["name"] for r in _rows(db,
-        "SELECT d.name FROM docs d WHERE d.source=? AND NOT EXISTS "
-        "(SELECT 1 FROM links l JOIN name_map m ON m.key=l.dst_name WHERE m.doc_id=d.id) "
-        "ORDER BY d.name", (source,))]
+    from brain import graphstore
+    linked_to = graphstore.ask(db, "targets")
+    return [r["name"] for r in _rows(db, "SELECT id, name FROM docs WHERE source=? ORDER BY name", (source,))
+            if r["id"] not in linked_to]
 
 
 def dangling_split(db: sqlite3.Connection, source: str = "memory") -> dict:
@@ -188,11 +188,8 @@ def _pair_facts(db: sqlite3.Connection) -> Dict[int, dict]:
 
 
 def _is_linked(db: sqlite3.Connection, a_id: int, b_id: int) -> bool:
-    row = db.execute(
-        "SELECT 1 FROM links l JOIN name_map m ON m.key=l.dst_name "
-        "WHERE (l.src_id=? AND m.doc_id=?) OR (l.src_id=? AND m.doc_id=?) LIMIT 1",
-        (a_id, b_id, b_id, a_id)).fetchone()
-    return row is not None
+    from brain import graphstore
+    return bool(graphstore.ask(db, "linked", a_id, b_id))
 
 
 def duplicates(db: sqlite3.Connection, limit: int = 25) -> List[dict]:
@@ -300,6 +297,28 @@ def classify(checks: dict) -> dict:
     return out
 
 
+def stores_state(db: sqlite3.Connection) -> dict:
+    """Each dedicated database chosen: is it in sync, did it last answer. From the record only — no network."""
+    out = {}
+    try:
+        from brain import stores as _st, vectors as _vec
+        for role in _st.ROLES:
+            c = _st.choice(role)
+            if c["backend"] == "sqlite":
+                continue
+            h = _st.health(db, role)
+            if c.get("error"):
+                out[role] = {"backend": c["backend"], "in_sync": False, "ok": False, "error": "unknown backend"}
+                continue
+            be = _st.vector_backend(c) if role == "vector" else _st.graph_backend(c)
+            target = be.target(_vec.model_tag(), _vec.DIM) if role == "vector" else be.target()
+            out[role] = {"backend": c["backend"], "in_sync": h.get("synced") == target,
+                         "ok": h.get("ok") is not False, "error": h.get("error") or "", "at": h.get("at", "")}
+    except Exception:                                    # noqa: BLE001
+        pass
+    return out
+
+
 def status(db: sqlite3.Connection) -> dict:
     st = store.corpus_stats(db)
     by_source = {r["source"]: r["c"] for r in _rows(db,
@@ -332,6 +351,9 @@ def status(db: sqlite3.Connection) -> dict:
     return {
         "corpus": st,
         "calibration_guard": guard,
+        # ⛔ ★A chosen database that stopped answering must show up here too★ (§stores) — the local copy
+        #    answers in its place, so nothing breaks, and that is exactly why it would go unnoticed.
+        "stores": stores_state(db),
         "by_source": by_source,
         "memory_by_kind": by_kind,
         "judge_budget": judge,

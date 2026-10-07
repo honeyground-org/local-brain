@@ -1305,6 +1305,12 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
             db.execute("DELETE FROM path_links WHERE src_id=?", (doc_id,))
             db.execute("DELETE FROM usage WHERE path=?", (path,))
             db.execute("DELETE FROM docs WHERE id=?", (doc_id,))
+            # ★and its embeddings★ (2026-10-07) — they stayed, pulled the similarity gate's top-N mean,
+            # and would have been read as the next document's to take this rowid
+            try:
+                db.execute("DELETE FROM vectors WHERE doc_id=?", (doc_id,))
+            except sqlite3.OperationalError:
+                pass                                     # no semantic layer on this machine yet
     _build_basename_aliases(db)
     _resolve_path_links(db)
     _rebuild_terms(db)
@@ -1335,6 +1341,26 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
         pass                                             # an alias-learning failure must not block indexing
     set_meta(db, "last_index", time.strftime("%Y-%m-%dT%H:%M:%S"))
     set_meta(db, "last_index_stats", json.dumps(stats))
+    # ★Embeddings of documents removed before 2026-10-07 stayed behind★ — a human-run index clears them
+    if recalibrate:
+        try:
+            with db:
+                n_gone = db.execute("DELETE FROM vectors WHERE doc_id NOT IN (SELECT id FROM docs)").rowcount
+            if n_gone:
+                stats["vectors_of_removed_docs"] = n_gone
+        except sqlite3.OperationalError:
+            pass                                         # no semantic layer on this machine yet
+    # ★A chosen dedicated database gets the difference★ (§stores) — before calibration, which reads the graph.
+    # Nothing at all happens with the default; on the hook path only when a document actually changed.
+    if added or updated or removed or recalibrate:
+        try:
+            from brain import stores as _stores
+            pushed = _stores.sync_if_chosen(db)
+            if pushed:
+                stats["stores"] = {r: ("error" if v.get("error") else "unchanged" if v.get("unchanged") else "sent")
+                                   for r, v in pushed.items()}
+        except Exception:                                # noqa: BLE001
+            pass                                         # a store failure must not block indexing
     # ★When the corpus changes, so does the scale★ — re-measure the threshold after indexing.
     # A failure here must not kill the index (the threshold can be re-measured in the hook).
     #

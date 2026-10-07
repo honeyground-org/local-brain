@@ -239,20 +239,19 @@ def _hydrate(db: sqlite3.Connection, doc_id: int) -> Optional[sqlite3.Row]:
 
 
 def _neighbors(db: sqlite3.Connection, doc_ids: Sequence[int]) -> Dict[int, str]:
-    """One hop only. ★Two hops reaches nearly everything in a personal graph★ (the earlier system's own finding)."""
+    """One hop only. ★Two hops reaches nearly everything in a personal graph★ (the earlier system's own finding).
+
+    The traversal is the chosen graph store's (§graphstore); "via" is the first seed, in `doc_ids` order,
+    that reaches a neighbour — so it does not depend on the order a backend returns rows in.
+    """
+    from brain import graphstore
+    seeds = [d for d in doc_ids if db.execute("SELECT 1 FROM docs WHERE id=?", (d,)).fetchone()]
+    hops = graphstore.ask(db, "neighbors", seeds)
     out: Dict[int, str] = {}
-    for did in doc_ids:
+    for did in seeds:
         src = db.execute("SELECT name FROM docs WHERE id=?", (did,)).fetchone()
-        if not src:
-            continue
-        for row in db.execute(
-                "SELECT DISTINCT m.doc_id id FROM links l JOIN name_map m ON m.key=l.dst_name "
-                "WHERE l.src_id=?", (did,)):
-            out.setdefault(row["id"], src["name"])
-        for row in db.execute(
-                "SELECT DISTINCT l.src_id id FROM links l JOIN name_map m ON m.key=l.dst_name "
-                "WHERE m.doc_id=?", (did,)):
-            out.setdefault(row["id"], src["name"])
+        for nb in sorted(hops.get(int(did), ())):
+            out.setdefault(nb, src["name"])
     out.pop(0, None)
     for did in doc_ids:
         out.pop(did, None)
@@ -778,10 +777,11 @@ def neighbors(db: sqlite3.Connection, name: str, depth: int = 1) -> dict:
             out["outgoing"].append(hit["name"])
         else:
             out["dangling"].append(r["dst_name"])
-    for r in db.execute(
-            "SELECT DISTINCT d.name FROM links l JOIN name_map m ON m.key=l.dst_name "
-            "JOIN docs d ON d.id=l.src_id WHERE m.doc_id=?", (row["id"],)):
-        out["incoming"].append(r["name"])
+    from brain import graphstore
+    for src_id in graphstore.ask(db, "incoming", row["id"]):
+        r = db.execute("SELECT name FROM docs WHERE id=?", (src_id,)).fetchone()
+        if r:
+            out["incoming"].append(r["name"])
     out["outgoing"] = sorted(set(out["outgoing"]))
     out["incoming"] = sorted(set(out["incoming"]))
     out["dangling"] = sorted(set(out["dangling"]))

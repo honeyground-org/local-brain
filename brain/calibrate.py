@@ -452,7 +452,10 @@ def measure(db: sqlite3.Connection) -> dict:
 #   16 (2026-10-07)  the bridge cache is keyed by (word, generation) in a new table — a long-running process
 #       of another generation could replace the current generation's row of a word. No bridge rule changed;
 #       bumped because `translit` changed (and the new table starts empty either way).
-CODE_GENERATION = 16
+#   17 (2026-10-07)  graph traversal and similarity search go through ★a chosen store★ (§stores · §graphstore ·
+#       §vecstore). With the default (sqlite) the questions are the same SQL as before; neighbours tied on
+#       score are now taken in document-id order (it was SQLite's row order, which no other store can repeat).
+CODE_GENERATION = 17
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·
@@ -460,8 +463,8 @@ CODE_GENERATION = 16
 # ⚠️ Known gap, on purpose: the noise-control sentences live in the message catalogs (`calib.noise.*`),
 #    so editing those moves the floor without moving this fingerprint. They are frozen control
 #    text that nobody edits casually, and `_bench` still guards the deployment.
-RULER_MODULES = ("adaptive", "calibrate", "evalinit", "hook", "langdata", "lexicon", "search",
-                 "store", "textindex", "translit")
+RULER_MODULES = ("adaptive", "calibrate", "evalinit", "graphstore", "hook", "langdata", "lexicon", "search",
+                 "store", "stores", "textindex", "translit")
 
 
 def fire_rate_at(real_tops, threshold: float):

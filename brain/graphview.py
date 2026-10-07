@@ -84,13 +84,10 @@ ISOLATE_BAND = 92         # height of the bottom band holding orphans
 
 def fetch(db: sqlite3.Connection) -> Tuple[List[dict], List[Tuple[int, int]], List[dict]]:
     """(connected nodes, edges, orphan nodes). Resolves a link through either a name or an alias."""
-    rows = db.execute(
-        "SELECT s.name a, d.name b FROM links l "
-        "JOIN docs s ON s.id=l.src_id "
-        "JOIN name_map m ON m.key=l.dst_name "
-        "JOIN docs d ON d.id=m.doc_id "
-        "WHERE s.source='memory' AND d.source='memory' AND s.id!=d.id").fetchall()
-    pairs = sorted({tuple(sorted((r["a"], r["b"]))) for r in rows})
+    from brain import graphstore
+    mem = {r["id"]: r["name"] for r in db.execute("SELECT id, name FROM docs WHERE source='memory'")}
+    pairs = sorted({tuple(sorted((mem[a], mem[b]))) for a, b in graphstore.ask(db, "edges")
+                    if a in mem and b in mem and a != b})
 
     kinds = {r["name"]: (r["kind"] or "", r["description"] or r["title"] or "")
              for r in db.execute(

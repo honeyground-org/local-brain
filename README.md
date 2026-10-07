@@ -66,11 +66,15 @@ without touching your memories.
 | **Agent host** | Claude Code · Codex · any MCP client |
 | **AI engine** (optional) | Gemini · OpenAI · Anthropic · any OpenAI-compatible server, such as a local Ollama · none |
 | **Data sources** | memory files · project docs · Obsidian and wikis · any folder (`brain add <path>`) |
+| **Vector database** | the local SQLite copy · Qdrant |
+| **Graph database** | the local SQLite copy · Neo4j |
 | **Scheduler** | launchd · cron |
 
-**Never locked into a database.** Your memories stay plain Markdown files. The index is one SQLite file
-rebuilt from them at any time (`brain index --full`), and `brain export` / `brain import` carry what you
-earned to another machine.
+**Swap the databases, keep your data.** Similarity search and graph traversal can each be served by a
+database built for that job. Your memories stay plain Markdown files and the local SQLite copy stays
+canonical, so switching is a sync, not a re-embed, and `brain stores --check` asks both the same questions
+to prove they agree (see [Storage backends](#storage-backends)). `brain export` / `brain import` carry what
+you earned to another machine.
 
 ## Built to be trusted
 
@@ -140,6 +144,7 @@ All commands work from any directory once installed (`brain <command>`).
 | Command | What it does |
 |---|---|
 | `brain engines` | Which AI engine fills each role (embed · judge), what it is sent, how to change it |
+| `brain stores` | Which database serves vector search and the graph (sqlite · qdrant · neo4j); `--sync` · `--check` |
 | `brain vec status\|build\|calibrate\|search` | Meaning-based search via remote embeddings; `calibrate` also re-measures the judge |
 | `brain calibrate` | Re-measure the lexical threshold against this corpus |
 | `brain eval-init` | Draft an evaluation set from *your* history (someone else's gold is theirs) |
@@ -285,6 +290,43 @@ index is a derivative — delete it and `brain index --full` rebuilds it.
 
 ---
 
+## Storage backends
+
+Two kinds of question have databases built for them, and brain lets each one be answered there:
+
+| Role | What it answers | Backends | What is sent |
+|---|---|---|---|
+| `vector` | similarity search over note embeddings | `sqlite` (default) · `qdrant` | the vectors and `{doc_id, chunk_no}`, never text |
+| `graph` | the links between notes: neighbours, incoming links, link targets | `sqlite` (default) · `neo4j` | document ids and links; names only with `--names` |
+
+```bash
+brain stores                                                   # which database answers each role, and whether it is in sync
+brain stores --set vector=qdrant --url http://localhost:6333   # choose, then sync the local copy across
+brain stores --set graph=neo4j --url http://localhost:7474     # password from NEO4J_PASSWORD or secrets.json
+brain stores --check                                           # the same questions to both, compared
+brain stores --set vector=sqlite                               # back to the local copy
+```
+
+How it stays trustworthy:
+
+- **The local copy stays canonical.** Embeddings are earned and the graph is derived from your files, so
+  both always live in the local SQLite file too. A dedicated database is a serving index: switching to it
+  is a sync, never a re-embed.
+- **Only the difference travels.** A ledger records what each target already holds; indexing and
+  embedding push only what changed, and a sync with nothing new sends nothing.
+- **It answers only when it is in sync.** Until the first sync completes, or whenever the database does
+  not answer, the local copy answers instead. The failure is recorded for `brain stores`, and the
+  database is not asked again for a minute.
+- **Agreement is measured, not assumed.** `brain stores --check` replays cached questions against both
+  and compares top results, scores, neighbours, edges and link targets.
+
+Measured on the author's notes (1,909 documents, 9,590 chunks, 3,376 links; 2026-10-07, both databases
+on the same machine): identical answers on every question compared, similarity search **188 ms → 12 ms**
+with Qdrant, and one-hop neighbours for every document **3.4 s → 0.48 s** with Neo4j.
+
+Adding another database is one class in `brain/vecstore.py` or `brain/graphstore.py` and one row in
+`brain/stores.py`; `tests/verify_stores.py` states the contract it must meet.
+
 ## Who sets which number
 
 Nothing here is one person's setting. Every number comes from one of four places, in this order:
@@ -318,7 +360,8 @@ Two kinds live side by side. Most run anywhere on fixtures (`verify_host_neutral
 `verify_corpus_kinds`, `verify_index_roles`, `verify_first_day`, `verify_engines`…). Others measure
 **your own** notes, labelled questions or session history — on a machine without them they stop with
 **exit code 77 (skipped)** and say what is missing, rather than pass on nothing or fail for no reason.
-A fresh clone with an empty home runs 36 green, 14 skipped, 0 red (measured 2026-10-07).
+A fresh clone with an empty home runs 38 green, 14 skipped, 0 red (measured 2026-10-07 with a local
+Qdrant running; without a database the live store check is one more skip).
 
 ```bash
 python3 tests/verify_recall.py          # recall quality regression
@@ -335,6 +378,8 @@ python3 tests/verify_english_only.py    # no Korean left in any shipping file
 python3 tests/verify_first_day.py       # someone else's first day: install, index, every screen renders
 python3 tests/verify_measure_isolation.py  # a measurement never changes the index under anyone else
 python3 tests/verify_server_refresh.py  # a long-running MCP server answers with the code on disk
+python3 tests/verify_stores.py          # vector and graph databases are replaceable: sync, diff, fallback
+python3 tests/verify_stores_live.py     # Qdrant and Neo4j, live: the same answers as the local copy
 ```
 
 ---
@@ -352,13 +397,17 @@ python3 tests/verify_server_refresh.py  # a long-running MCP server answers with
 | `brain/ruledisc.py` | Discovers behaviour rules from use: transcripts × memories → judge |
 | `brain/hosts.py` | Host adapters — Claude Code, Codex, generic |
 | `brain/i18n.py` | Message catalogs, English-first |
+| `brain/stores.py` | Storage backends — which database serves each role, the sync ledger, the fallback |
+| `brain/vecstore.py` | Vector stores — the local scan and Qdrant |
+| `brain/graphstore.py` | Graph stores — the local link table and Neo4j |
 | `brain/server.py` | MCP over stdio (JSON-RPC, no SDK); refreshes itself when the code on disk changes |
 | `brain/cli.py` | Terminal entry point — same core as the server |
 | `config.json` | Single source of truth for what gets indexed. A new corpus is one entry |
 
 ## Privacy
 
-Nothing leaves your machine unless you choose an AI engine (`brain engines`). When you do,
+Nothing leaves your machine unless you choose an AI engine (`brain engines`) or a database on another
+host (`brain stores`; a database sent vectors or ids, never text). When you choose an engine,
 everything on the way out passes through `brain/privacy.py`, which masks
 credential-shaped **values** while keeping key names searchable. Per-source
 (`--no-embed`) and per-document (`embed: false`) opt-outs exist for anything that

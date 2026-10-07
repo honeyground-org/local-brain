@@ -64,6 +64,7 @@ HELP_GROUPS = (
     )),
     ("cli.help.group.semantic", (
         ("engines", "cli.help.cmd.engines"),
+        ("stores", "cli.help.cmd.stores"),
         ("vec", "cli.help.cmd.vec"),
         ("calibrate", "cli.help.cmd.calibrate"),
         ("eval-init", "cli.help.cmd.eval_init"),
@@ -139,6 +140,96 @@ def engines_text(db) -> str:
     if unused:
         out.append(i18n.t("cli.engines.keys_unused", names=", ".join(unused)))
     return "\n".join(out)
+
+
+def stores_text(db) -> str:
+    """`brain stores` — which database answers each kind of question, what it is sent, and whether it serves.
+
+    ⛔ Never prints a password — only where it is looked for, and only when it is missing.
+    """
+    import urllib.parse as _up
+    from brain import engines as _en, stores as _st
+    out = [i18n.t("cli.stores.title"), ""]
+    for r in _st.describe(db):
+        role = r["role"]
+        what = (i18n.t("cli.stores.role.vector.what") if role == "vector"
+                else i18n.t("cli.stores.role.graph.what"))
+        out.append("  %-6s %s" % (role, what))
+        backend = r["backend"] + ((" @ " + r["url"]) if r.get("url") else "")
+        source = (i18n.t("cli.stores.src.env") if r["source"] == "env"
+                  else i18n.t("cli.stores.src.config") if r["source"] == "config"
+                  else i18n.t("cli.stores.src.default"))
+        out.append("         " + i18n.t("cli.stores.backend_line", backend=backend, source=source))
+        if r.get("error"):
+            out.append("         " + i18n.t("cli.stores.unknown", backend=r["backend"]))
+        elif r["backend"] == "sqlite":
+            out.append("         " + i18n.t("cli.stores.local_copy", n=r["local_count"]))
+        else:
+            where = (i18n.t("cli.stores.stays_local") if r["local"]
+                     else _up.urlsplit(r.get("url") or "").hostname or r.get("url"))
+            if role == "vector":
+                out.append("         " + i18n.t("cli.stores.sends.vector", where=where))
+            else:
+                names = i18n.t("cli.stores.sends.names") if (r.get("options") or {}).get("names") else ""
+                out.append("         " + i18n.t("cli.stores.sends.graph", where=where, names=names))
+            ping = r.get("ping") or {}
+            if not ping.get("ok"):
+                out.append("         " + i18n.t("cli.stores.status.unreachable", error=ping.get("error", "")))
+            else:
+                sync = i18n.t("cli.stores.in_sync") if r.get("in_sync") else i18n.t("cli.stores.not_synced")
+                out.append("         " + i18n.t("cli.stores.status.reachable", version=ping.get("version", ""),
+                                                held=r.get("held", 0), local=r["local_count"], sync=sync))
+            spec = _st.BACKENDS.get(r["backend"], {})
+            if r["backend"] == "neo4j" and not _st.secret(r):
+                out.append("         " + i18n.t("cli.stores.secret_hint", env=spec["secret_env"],
+                                                field=spec["secret_field"], path=_en.secrets_path()))
+            h = r.get("health") or {}
+            if h.get("ok") is False and h.get("error"):
+                out.append("         " + i18n.t("cli.stores.last_error", at=h.get("at", ""), error=h["error"][:160]))
+        out.append("")
+    out.append(i18n.t("cli.stores.choices"))
+    out.append(i18n.t("cli.stores.how_to_change"))
+    return "\n".join(out)
+
+
+def stores_sync_text(res: dict) -> str:
+    out = [i18n.t("cli.stores.sync.title")]
+    for role, r in res.items():
+        if r.get("skipped"):
+            out.append("  " + i18n.t("cli.stores.sync.on_local_copy", role=role))
+        elif r.get("error"):
+            out.append("  " + i18n.t("cli.stores.sync.error", role=role, error=r["error"]))
+        elif r.get("unchanged"):
+            out.append("  " + i18n.t("cli.stores.sync.unchanged", role=role, target=r["target"]))
+        elif role == "vector":
+            out.append("  " + i18n.t("cli.stores.sync.vector", role=role, docs=r["sent_docs"], chunks=r["sent_chunks"],
+                                     deleted=r["deleted_docs"], target=r["target"]))
+        else:
+            out.append("  " + i18n.t("cli.stores.sync.graph", role=role, nodes=r["sent_nodes"], edges=r["sent_edges"],
+                                     gone_nodes=r["deleted_nodes"], gone_edges=r["removed_edges"], target=r["target"]))
+    return "\n".join(out) + "\n"
+
+
+def stores_check_text(res: dict) -> str:
+    out = [i18n.t("cli.stores.check.title")]
+    same = lambda ok: i18n.t("cli.stores.check.same") if ok else i18n.t("cli.stores.check.differ")  # noqa: E731
+    for role, r in res.items():
+        if r.get("skipped"):
+            out.append("  " + i18n.t("cli.stores.check.on_local_copy", role=role))
+        elif r.get("error"):
+            out.append("  " + i18n.t("cli.stores.check.error", role=role, error=r["error"]))
+        elif role == "vector" and not r.get("queries"):
+            out.append("  " + i18n.t("cli.stores.check.no_questions", role=role))
+        elif role == "vector":
+            out.append("  " + i18n.t("cli.stores.check.vector", role=role, n=r["queries"], top1=r["top1_agree"],
+                                     overlap="%.0f%%" % (100 * r["overlap_at_10"]), delta=r["max_score_delta"],
+                                     ms_local=r["ms_local"], ms_store=r["ms_store"], backend=r["backend"]))
+        else:
+            out.append("  " + i18n.t("cli.stores.check.graph", role=role, same=r["neighbors_same"], docs=r["docs"],
+                                     edges_store=r["edges_store"], edges_local=r["edges_local"],
+                                     targets=same(r["targets_same"]), ms_local=r["ms_local"],
+                                     ms_store=r["ms_store"], backend=r["backend"]))
+    return "\n".join(out) + "\n"
 
 
 def _help_tail() -> str:
@@ -251,6 +342,22 @@ def main(argv=None) -> int:
     p.add_argument("--base-url", default="",
                    help="any OpenAI-compatible server, e.g. http://localhost:11434/v1 (nothing leaves)")
     p.add_argument("--effort", default="", help="judge effort, for providers that take one")
+
+    p = sub.add_parser("stores",
+                       help="Storage backends — which database serves vector search and the graph")
+    p.add_argument("--set", nargs="+", default=[], metavar="ROLE=BACKEND",
+                   help="e.g. vector=qdrant graph=neo4j (or =sqlite, the local copy)")
+    p.add_argument("--url", default="", help="the database's address, e.g. http://localhost:6333")
+    p.add_argument("--collection-prefix", default="", help="qdrant: collection name prefix (default brain)")
+    p.add_argument("--exact", action="store_true",
+                   help="qdrant: brute-force search inside Qdrant (the same answers as the local scan)")
+    p.add_argument("--database", default="", help="neo4j: database name (default neo4j)")
+    p.add_argument("--user", default="", help="neo4j: user (default neo4j); the password comes from NEO4J_PASSWORD")
+    p.add_argument("--names", action="store_true", help="neo4j: also send document names (off by default)")
+    p.add_argument("--sync", action="store_true", help="push the local copy to the chosen databases")
+    p.add_argument("--full", action="store_true", help="with --sync: rebuild the targets from scratch")
+    p.add_argument("--check", action="store_true",
+                   help="ask the local copy and the database the same questions, and compare")
 
     p = sub.add_parser("vec", help="Semantic search (remote embeddings) — status, ingest, calibrate, query")
     p.add_argument("action", choices=["status", "build", "calibrate", "search", "warm"])
@@ -512,6 +619,36 @@ def main(argv=None) -> int:
                 print(i18n.t("cli.engines.rebuild_hint"))
             print()
         print(engines_text(db))
+    elif args.cmd == "stores":
+        from brain import stores as _st
+        if args.set:
+            try:
+                want = _st.parse_assignments(args.set)
+            except ValueError as exc:
+                print(str(exc))
+                return 2
+            has_opts = (args.url or args.collection_prefix or args.exact or args.database or args.user
+                        or args.names)
+            if has_opts and len(want) != 1:
+                print(i18n.t("cli.stores.one_role_for_options"))
+                return 2
+            for role, backend in want.items():
+                opts = ({"collection_prefix": args.collection_prefix, "exact": True if args.exact else None}
+                        if role == "vector" else
+                        {"database": args.database, "user": args.user, "names": True if args.names else None})
+                try:
+                    entry = _st.set_choice(role, backend, args.url, opts)
+                except ValueError as exc:
+                    print(str(exc))
+                    return 2
+                print(i18n.t("cli.stores.set", role=role, entry=json.dumps(entry)))
+            args.sync = True                     # a new choice serves only once it holds the local copy
+            print()
+        if args.sync:
+            print(stores_sync_text(_st.sync(db, full=args.full, progress=True)))
+        if args.check:
+            print(stores_check_text(_st.check(db)))
+        print(stores_text(db))
     elif args.cmd == "vec":
         from brain import vectors
         if args.action == "status":
@@ -603,6 +740,13 @@ def main(argv=None) -> int:
                       % ("✅" if j["ok"] else "❌", j["job"], age, by, j["what"]))
                 if j.get("why"):
                     print("     %s" % j["why"])
+
+        for role, sr in (st.get("stores") or {}).items():
+            if not sr.get("ok"):
+                print("\n" + i18n.t("cli.status.store_fallback", role=role, backend=sr["backend"],
+                                     error=(sr.get("error") or "")[:120]))
+            elif not sr.get("in_sync"):
+                print("\n" + i18n.t("cli.status.store_unsynced", role=role, backend=sr["backend"]))
 
         print("\n%s" % i18n.t("cli.status.to_fix"))
         if not issues:

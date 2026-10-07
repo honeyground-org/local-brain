@@ -557,11 +557,14 @@ def build(db: sqlite3.Connection, limit_docs: int = 0,
         hit_daily_flag[0] = True
     el = time.time() - t0
     left = len(stale_docs(db))
+    # a chosen vector store gets what was just embedded (§stores — nothing happens with the default)
+    from brain import stores
+    pushed = stores.sync_if_chosen(db, ("vector",)).get("vector")
     return {"docs": n_docs, "chunks": n_chunks, "calls": n_calls,
             "daily_quota_reached": hit_daily_flag[0], "docs_left": left,
             "seconds": round(el, 1), "chunks_per_min": round(n_chunks / max(1e-9, el / 60.0), 1),
             "waited_sec": round(waited, 1), "model": model_tag(), "dim": DIM,
-            "provider": PROVIDER}
+            "provider": PROVIDER, **({"store": pushed} if pushed else {})}
 
 
 def coverage(db: sqlite3.Connection) -> dict:
@@ -624,16 +627,19 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
         if q is None:
             q = _unit(embed([query], side="query")[0])
             _qcache_put(db, query, q)
-    best: Dict[int, float] = {}
-    for did, blob in db.execute(
-            "SELECT doc_id, vec FROM vectors WHERE model=? AND dim=?",
-            (model_tag(), DIM)):
-        v = array.array("f")
-        v.frombytes(blob)
-        sc = sum(map(operator.mul, q, v))
-        if sc > best.get(did, -2.0):
-            best[did] = sc
-    order = sorted(best.items(), key=lambda kv: -kv[1])
+    # ★Where the similarity search runs is the chosen vector store's★ (§stores · §vecstore) — the local
+    # scan by default. Every backend returns the same thing: documents by their closest chunk, best first.
+    from brain import stores, vecstore
+    n = max(k, TOPN_FOR_MEAN)
+    local = vecstore.SqliteVectors()
+    c = stores.choice("vector")
+    if c["backend"] == "sqlite" or c.get("error"):
+        order = local.search(db, q, model_tag(), DIM, n)
+    else:
+        be = vecstore.make(c)
+        order = stores.serve(db, "vector", be.target(model_tag(), DIM),
+                             lambda: be.search(db, q, model_tag(), DIM, n),
+                             lambda: local.search(db, q, model_tag(), DIM, n))
     if not order:
         return []
     head = [c for _, c in order[:TOPN_FOR_MEAN]]
