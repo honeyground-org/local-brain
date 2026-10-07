@@ -173,13 +173,20 @@ def scan_tracked(tl, cwd=ROOT, files=None):
     return hits
 
 
-def scan_history(tl, cwd=ROOT):
-    """Axis 2 — ★what push sends★. {term: {'messages': n, 'diff': n}}"""
+def scan_history(tl, cwd=ROOT, skips=()):
+    """Axis 2 — ★what push sends★. {term: {'messages': n, 'diff': n}}
+
+    A line matching a declared exclusion (`!regex` in the term list) is skipped here too — the same rule
+    the tracked-file axis uses, or a declared false positive (`_trg`) would block every release forever.
+    """
     hits = {}
     if not tl:
         return hits
-    msgs = _git(["log", "--all", "--format=%s%n%b"], cwd).lower()
-    diff = _git(["log", "--all", "-p", "--format="], cwd).lower()
+
+    def keep(text: str) -> str:
+        return "\n".join(l for l in text.splitlines() if not any(p.search(l) for p in skips)).lower()
+    msgs = keep(_git(["log", "--all", "--format=%s%n%b"], cwd))
+    diff = keep(_git(["log", "--all", "-p", "--format="], cwd))
     for t in tl:
         t_low = t.lower()
         m, d = msgs.count(t_low), diff.count(t_low)
@@ -314,9 +321,9 @@ def selftest():
 
 
 def main():
-    # ★Release method★ — a snapshot (only the current files, into a new repository) is the default.
-    #   `--inplace` covers releasing this repository history and all (then axis 2 is the blocker).
-    inplace = "--inplace" in sys.argv
+    # ★Release method★ — since 2026-10-07 this repository ★is★ the public one, so its history ships and
+    #   axis 2 is a blocker. `--snapshot` keeps the old check (only the current files, into a new repository).
+    inplace = "--snapshot" not in sys.argv
     print("=" * 74)
     print("Pre-release scrub check — if this repository is handed to someone, what goes with it")
     print("mode: " + ("★history and all (--inplace)★" if inplace else "snapshot release (only the current files, into a new repository)"))
@@ -332,7 +339,7 @@ def main():
 
     pub, exc = split_public()
     print(f"\n{len(pub)} files ship · {len(exc)} left out by the manifest")
-    print("   (the exclusion list = tests/public_exclude.txt — ★the same file the exporter reads★)")
+    print("   (tests/public_exclude.txt — empty or absent when the repository itself is what ships)")
 
     tl, src = terms()
     blockers = []
@@ -361,7 +368,8 @@ def main():
         print(f"   ── ({n_exc} lines in excluded files — ★counted, not hidden★. They do not ship)")
 
         print(f"\n[axis2] ★history★ — push sends history, not files")
-        t2 = scan_history(split_terms(tl)[0])
+        _w, _sk = split_terms(tl)
+        t2 = scan_history(_w, skips=_sk)
         n_hist = sum(v["messages"] + v["diff"] for v in t2.values())
         for t, h in sorted(t2.items(), key=lambda x: -(x[1]["messages"] + x[1]["diff"])):
             print(f"   {t:<16} commit msgs {h['messages']:>3} · past diffs {h['diff']:>4}")
@@ -415,11 +423,15 @@ def main():
         print(f"   ⛔ internal host {h}  ({len(fs)} spots: {fs[0]})")
     if ident["emails"] or ident["homes"] or ident["ips"] or ident["hosts"]:
         blockers.append("files that ship hold an email, a person's path, or internal infrastructure")
-    print("   ── commit authors (★must be decided when the snapshot is made★):")
+    print("   ── commit authors (★decided once — a GitHub noreply address names an account, not a mailbox★):")
     for a, n in sorted(ident["authors"].items(), key=lambda x: -x[1]):
         print(f"      {a}  {n} commits")
-    if inplace and ident["authors"]:
-        blockers.append(f"{len(ident['authors'])} commit-author identities ship as-is")
+    # ⛔ a published history carries every author line — only a GitHub noreply address is safe by itself;
+    #    anything else is a person's real mailbox shipping in every commit
+    exposed = [a for a in ident["authors"] if "@users.noreply.github.com>" not in a]
+    if inplace and exposed:
+        blockers.append(f"{len(exposed)} commit-author identities with a real address ship as-is: "
+                        + ", ".join(exposed[:3]))
 
     print("\n" + "=" * 74)
     if blockers == ["could not measure the internal-name axis (no term list)"]:

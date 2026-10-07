@@ -30,7 +30,7 @@ itself done"; a scanner silently matching nothing looks exactly like both.
 
 ## Use
 
-    python3 tests/verify_secret_scanner.py                 # the public snapshot (../local-brain-public)
+    python3 tests/verify_secret_scanner.py                 # this repository (what ships)
     python3 tests/verify_secret_scanner.py --here          # this repository instead
     python3 tests/verify_secret_scanner.py <path>
 
@@ -49,7 +49,7 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_TARGET = os.path.join(os.path.dirname(ROOT), "local-brain-public")
+DEFAULT_TARGET = ROOT          # this repository is what ships (since 2026-10-07 there is no separate snapshot)
 
 
 def binary() -> str:
@@ -123,8 +123,7 @@ def main() -> int:
     print(f"scanner {exe} ({ver or 'version unknown'})")
 
     if not os.path.isdir(target):
-        print(f"\n⛔⛔ NOT MEASURED — no such folder. Build the snapshot first "
-              f"(`python3 tests/export_public.py`).")
+        print(f"\n⛔⛔ NOT MEASURED — no such folder: {target}")
         return 77                                         # ⏭ skipped — nothing to scan yet
 
     print("\n" + "-" * 74)
