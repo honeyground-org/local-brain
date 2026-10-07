@@ -241,6 +241,7 @@ The server also picks up new code on disk by itself: after an update there is no
 ./install.sh --with-hook --with-guard   # fully local: no AI engine, nothing leaves the machine
 ./install.sh --all --embed gemini --judge gemini        # + meaning-based search (GEMINI_API_KEY)
 ./install.sh --all --embed openai --judge anthropic     # mix providers (OPENAI_API_KEY, ANTHROPIC_API_KEY)
+./install.sh --all --stores docker      # + vector search on Qdrant and the graph on Neo4j, both in Docker
 ./install.sh --help                     # choose what to enable
 ```
 
@@ -324,6 +325,27 @@ Measured on the author's notes (1,909 documents, 9,590 chunks, 3,376 links; 2026
 on the same machine): identical answers on every question compared, similarity search **188 ms → 12 ms**
 with Qdrant, and one-hop neighbours for every document **3.4 s → 0.48 s** with Neo4j.
 
+### Run them in Docker
+
+```bash
+./install.sh --stores docker      # at install time
+brain stores --docker             # any time later: both, or just `vector` / `graph`
+brain stores --docker-stop        # stop them; the data stays, and the local copy answers meanwhile
+```
+
+- Pinned images (`qdrant/qdrant:v1.19.2`, `neo4j:5.26.31-community`), ports bound to 127.0.0.1 only,
+  `restart: unless-stopped`.
+- **The data lives in plain folders under the brain's home** (`<home>/stores/qdrant`, `<home>/stores/neo4j/`),
+  not in Docker volumes, so removing the containers, the images or Docker itself leaves it in place.
+  Measured: with the containers removed and created again, nothing had to be sent again and every answer
+  matched.
+- **If a database ever comes back empty, it refills itself.** Each sync compares what the database holds
+  with what it was sent; when they differ, the next sync rebuilds it from the local copy.
+- The Neo4j password is generated into `secrets.json` (0600) and handed to Docker by name, never on a
+  command line.
+- After a reboot the containers come back as soon as Docker starts. On macOS and Windows, turn on
+  *Start Docker Desktop when you sign in*; until Docker is up, the local copy answers.
+
 Adding another database is one class in `brain/vecstore.py` or `brain/graphstore.py` and one row in
 `brain/stores.py`; `tests/verify_stores.py` states the contract it must meet.
 
@@ -360,7 +382,7 @@ Two kinds live side by side. Most run anywhere on fixtures (`verify_host_neutral
 `verify_corpus_kinds`, `verify_index_roles`, `verify_first_day`, `verify_engines`…). Others measure
 **your own** notes, labelled questions or session history — on a machine without them they stop with
 **exit code 77 (skipped)** and say what is missing, rather than pass on nothing or fail for no reason.
-A fresh clone with an empty home runs 38 green, 14 skipped, 0 red (measured 2026-10-07 with a local
+A fresh clone with an empty home runs 39 green, 14 skipped, 0 red (measured 2026-10-07 with a local
 Qdrant running; without a database the live store check is one more skip).
 
 ```bash
@@ -380,6 +402,7 @@ python3 tests/verify_measure_isolation.py  # a measurement never changes the ind
 python3 tests/verify_server_refresh.py  # a long-running MCP server answers with the code on disk
 python3 tests/verify_stores.py          # vector and graph databases are replaceable: sync, diff, fallback
 python3 tests/verify_stores_live.py     # Qdrant and Neo4j, live: the same answers as the local copy
+python3 tests/verify_docker_stores.py   # Docker: data survives restarts and removed containers, refills itself
 ```
 
 ---
@@ -400,6 +423,7 @@ python3 tests/verify_stores_live.py     # Qdrant and Neo4j, live: the same answe
 | `brain/stores.py` | Storage backends — which database serves each role, the sync ledger, the fallback |
 | `brain/vecstore.py` | Vector stores — the local scan and Qdrant |
 | `brain/graphstore.py` | Graph stores — the local link table and Neo4j |
+| `brain/dockerstores.py` | Qdrant and Neo4j in Docker, with the data in folders of your own |
 | `brain/server.py` | MCP over stdio (JSON-RPC, no SDK); refreshes itself when the code on disk changes |
 | `brain/cli.py` | Terminal entry point — same core as the server |
 | `config.json` | Single source of truth for what gets indexed. A new corpus is one entry |

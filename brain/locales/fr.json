@@ -629,5 +629,16 @@
  "cli.stores.check.same": "identiques",
  "cli.stores.check.differ": "différents",
  "cli.status.store_fallback": "stockage — {role} → {backend} ne répond pas ; la copie locale répond à sa place ({error}). Voir `brain stores`.",
- "cli.status.store_unsynced": "stockage — {role} → {backend} n'est pas encore synchronisé ; la copie locale répond jusqu'à `brain stores --sync`."
+ "cli.status.store_unsynced": "stockage — {role} → {backend} n'est pas encore synchronisé ; la copie locale répond jusqu'à `brain stores --sync`.",
+ "install.stores_title": "Bases dédiées dans Docker (recherche vectorielle · graphe)",
+ "install.would_docker_store": "démarrer {role} ({image}) dans Docker, données dans {data}",
+ "install.stores_up": "{role} tourne dans Docker ({version}) — données dans {data}",
+ "install.stores_failed": "bases Docker pas prêtes : {why} — la copie locale continue de répondre",
+ "install.stores_synced": "{role} contient la copie locale ({target})",
+ "cli.stores.docker_line": "docker    {state} · données dans {data}",
+ "cli.stores.docker_up": "en marche dans Docker : {roles} · fichier compose {compose}",
+ "cli.stores.docker_failed": "bases Docker non démarrées : {why}",
+ "cli.stores.docker_stopped": "bases Docker arrêtées — les données restent dans {data} ; la copie locale répond jusqu'à leur retour",
+ "cli.stores.healed": "{role}  la base n'avait plus ce qu'elle avait reçu ({held} sur {expected}) — remplie à nouveau depuis la copie locale",
+ "cli.stores.bad_role": "rôles possibles : {roles}"
 }

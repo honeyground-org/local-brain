@@ -249,6 +249,35 @@ def step_engines(embed: str, judge: str) -> None:
         say("  " + i18n.t("install.engines_hint"))
 
 
+# ── 3c. dedicated databases in Docker (optional) ───────────────────────────
+def step_stores(mode: str) -> None:
+    """`--stores docker` — Qdrant and Neo4j in Docker, data in a folder of the brain's home (§dockerstores).
+
+    ⛔ Optional and never automatic: the local SQLite copy answers everything without it. A machine without
+       Docker gets a warning, not a failed install.
+    """
+    if mode != "docker":
+        return
+    from brain import dockerstores, store, stores
+    say("\n" + i18n.t("install.stores_title"))
+    if DRY:
+        dockerstores.up(dry_run=True, say=say)
+        return
+    res = dockerstores.up()
+    if not res["ok"]:
+        warn(i18n.t("install.stores_failed", why=res["why"]))
+        return
+    for role, version in res["roles"].items():
+        ok(i18n.t("install.stores_up", role=role, version=version,
+                  data=", ".join(res["data"][role])))
+    got = stores.sync(store.connect())
+    for role, r in got.items():
+        if r.get("error"):
+            warn(i18n.t("install.stores_failed", why=r["error"]))
+        else:
+            ok(i18n.t("install.stores_synced", role=role, target=r.get("target", "")))
+
+
 # ── 4. MCP ─────────────────────────────────────────────────────────────────
 def step_mcp() -> None:
     from brain import hosts
@@ -491,6 +520,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="engine for meaning-based search: gemini · openai · none (see `brain engines`)")
     ap.add_argument("--judge", default="", metavar="PROVIDER",
                     help="engine that judges candidates: gemini · openai · anthropic · none")
+    ap.add_argument("--stores", default="", choices=["", "local", "docker"],
+                    help="where vector search and the graph run: local (default) · docker (Qdrant + Neo4j)")
     ap.add_argument("--lang", default="", help="UI language (en de es fr ja ko)")
     ap.add_argument("--dry-run", action="store_true",
                     help="show what would change and touch NOTHING")
@@ -516,6 +547,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not step_index():
         return 1
     step_engines(a.embed, a.judge)
+    step_stores(a.stores)
     step_mcp()
     step_hooks(a.with_hook, a.with_guard)
     step_schedule(a.with_cron)

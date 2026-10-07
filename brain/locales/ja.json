@@ -629,5 +629,16 @@
  "cli.stores.check.same": "一致",
  "cli.stores.check.differ": "不一致",
  "cli.status.store_fallback": "ストレージ — {role} → {backend} が応答せず、代わりにローカルの写しが答えている ({error})。`brain stores` を参照。",
- "cli.status.store_unsynced": "ストレージ — {role} → {backend} はまだ未同期。`brain stores --sync` まではローカルの写しが答える。"
+ "cli.status.store_unsynced": "ストレージ — {role} → {backend} はまだ未同期。`brain stores --sync` まではローカルの写しが答える。",
+ "install.stores_title": "Docker で動かす専用DB (ベクトル検索 · グラフ)",
+ "install.would_docker_store": "{role} を Docker で起動 ({image})、データは {data} に保管",
+ "install.stores_up": "{role} は Docker で稼働中 ({version}) — データは {data}",
+ "install.stores_failed": "Docker のDBが準備できていない: {why} — ローカルの写しが引き続き答える",
+ "install.stores_synced": "{role} にローカルの写しを入れた ({target})",
+ "cli.stores.docker_line": "docker    {state} · データは {data}",
+ "cli.stores.docker_up": "Docker で稼働中: {roles} · compose ファイル {compose}",
+ "cli.stores.docker_failed": "Docker のDBを起動できなかった: {why}",
+ "cli.stores.docker_stopped": "Docker のDBを停止 — データは {data} に残る。戻るまではローカルの写しが答える",
+ "cli.stores.healed": "{role}  DBが送られたものを失っていた ({expected} 中 {held}) — ローカルの写しから入れ直した",
+ "cli.stores.bad_role": "役割は {roles}"
 }

@@ -179,6 +179,11 @@ def stores_text(db) -> str:
                 sync = i18n.t("cli.stores.in_sync") if r.get("in_sync") else i18n.t("cli.stores.not_synced")
                 out.append("         " + i18n.t("cli.stores.status.reachable", version=ping.get("version", ""),
                                                 held=r.get("held", 0), local=r["local_count"], sync=sync))
+            if (r.get("options") or {}).get("managed") == "docker":
+                from brain import dockerstores as _dk
+                state = {x["service"]: x["state"] for x in _dk.status()}.get(_dk.SERVICE[role], "") or "-"
+                out.append("         " + i18n.t("cli.stores.docker_line", state=state,
+                                                data=", ".join(_dk.data_dirs()[_dk.SERVICE[role]])))
             spec = _st.BACKENDS.get(r["backend"], {})
             if r["backend"] == "neo4j" and not _st.secret(r):
                 out.append("         " + i18n.t("cli.stores.secret_hint", env=spec["secret_env"],
@@ -197,9 +202,14 @@ def stores_sync_text(res: dict) -> str:
     for role, r in res.items():
         if r.get("skipped"):
             out.append("  " + i18n.t("cli.stores.sync.on_local_copy", role=role))
-        elif r.get("error"):
+            continue
+        if r.get("error"):
             out.append("  " + i18n.t("cli.stores.sync.error", role=role, error=r["error"]))
-        elif r.get("unchanged"):
+            continue
+        if r.get("healed"):
+            h = r["healed"]
+            out.append("  " + i18n.t("cli.stores.healed", role=role, held=h.get("held"), expected=h.get("expected")))
+        if r.get("unchanged"):
             out.append("  " + i18n.t("cli.stores.sync.unchanged", role=role, target=r["target"]))
         elif role == "vector":
             out.append("  " + i18n.t("cli.stores.sync.vector", role=role, docs=r["sent_docs"], chunks=r["sent_chunks"],
@@ -354,6 +364,10 @@ def main(argv=None) -> int:
     p.add_argument("--database", default="", help="neo4j: database name (default neo4j)")
     p.add_argument("--user", default="", help="neo4j: user (default neo4j); the password comes from NEO4J_PASSWORD")
     p.add_argument("--names", action="store_true", help="neo4j: also send document names (off by default)")
+    p.add_argument("--docker", nargs="*", metavar="ROLE", default=None,
+                   help="run the databases in Docker (both, or: vector · graph); data stays in a folder of your own")
+    p.add_argument("--docker-stop", action="store_true",
+                   help="stop the Docker databases (the data stays; the local copy answers meanwhile)")
     p.add_argument("--sync", action="store_true", help="push the local copy to the chosen databases")
     p.add_argument("--full", action="store_true", help="with --sync: rebuild the targets from scratch")
     p.add_argument("--check", action="store_true",
@@ -621,6 +635,23 @@ def main(argv=None) -> int:
         print(engines_text(db))
     elif args.cmd == "stores":
         from brain import stores as _st
+        if args.docker is not None:
+            from brain import dockerstores as _dk
+            roles = args.docker or list(_st.ROLES)
+            if any(r not in _st.ROLES for r in roles):
+                print(i18n.t("cli.stores.bad_role", roles=", ".join(_st.ROLES)))
+                return 2
+            res = _dk.up(roles)
+            if not res["ok"]:
+                print(i18n.t("cli.stores.docker_failed", why=res["why"]))
+                return 1
+            print(i18n.t("cli.stores.docker_up", roles=", ".join("%s %s" % kv for kv in res["roles"].items()),
+                         compose=res["compose"]))
+            args.sync = True
+        if args.docker_stop:
+            from brain import dockerstores as _dk
+            print(i18n.t("cli.stores.docker_stopped", data=_dk.base_dir()) if _dk.stop()
+                  else i18n.t("cli.stores.docker_failed", why="docker compose stop"))
         if args.set:
             try:
                 want = _st.parse_assignments(args.set)

@@ -136,6 +136,13 @@ class Neo4jGraph:
                        "DELETE r", {"pairs": [[self._key(a), self._key(b)] for a, b in pairs[i:i + BATCH]]})],
                      timeout=stores.SYNC_TIMEOUT)
 
+    def counts(self) -> Tuple[int, int]:
+        """(nodes, edges) this brain holds here — what a sync compares with its ledger."""
+        rows = self.run([("MATCH (d:BrainDoc {ns: $ns}) RETURN count(d)", {"ns": self.ns}),
+                         ("MATCH (:BrainDoc {ns: $ns})-[r:LINKS_TO]->() RETURN count(r)", {"ns": self.ns})],
+                        timeout=stores.SYNC_TIMEOUT)
+        return int(rows[0][0][0]), int(rows[1][0][0])
+
     def neighbors(self, db: sqlite3.Connection, ids: Sequence[int]) -> Dict[int, Set[int]]:
         out: Dict[int, Set[int]] = {int(d): set() for d in ids}
         if not ids:
@@ -199,6 +206,14 @@ def sync(db: sqlite3.Connection, backend, full: bool = False, progress: bool = F
         stores.ledger_clear(db, "graph.", target)
     have_nodes = stores.ledger(db, "graph.node", target)
     have_edges = stores.ledger(db, "graph.edge", target)
+    if (have_nodes or have_edges) and not full:
+        # ★Does the database still hold what the ledger says★ (§vecstore.sync) — else rebuild it from the local copy
+        held, expected = backend.counts(), (len(have_nodes), len(have_edges))
+        if held != expected:
+            backend.reset()
+            stores.ledger_clear(db, "graph.", target)
+            have_nodes, have_edges = {}, {}
+            stats["healed"] = {"expected": list(expected), "held": list(held)}
     node_up = [k for k, v in want_nodes.items() if have_nodes.get(k) != v]
     node_gone = [k for k in have_nodes if k not in want_nodes]
     edge_add = [k for k in want_edges if k not in have_edges]

@@ -629,5 +629,16 @@
  "cli.stores.check.same": "idénticos",
  "cli.stores.check.differ": "distintos",
  "cli.status.store_fallback": "almacenamiento — {role} → {backend} no responde; responde la copia local ({error}). Véase `brain stores`.",
- "cli.status.store_unsynced": "almacenamiento — {role} → {backend} aún no está sincronizado; responde la copia local hasta `brain stores --sync`."
+ "cli.status.store_unsynced": "almacenamiento — {role} → {backend} aún no está sincronizado; responde la copia local hasta `brain stores --sync`.",
+ "install.stores_title": "Bases de datos dedicadas en Docker (búsqueda vectorial · grafo)",
+ "install.would_docker_store": "iniciar {role} ({image}) en Docker, con sus datos en {data}",
+ "install.stores_up": "{role} en marcha en Docker ({version}) — datos en {data}",
+ "install.stores_failed": "bases de datos en Docker no listas: {why} — la copia local sigue respondiendo",
+ "install.stores_synced": "{role} contiene la copia local ({target})",
+ "cli.stores.docker_line": "docker    {state} · datos en {data}",
+ "cli.stores.docker_up": "en marcha en Docker: {roles} · archivo compose {compose}",
+ "cli.stores.docker_failed": "bases de datos en Docker no iniciadas: {why}",
+ "cli.stores.docker_stopped": "bases de datos en Docker detenidas — los datos siguen en {data}; responde la copia local hasta que vuelvan",
+ "cli.stores.healed": "{role}  la base de datos ya no tenía lo enviado ({held} de {expected}) — rellenada desde la copia local",
+ "cli.stores.bad_role": "los roles son: {roles}"
 }

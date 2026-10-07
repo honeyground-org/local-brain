@@ -631,5 +631,16 @@
  "cli.stores.check.same": "identical",
  "cli.stores.check.differ": "differ",
  "cli.status.store_fallback": "storage — {role} → {backend} is not answering; the local copy answers instead ({error}). See `brain stores`.",
- "cli.status.store_unsynced": "storage — {role} → {backend} is not in sync yet; the local copy answers until `brain stores --sync`."
+ "cli.status.store_unsynced": "storage — {role} → {backend} is not in sync yet; the local copy answers until `brain stores --sync`.",
+ "install.stores_title": "Dedicated databases in Docker (vector search · graph)",
+ "install.would_docker_store": "start {role} ({image}) in Docker, keeping its data in {data}",
+ "install.stores_up": "{role} running in Docker ({version}) — data in {data}",
+ "install.stores_failed": "Docker databases not ready: {why} — the local copy keeps answering",
+ "install.stores_synced": "{role} holds the local copy ({target})",
+ "cli.stores.docker_line": "docker    {state} · data in {data}",
+ "cli.stores.docker_up": "running in Docker: {roles} · compose file {compose}",
+ "cli.stores.docker_failed": "Docker databases not started: {why}",
+ "cli.stores.docker_stopped": "Docker databases stopped — the data stays in {data}; the local copy answers until they are back",
+ "cli.stores.healed": "{role}  the database no longer held what it was sent ({held} of {expected}) — refilled from the local copy",
+ "cli.stores.bad_role": "roles are: {roles}"
 }

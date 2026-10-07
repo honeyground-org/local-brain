@@ -13,6 +13,7 @@ In-memory stand-ins play the dedicated databases, so the contract is checked any
   ⑤ a database not yet in sync never answers; one that fails falls back to the local copy, says so,
      and is not asked again for a while
   ⑥ a choice is a person's: written to config, refused for the wrong role, the environment wins
+  ⑦ a database that lost its data (a Docker reset, a deleted collection) is noticed and refilled
 
 How to run:  PYTHONPATH=. python3 tests/verify_stores.py
 """
@@ -128,6 +129,9 @@ class FakeGraph:
     def remove_edges(self, pairs):
         self.calls["write"] += 1
         self.E -= set(pairs)
+
+    def counts(self):
+        return len(self.nodes), len(self.E)
 
     def _ask(self):
         self.calls["ask"] += 1
@@ -248,6 +252,21 @@ def main() -> int:
     check("…and it is not asked again for a while", FG.calls["ask"] == before)
     FG.fail = False
     stores._DOWN.clear()
+
+    print("\n⑦ a database that lost its data is refilled from the local copy")
+    FV.points.clear()                                    # a Docker reset, a deleted collection …
+    FG.nodes.clear()
+    FG.E.clear()
+    r = stores.sync(db)
+    check("the next sync notices and refills both", r["vector"].get("healed") and r["graph"].get("healed")
+          and len(FV.points) == vecstore.SqliteVectors().count(db, vectors.model_tag(), vectors.DIM)
+          and sorted(FG.E) == graphstore.LOCAL.edges(db), json.dumps({k: v.get("healed") for k, v in r.items()}))
+    r = stores.sync(db)
+    check("…and then there is nothing left to send", r["vector"].get("unchanged") and r["graph"].get("unchanged"))
+    FV.points.popitem()                                  # partly lost is lost too
+    r = stores.sync(db)
+    check("a database missing even one chunk is rebuilt", r["vector"].get("healed")
+          and len(FV.points) == vecstore.SqliteVectors().count(db, vectors.model_tag(), vectors.DIM))
 
     print("\n⑥ a choice is a person's")
     for k in ("BRAIN_VECTOR_STORE", "BRAIN_GRAPH_STORE"):

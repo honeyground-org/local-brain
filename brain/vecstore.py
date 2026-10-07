@@ -167,6 +167,21 @@ def sync(db: sqlite3.Connection, backend, full: bool = False, progress: bool = F
         backend.reset(model, dim)
         stores.ledger_clear(db, "vector", target)
     have = stores.ledger(db, "vector", target)
+    if have and not full:
+        # ★Does the database still hold what the ledger says it was sent★ (2026-10-07) — a collection deleted,
+        # a Docker reset, a restore from an old backup: the ledger would keep the database out of sync forever.
+        expected = sum(int(v.rsplit("|", 1)[1]) for v in have.values())
+        try:
+            held = backend.count(db, model, dim)
+        except stores.StoreError as exc:
+            if "HTTP 404" not in str(exc):
+                raise
+            held = 0
+        if held != expected:
+            backend.reset(model, dim)
+            stores.ledger_clear(db, "vector", target)
+            have = {}
+            stats["healed"] = {"expected": expected, "held": held}
     up = sorted((k for k, v in desired.items() if have.get(k) != v), key=int)
     gone = sorted((k for k in have if k not in desired), key=int)
     if not up and not gone:

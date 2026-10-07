@@ -269,7 +269,8 @@ def serve(db: sqlite3.Connection, role: str, target: str, remote: Callable[[], o
         return remote()
     except StoreError as exc:
         _DOWN[role] = time.time()
-        record(db, role, ok=False, error=str(exc)[:300], fallbacks=int(h.get("fallbacks") or 0) + 1)
+        lost = {"synced": ""} if "HTTP 404" in str(exc) else {}   # it no longer holds this copy — the next sync heals it
+        record(db, role, ok=False, error=str(exc)[:300], fallbacks=int(h.get("fallbacks") or 0) + 1, **lost)
         return local()
 
 

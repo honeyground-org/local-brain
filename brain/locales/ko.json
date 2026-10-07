@@ -629,5 +629,16 @@
  "cli.stores.check.same": "같음",
  "cli.stores.check.differ": "다름",
  "cli.status.store_fallback": "저장소 — {role} → {backend} 가 응답하지 않아 로컬 사본이 대신 답하는 중 ({error}). `brain stores` 참고.",
- "cli.status.store_unsynced": "저장소 — {role} → {backend} 가 아직 동기화 전이라 `brain stores --sync` 전까지 로컬 사본이 답한다."
+ "cli.status.store_unsynced": "저장소 — {role} → {backend} 가 아직 동기화 전이라 `brain stores --sync` 전까지 로컬 사본이 답한다.",
+ "install.stores_title": "도커로 띄우는 전용 DB (벡터 검색 · 그래프)",
+ "install.would_docker_store": "{role} 을 도커로 시작 ({image}), 데이터는 {data} 에 보관",
+ "install.stores_up": "{role} 도커에서 실행 중 ({version}) — 데이터는 {data}",
+ "install.stores_failed": "도커 DB 준비 안 됨: {why} — 로컬 사본이 계속 답한다",
+ "install.stores_synced": "{role} 에 로컬 사본을 채웠다 ({target})",
+ "cli.stores.docker_line": "도커      {state} · 데이터는 {data}",
+ "cli.stores.docker_up": "도커에서 실행 중: {roles} · compose 파일 {compose}",
+ "cli.stores.docker_failed": "도커 DB 를 시작하지 못함: {why}",
+ "cli.stores.docker_stopped": "도커 DB 를 멈췄다 — 데이터는 {data} 에 그대로, 다시 켤 때까지 로컬 사본이 답한다",
+ "cli.stores.healed": "{role}  DB 가 보낸 것을 잃어버렸다 ({expected} 중 {held}) — 로컬 사본으로 다시 채움",
+ "cli.stores.bad_role": "역할은 {roles} 중 하나"
 }

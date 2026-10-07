@@ -629,5 +629,16 @@
  "cli.stores.check.same": "gleich",
  "cli.stores.check.differ": "abweichend",
  "cli.status.store_fallback": "Speicher — {role} → {backend} antwortet nicht; die lokale Kopie antwortet stattdessen ({error}). Siehe `brain stores`.",
- "cli.status.store_unsynced": "Speicher — {role} → {backend} ist noch nicht synchron; die lokale Kopie antwortet bis `brain stores --sync`."
+ "cli.status.store_unsynced": "Speicher — {role} → {backend} ist noch nicht synchron; die lokale Kopie antwortet bis `brain stores --sync`.",
+ "install.stores_title": "Eigene Datenbanken in Docker (Vektorsuche · Graph)",
+ "install.would_docker_store": "{role} ({image}) in Docker starten, Daten in {data}",
+ "install.stores_up": "{role} läuft in Docker ({version}) — Daten in {data}",
+ "install.stores_failed": "Docker-Datenbanken nicht bereit: {why} — die lokale Kopie antwortet weiter",
+ "install.stores_synced": "{role} hält die lokale Kopie ({target})",
+ "cli.stores.docker_line": "Docker    {state} · Daten in {data}",
+ "cli.stores.docker_up": "läuft in Docker: {roles} · Compose-Datei {compose}",
+ "cli.stores.docker_failed": "Docker-Datenbanken nicht gestartet: {why}",
+ "cli.stores.docker_stopped": "Docker-Datenbanken gestoppt — die Daten bleiben in {data}; bis sie zurück sind, antwortet die lokale Kopie",
+ "cli.stores.healed": "{role}  die Datenbank hielt nicht mehr, was sie bekam ({held} von {expected}) — aus der lokalen Kopie neu gefüllt",
+ "cli.stores.bad_role": "Rollen: {roles}"
 }

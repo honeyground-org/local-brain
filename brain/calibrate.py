@@ -455,7 +455,10 @@ def measure(db: sqlite3.Connection) -> dict:
 #   17 (2026-10-07)  graph traversal and similarity search go through ★a chosen store★ (§stores · §graphstore ·
 #       §vecstore). With the default (sqlite) the questions are the same SQL as before; neighbours tied on
 #       score are now taken in document-id order (it was SQLite's row order, which no other store can repeat).
-CODE_GENERATION = 17
+#   18 (2026-10-07)  a sync compares what a dedicated database holds with what its ledger says it was sent and
+#       refills it from the local copy when they differ; an answer of "not found" marks the target out of sync.
+#       No question is answered differently; bumped because `stores` and `graphstore` changed.
+CODE_GENERATION = 18
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·
