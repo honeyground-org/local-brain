@@ -4,6 +4,8 @@
 
 ### What does the AI era need? A brain.
 
+[![CI](https://github.com/honeyground-org/local-brain/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/honeyground-org/local-brain/actions/workflows/ci.yml)
+
 An open-source memory system for coding agents that lives on your machine.<br>
 The right knowledge at the right moment, so work gets more efficient and your agent performs at its best.
 

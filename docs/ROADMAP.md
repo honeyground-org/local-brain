@@ -70,7 +70,10 @@ A memory for coding agents that is **more efficient and performs better than the
   and lets the PR report show a recall number for every pull request.
 - **More reviewers** — area owners for storage, retrieval, privacy and the behaviour layer, so a
   high-impact change no longer needs an admin bypass.
-- **Windows required** — the Windows clean room runs and is shown; make it required once it is green.
+- **Windows required** — the Windows clean room runs in CI and is shown, not required. First run
+  (2026-10-07): 32 green, 15 skipped, 7 red — `verify_docker_stores`, `verify_first_day`, `verify_guard`,
+  `verify_help`, `verify_host_neutral`, `verify_package`, `verify_public_scrub`. Make it required once they
+  are green.
 - Lower `tests/english_only_ratchet.txt` as the remaining Korean data lines move into locale or data files.
 
 ### 2. Quality
