@@ -121,6 +121,28 @@ def compose(*args: str) -> bool:
                           capture_output=True, text=True, env=env, timeout=600).returncode == 0
 
 
+def empty_folder(d: str) -> None:
+    """Empty a folder the containers wrote into.
+
+    ⛔ On Linux those files belong to the container's user (root, or Neo4j's own uid), so
+       `shutil.rmtree(d, ignore_errors=True)` removed nothing and said nothing — and the refill row then
+       measured a database that had never been emptied (CI, 2026-10-07; macOS maps ownership, so it
+       passed there). Delete from inside a container, which may, then remove what is left as ourselves.
+    """
+    if not os.path.isdir(d):
+        return
+    subprocess.run(["docker", "run", "--rm", "--entrypoint", "sh", "-v", "%s:/wipe" % d, dk.IMAGES["qdrant"],
+                    "-c", "rm -rf /wipe/* /wipe/.[!.]* 2>/dev/null; true"], capture_output=True, timeout=300)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def _is_empty(d: str) -> bool:
+    try:
+        return not os.path.exists(d) or not os.listdir(d)
+    except OSError:
+        return False                                    # unreadable is not empty — say so
+
+
 def live() -> None:
     if os.environ.get("BRAIN_TEST_DOCKER") != "1":
         print("\n(④–⑥ skipped — set BRAIN_TEST_DOCKER=1 to start real containers)")
@@ -161,9 +183,11 @@ def live() -> None:
 
         print("\n⑥ the data folders emptied")
         compose("down")
-        for dirs in dk.data_dirs().values():
-            for d in dirs:
-                shutil.rmtree(d, ignore_errors=True)
+        folders = [d for dirs in dk.data_dirs().values() for d in dirs]
+        for d in folders:
+            empty_folder(d)
+        left = [d for d in folders if not _is_empty(d)]
+        check("the data folders are really empty", not left, ", ".join(left))
         r = dk.up()
         s = stores.sync(db)
         check("the next sync notices and refills both", r["ok"] and all(x.get("healed") for x in s.values()),

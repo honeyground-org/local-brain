@@ -34,7 +34,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PASS_THROUGH = ("BRAIN_TEST_QDRANT_URL", "BRAIN_TEST_NEO4J_URL", "NEO4J_PASSWORD", "BRAIN_TEST_DOCKER",
                 "BRAIN_SCRUB_TERMS", "BRAIN_GITLEAKS", "PATH", "SYSTEMROOT", "SYSTEMDRIVE", "COMSPEC",
-                "PATHEXT", "TEMP", "TMP", "LANG", "LC_ALL")
+                "PATHEXT", "TEMP", "TMP", "LANG", "LC_ALL", "TZ")
 
 
 def tracked() -> list:
@@ -62,6 +62,12 @@ def copy_tree(dest: str) -> int:
 
 
 def main(argv) -> int:
+    # ⛔ A Windows console speaks cp1252 and dies on the first ✅ (CI, 2026-10-07) — write UTF-8 regardless.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     keep = "--keep" in argv
     with_pp = "--pythonpath" in argv
     strict = "--strict" in argv

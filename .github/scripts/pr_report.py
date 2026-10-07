@@ -559,6 +559,12 @@ def arg(argv: list, name: str, default=None):
 
 
 def main(argv: list) -> int:
+    # ⛔ A Windows console speaks cp1252 and dies on the first ✅ (CI, 2026-10-07) — write UTF-8 regardless.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     gov = load_governance()
     if "--codeowners" in argv:
         text = codeowners(gov)
