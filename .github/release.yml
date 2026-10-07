@@ -1,0 +1,19 @@
+# Release notes, grouped by the area labels the PR report sets.
+changelog:
+  exclude:
+    labels: ["skip-changelog"]
+  categories:
+    - title: Measurement and retrieval
+      labels: ["area: calibration", "area: retrieval"]
+    - title: Storage
+      labels: ["area: storage"]
+    - title: Privacy and the behaviour layer
+      labels: ["area: privacy", "area: behaviour"]
+    - title: Install, hosts, command line and pages
+      labels: ["area: install", "area: cli", "area: dashboard"]
+    - title: Translations and documentation
+      labels: ["area: i18n", "area: docs"]
+    - title: How the project runs
+      labels: ["area: governance", "area: tests"]
+    - title: Other changes
+      labels: ["*"]

@@ -51,23 +51,27 @@ A memory for coding agents that is **more efficient and performs better than the
 - A measurement never changes shared state that other processes read (trial settings stay in-process).
 - Long-running MCP servers pick up new code on disk by themselves.
 - A fresh clone with an empty home passes every check that does not need personal data
-  (39 green, 14 skipped, 0 red with a local Qdrant running).
+  (`python3 tests/clean_room.py`: 41 green, 13 skipped, 0 red on macOS with a local Qdrant running).
 
-**Release**
+**Release and contribution**
 - Public under Apache-2.0. This repository is the single source: there is no private copy to sync from.
+- Open to contributors (2026-10-07): CI runs the clean room on Linux, macOS and Windows (Python 3.8 –
+  3.13), the live store checks against Qdrant and Neo4j, the Docker check and the release gates on every
+  pull request. The PR rules check the title, the description, the sign-off (DCO) and imports; the PR
+  report classifies the impact and asks the right reviewers; high-impact changes need two approvals
+  including a maintainer and get a deep review. `main` is protected and merges through a merge queue.
+  See CONTRIBUTING.md and GOVERNANCE.md; the roster is `.github/governance.json`.
 
 ## What comes next
 
 ### 1. Open contribution
-- **CI on every pull request** — the clean-room suite (empty home, Python 3.8–3.13, Linux · macOS · Windows),
-  the live store checks against Qdrant and Neo4j service containers, and the release gates
-  (`verify_public_scrub`, `verify_secret_scanner`, `verify_english_only`, `verify_i18n`,
-  `verify_code_generation`).
-- **A public evaluation corpus** — quality checks today run on the author's notes and skip in CI. A
-  synthetic, shareable corpus with labelled questions lets CI catch a change that lowers recall.
-- **Review rules** — protected `main`, required checks and approvals, `CODEOWNERS` for the sensitive areas
-  (calibration, storage, privacy, behaviour layer), a merge queue, a pull-request template that asks for
-  before/after numbers, `CONTRIBUTING.md`, `SECURITY.md`, and DCO sign-off.
+- **A public evaluation corpus** — quality checks today run on the author's notes and skip in CI. A synthetic,
+  shareable corpus with labelled questions lets CI catch a change that lowers recall,
+  and lets the PR report show a recall number for every pull request.
+- **More reviewers** — area owners for storage, retrieval, privacy and the behaviour layer, so a
+  high-impact change no longer needs an admin bypass.
+- **Windows required** — the Windows clean room runs and is shown; make it required once it is green.
+- Lower `tests/english_only_ratchet.txt` as the remaining Korean data lines move into locale or data files.
 
 ### 2. Quality
 - Close the gap to OR'd `grep` on hit rate while keeping the reading load far lower (top-3 against hundreds

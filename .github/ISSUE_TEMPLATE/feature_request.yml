@@ -1,0 +1,29 @@
+name: Proposal
+description: A change in behaviour, a new backend, host or language. Discuss it here before the pull request.
+labels: ["proposal"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard or impossible today, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What would change. Which existing seam does it extend (storage backend, host, locale, engine)?
+    validations:
+      required: true
+  - type: textarea
+    id: measure
+    attributes:
+      label: How we would know it works
+      description: The number that should move, how to measure it, and the check that would fail without it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

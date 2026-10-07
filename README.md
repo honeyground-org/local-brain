@@ -382,10 +382,14 @@ Two kinds live side by side. Most run anywhere on fixtures (`verify_host_neutral
 `verify_corpus_kinds`, `verify_index_roles`, `verify_first_day`, `verify_engines`…). Others measure
 **your own** notes, labelled questions or session history — on a machine without them they stop with
 **exit code 77 (skipped)** and say what is missing, rather than pass on nothing or fail for no reason.
-A fresh clone with an empty home runs 39 green, 14 skipped, 0 red (measured 2026-10-07 with a local
-Qdrant running; without a database the live store check is one more skip).
+`python3 tests/clean_room.py` runs every check the way CI does — the tracked files copied into an
+empty folder, a fresh empty home for each check. Measured 2026-10-07 on macOS: 41 green, 13 skipped,
+0 red (with a local Qdrant running; without one, the live store check is one more skip). CI runs it on
+Linux, macOS and Windows with Python 3.8 – 3.13, and supplies Qdrant, Neo4j and Docker so nothing that
+matters is skipped there.
 
 ```bash
+python3 tests/clean_room.py             # every check below, in a clean room
 python3 tests/verify_recall.py          # recall quality regression
 python3 tests/verify_reachability.py    # "still reachable after removal from the index?"
 python3 tests/verify_vs_grep.py         # ★does it beat grep★ — reads less, hits more
@@ -403,6 +407,7 @@ python3 tests/verify_server_refresh.py  # a long-running MCP server answers with
 python3 tests/verify_stores.py          # vector and graph databases are replaceable: sync, diff, fallback
 python3 tests/verify_stores_live.py     # Qdrant and Neo4j, live: the same answers as the local copy
 python3 tests/verify_docker_stores.py   # Docker: data survives restarts and removed containers, refills itself
+python3 tests/verify_pr_report.py       # the pull-request rules, the review gate and CODEOWNERS can each fail
 ```
 
 ---
@@ -469,6 +474,25 @@ brain privacy                              # → blocked per source: [...]
 Once an embedder is chosen, the default is "everything may be embedded", so meaning-based search
 covers all of your notes; opt out per source or per document as shown above. Until one is chosen,
 `brain engines` and the installer say plainly that it is off and how to turn it on.
+
+## Contributing
+
+local-brain is built in the open, and every change goes through the same path:
+
+```
+proposal issue ──► pull request ──► automatic checks ──► PR report ──► reviewers ──► merge queue ──► main
+ (behaviour       (template:         (clean room on       (impact,       (code owners;   (re-checked on
+  changes)         purpose, effect,    3 OSes, live DBs,    what is         high impact:    the latest main,
+                   extensibility,      Docker, release      missing,        2 incl. a       squash merge)
+                   risks, checks)      gates, PR rules)     deep review)    maintainer)
+```
+
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — set up, the rules every change follows, how to write the pull
+  request, what each automatic check does and how to fix it.
+- **[GOVERNANCE.md](GOVERNANCE.md)** — maintainers and area owners, how impact decides the review, and
+  what an important change has to show before it merges.
+- **[SECURITY.md](SECURITY.md)** — report security problems privately.
+- **[docs/ROADMAP.md](docs/ROADMAP.md)** — where the project is going and the principles behind it.
 
 ## License
 

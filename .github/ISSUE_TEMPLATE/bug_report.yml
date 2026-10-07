@@ -1,0 +1,32 @@
+name: Bug report
+description: Something does not work as documented.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows it. Commands and their output help most.
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of `brain status`
+      description: Remove anything private first — paths, note titles, names.
+      render: text
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: Operating system, Python version, host (Claude Code, Codex, …), storage backends.
+      placeholder: macOS 15 · Python 3.12 · Claude Code · vector=qdrant graph=sqlite
+    validations:
+      required: true

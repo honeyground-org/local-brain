@@ -1,0 +1,104 @@
+# The PR report: one comment that says what a change touches, its impact, what it still needs and who
+# should review it — plus labels, review requests and, for important changes, the deep review.
+#
+# ⛔ `pull_request_target` runs with a token that can write, on pull requests from anyone. So the
+#    workspace is ★the base branch★; the pull request is fetched only as git objects and read as data.
+#    Nothing from the pull request is executed here. See SECURITY.md and the action's docs/security.md.
+name: PR report
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review, labeled]
+
+permissions: {}
+
+concurrency:
+  group: pr-report-${{ github.event.pull_request.number }}-${{ github.event.action == 'labeled' && 'label' || 'report' }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: PR report · impact, areas, reviewers
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    outputs:
+      impact: ${{ steps.report.outputs.impact }}
+      trusted: ${{ steps.report.outputs.trusted }}
+    steps:
+      - uses: actions/checkout@v7            # no `ref:` → the base branch, never the pull request's code
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: fetch the pull request's commits (as data)
+        env:
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: git fetch --no-tags origin "+refs/pull/${NUMBER}/head:refs/remotes/pr/head"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - id: report
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .github/scripts/pr_report.py --comment
+
+  deep-review:
+    name: deep review · purpose, effect, extensibility, risk
+    needs: report
+    # A maintainer asks with the `deep-review` label; it also starts by itself when a collaborator opens
+    # a high-impact change. The action itself refuses anyone without write access.
+    if: >-
+      always() && !github.event.pull_request.draft && (
+        (github.event.action == 'labeled' && github.event.label.name == 'deep-review') ||
+        ((github.event.action == 'opened' || github.event.action == 'ready_for_review') &&
+         needs.report.outputs.impact == 'high' && needs.report.outputs.trusted == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    env:
+      HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    steps:
+      - name: no key configured
+        if: env.HAS_KEY != 'true'
+        run: echo "::notice::deep review skipped — add the ANTHROPIC_API_KEY repository secret to enable it"
+      - uses: actions/checkout@v7            # the base branch at the root: the rules to judge by
+        if: env.HAS_KEY == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v7            # the pull request, as files to read — never run
+        if: env.HAS_KEY == 'true'
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-head
+          persist-credentials: false
+      - name: prompt
+        if: env.HAS_KEY == 'true'
+        id: prompt
+        env:
+          NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo 'text<<__PROMPT__'
+            sed -e "s/{{PR}}/${NUMBER}/g" -e "s#{{REPO}}#${REPO}#g" .github/deep-review.md
+            echo '__PROMPT__'
+          } >> "$GITHUB_OUTPUT"
+      - uses: anthropics/claude-code-action@v1
+        if: env.HAS_KEY == 'true'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: ${{ steps.prompt.outputs.text }}
+          claude_args: >-
+            --model claude-opus-5-5
+            --max-turns 40
+            --add-dir pr-head
+            --allowedTools "Read,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
