@@ -472,7 +472,10 @@ def measure(db: sqlite3.Connection) -> dict:
 #   22 (2026-10-10)  "this is not there" is a type (`stores.StoreGone`), not the text "HTTP 404", so a database
 #       that is not spoken to over HTTP (pgvector) is refilled when its table is gone. Nothing about a
 #       question changed; bumped because `stores` changed.
-CODE_GENERATION = 22
+#   23 (2026-10-10)  the indexer walks folders and files ★in sorted order★, so a fresh index numbers the same
+#       files the same way on every filesystem (ties and the proxy sample follow ids). The same corpus measured
+#       hit@3 0.883 on macOS and 0.833 on Linux before; 0.900 on both after. An existing index keeps its ids.
+CODE_GENERATION = 23
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·
