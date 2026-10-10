@@ -24,7 +24,7 @@
     "storage": {
       "impact": "high",
       "summary": "the SQLite index and the swappable vector and graph databases",
-      "paths": ["brain/store.py", "brain/stores.py", "brain/vecstore.py", "brain/graphstore.py", "brain/dockerstores.py"],
+      "paths": ["brain/store.py", "brain/stores.py", "brain/vecstore.py", "brain/graphstore.py", "brain/dockerstores.py", "brain/backends/"],
       "owners": []
     },
     "behaviour": {

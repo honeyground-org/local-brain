@@ -249,28 +249,71 @@ def step_engines(embed: str, judge: str) -> None:
         say("  " + i18n.t("install.engines_hint"))
 
 
-# ── 3c. dedicated databases in Docker (optional) ───────────────────────────
-def step_stores(mode: str) -> None:
-    """`--stores docker` — Qdrant and Neo4j in Docker, data in a folder of the brain's home (§dockerstores).
+# ── 3c. dedicated databases (optional, one role at a time) ─────────────────
+def store_plan(mode: str, vector: str = "", graph: str = "") -> Dict[str, tuple]:
+    """What the store flags ask for: {role: (backend, url)} — url "" means run it in Docker.
+
+    `--stores docker` = every role's default in Docker (§stores.DOCKER_DEFAULT); `--vector-store NAME` and
+    `--graph-store NAME` choose a role on its own (`NAME=URL` for a server that already runs). A role
+    named on its own wins over `--stores`. Raises ValueError(role, value) for a backend that is not there.
+    """
+    from brain import stores
+    plan = {r: (n, "") for r, n in stores.DOCKER_DEFAULT.items()} if mode == "docker" else {}
+    for role, value in (("vector", vector), ("graph", graph)):
+        if not value:
+            continue
+        name, _, url = value.strip().partition("=")
+        name = name.strip().lower()
+        if name not in stores.names(role):
+            raise ValueError(role, value)
+        if name == "sqlite":
+            plan.pop(role, None)
+        else:
+            plan[role] = (name, url.strip())
+    return plan
+
+
+def step_stores(plan: Dict[str, tuple]) -> None:
+    """Each chosen role: started in Docker with its data in a folder of the brain's home, or pointed at the
+    address given — then filled from the local copy (§dockerstores · §stores).
 
     ⛔ Optional and never automatic: the local SQLite copy answers everything without it. A machine without
-       Docker gets a warning, not a failed install.
+       Docker gets a warning, not a failed install — and a role not named is not touched.
     """
-    if mode != "docker":
+    if not plan:
         return
     from brain import dockerstores, store, stores
     say("\n" + i18n.t("install.stores_title"))
+    in_docker = {r: n for r, (n, url) in plan.items() if not url}
+    for role, name in list(in_docker.items()):
+        if stores.spec(name).docker is None:
+            warn(i18n.t("install.stores_no_docker", backend=name, role=role))
+            del in_docker[role]
     if DRY:
-        dockerstores.up(dry_run=True, say=say)
+        if in_docker:
+            dockerstores.up(in_docker, dry_run=True, say=say)
+        for role, (name, url) in plan.items():
+            if url:
+                _would(i18n.t("install.stores_set", role=role, backend=name, url=url))
         return
-    res = dockerstores.up()
-    if not res["ok"]:
-        warn(i18n.t("install.stores_failed", why=res["why"]))
+    chosen = []
+    if in_docker:
+        res = dockerstores.up(in_docker)
+        if not res["ok"]:
+            warn(i18n.t("install.stores_failed", why=res["why"]))
+        else:
+            chosen += list(in_docker)
+            for role, version in res["roles"].items():
+                ok(i18n.t("install.stores_up", role=role, version="%s %s" % (in_docker[role], version),
+                          data=", ".join(res["data"][role])))
+    for role, (name, url) in plan.items():
+        if url:
+            stores.set_choice(role, name, url)
+            ok(i18n.t("install.stores_set", role=role, backend=name, url=url))
+            chosen.append(role)
+    if not chosen:
         return
-    for role, version in res["roles"].items():
-        ok(i18n.t("install.stores_up", role=role, version=version,
-                  data=", ".join(res["data"][role])))
-    got = stores.sync(store.connect())
+    got = stores.sync(store.connect(), tuple(r for r in stores.ROLES if r in chosen))
     for role, r in got.items():
         if r.get("error"):
             warn(i18n.t("install.stores_failed", why=r["error"]))
@@ -520,8 +563,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="engine for meaning-based search: gemini · openai · none (see `brain engines`)")
     ap.add_argument("--judge", default="", metavar="PROVIDER",
                     help="engine that judges candidates: gemini · openai · anthropic · none")
+    from brain import stores as _st
     ap.add_argument("--stores", default="", choices=["", "local", "docker"],
-                    help="where vector search and the graph run: local (default) · docker (Qdrant + Neo4j)")
+                    help="local (default) · docker = every role's default in Docker (%s)"
+                         % " + ".join("%s %s" % kv for kv in _st.DOCKER_DEFAULT.items()))
+    for role in _st.ROLES:
+        ap.add_argument("--%s-store" % role, default="", metavar="NAME[=URL]",
+                        help="%s: %s — in Docker, or NAME=URL for a server that already runs"
+                             % (role, " · ".join(_st.names(role))))
     ap.add_argument("--lang", default="", help="UI language (en de es fr ja ko)")
     ap.add_argument("--dry-run", action="store_true",
                     help="show what would change and touch NOTHING")
@@ -546,8 +595,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         _save_language(a.lang)
     if not step_index():
         return 1
+    try:
+        plan = store_plan(a.stores, a.vector_store, a.graph_store)
+    except ValueError as exc:
+        role, value = exc.args
+        say(i18n.t("install.stores_bad", role=role, value=value, choices=", ".join(_st.names(role))))
+        return 2
     step_engines(a.embed, a.judge)
-    step_stores(a.stores)
+    step_stores(plan)
     step_mcp()
     step_hooks(a.with_hook, a.with_guard)
     step_schedule(a.with_cron)

@@ -27,6 +27,7 @@
 /pyproject.toml @wangjacsi
 /CONTRIBUTING.md @wangjacsi
 /SETUP-PROMPT.md @wangjacsi
+/brain/backends/ @wangjacsi
 /brain/health.py @wangjacsi
 /brain/rerank.py @wangjacsi
 /brain/search.py @wangjacsi

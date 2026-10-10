@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """★The Docker databases keep their data through a restart, a removal and a reinstall★ (local · budget 0)
 
-## What this holds down (§brain/dockerstores.py)
+## What this holds down (§brain/dockerstores.py) — for ★every backend that declares a Docker image★
 
 Always (no Docker needed):
   ① the compose file keeps the data in ★plain folders under the brain's home★ (no Docker volume — a Docker
-     reset deletes those), binds ports to 127.0.0.1, restarts unless stopped, pins its images, and names the
-     Neo4j password ★without its value★
-  ② the password is generated once (0600), reused, and every other key in secrets.json is kept
+     reset deletes those), binds ports to 127.0.0.1, restarts unless stopped, pins its images, and names
+     every credential ★without its value★
+  ② a generated credential is made once (0600), reused, and every other key in secrets.json is kept
   ③ a dry run starts nothing, writes nothing, and says what it would do
 
-Only with `BRAIN_TEST_DOCKER=1` and a running Docker (it pulls and starts two containers, on other ports,
-under its own project name, and removes them at the end):
-  ④ after `restart`, the same answers — without sending anything again
+Only with `BRAIN_TEST_DOCKER=1` (or `=name,name` for some) and a running Docker — it pulls and starts the
+containers on other ports, under its own project name, and removes them at the end. Each vector backend is
+paired with each graph backend (round-robin); for every pair:
+  ④ after `restart`, the same answers — without sending anything again; starting one role again leaves
+     the other one running and in sync
   ⑤ after the containers are ★removed★ and created again (what a Docker reinstall does), the same answers
      — still without sending anything: the data was in the folders all along
   ⑥ with the data folders emptied, the next sync notices and refills both from the local copy
@@ -36,18 +38,27 @@ sys.path.insert(0, ROOT)
 
 _TMP = tempfile.mkdtemp(prefix="brain-docker-")
 _KEYS = ("BRAIN_HOME", "BRAIN_CONFIG", "BRAIN_EMBED_DIM", "BRAIN_VECTOR_STORE", "BRAIN_GRAPH_STORE",
-         "BRAIN_ADAPTIVE_LEARN", "BRAIN_TRANSLIT_MS", "BRAIN_DOCKER_PROJECT", "BRAIN_QDRANT_PORT",
-         "BRAIN_NEO4J_HTTP_PORT", "BRAIN_NEO4J_BOLT_PORT", "NEO4J_PASSWORD")
+         "BRAIN_ADAPTIVE_LEARN", "BRAIN_TRANSLIT_MS", "BRAIN_DOCKER_PROJECT", "BRAIN_LANG")
 _SAVED = {k: os.environ.get(k) for k in _KEYS}
 os.environ.update(BRAIN_HOME=os.path.join(_TMP, "home"), BRAIN_CONFIG=os.path.join(_TMP, "config.json"),
-                  BRAIN_EMBED_DIM="24", BRAIN_ADAPTIVE_LEARN="0", BRAIN_TRANSLIT_MS="0",
-                  BRAIN_DOCKER_PROJECT="lbverify%s" % uuid.uuid4().hex[:6],
-                  BRAIN_QDRANT_PORT="16333", BRAIN_NEO4J_HTTP_PORT="17474", BRAIN_NEO4J_BOLT_PORT="17687")
-for _k in ("BRAIN_VECTOR_STORE", "BRAIN_GRAPH_STORE", "NEO4J_PASSWORD"):
+                  BRAIN_EMBED_DIM="24", BRAIN_ADAPTIVE_LEARN="0", BRAIN_TRANSLIT_MS="0", BRAIN_LANG="en",
+                  BRAIN_DOCKER_PROJECT="lbverify%s" % uuid.uuid4().hex[:6])
+for _k in ("BRAIN_VECTOR_STORE", "BRAIN_GRAPH_STORE"):
     os.environ.pop(_k, None)
 
-from brain import dockerstores as dk, engines, graphstore, store, stores  # noqa: E402
-from tests import _stores_fixture as fx  # noqa: E402
+from brain import dockerstores as dk, engines, stores  # noqa: E402
+from tests import _store_contract as contract  # noqa: E402
+
+# Every declared port moved by 10000, and every credential variable cleared — the person's own containers
+# (on the usual ports) and passwords are never touched.
+DOCKERABLE = dk.dockerable()
+for _b in DOCKERABLE.values():
+    for _p in _b.docker.ports:
+        _SAVED.setdefault(_p.env, os.environ.get(_p.env))
+        os.environ[_p.env] = str(_p.host + 10000)
+    if _b.secret:
+        _SAVED.setdefault(_b.secret.env, os.environ.get(_b.secret.env))
+        os.environ.pop(_b.secret.env, None)
 
 # ⛔ secrets.json's old location wins while it exists (§engines.secrets_path) — this check must never
 #    write a real person's secrets file, so the path is pinned inside the temp folder.
@@ -64,33 +75,46 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 
 def offline() -> None:
-    print("① the compose file")
-    text = dk.compose_text(("vector", "graph"))
+    print("① the compose file — every backend that runs in Docker")
+    rounds = [dict(stores.DOCKER_DEFAULT)] + [{b.role: n} for n, b in sorted(DOCKERABLE.items())]
     home = os.path.realpath(dk.base_dir())
-    mounts = [l.split('"')[1] for l in text.splitlines() if l.strip().startswith('- "') and ":/" in l
-              and not l.strip().startswith('- "127.')]
-    check("every mount is a plain folder under the brain's home", mounts
-          and all(os.path.realpath(m.split(":/")[0]).startswith(home) for m in mounts), "%d mounts" % len(mounts))
-    check("★no Docker volume★ (a Docker reset deletes those)",
-          not any(l.startswith("volumes:") for l in text.splitlines()))
-    check("ports bound to 127.0.0.1 only", all("127.0.0.1:" in l for l in text.splitlines()
-                                               if l.strip().startswith('- "') and l.count(":") == 2))
-    check("restarts unless stopped (back after a reboot)", text.count("restart: unless-stopped") == 2)
+    for services in rounds:
+        text = dk.compose_text(services)
+        lines, items = text.splitlines(), contract.compose_items(text)
+        what = " + ".join(services.values())
+        mounts, published = items.get("volumes", []), items.get("ports", [])
+        check("%s: every mount is a plain folder under the brain's home" % what, mounts
+              and all(os.path.realpath(contract.mount_host(m)).startswith(home) for m in mounts),
+              "%d mounts" % len(mounts))
+        check("%s: ★no Docker volume★ (a Docker reset deletes those)" % what,
+              not any(l.startswith("volumes:") for l in lines))
+        check("%s: ports bound to 127.0.0.1 only" % what,
+              published and all(p.startswith("127.0.0.1:") for p in published), ", ".join(published))
+        check("%s: restarts unless stopped (back after a reboot)" % what,
+              text.count("restart: unless-stopped") == len(services))
+        envs = [k for n in services.values() for k in stores.spec(n).docker.env]
+        check("%s: credentials named, never assigned" % what,
+              all(k in text and ("%s=" % k) not in text and ("%s:" % k) not in text for k in envs), ", ".join(envs))
+    images = {n: b.docker.image for n, b in DOCKERABLE.items()}
     check("pinned images, never :latest", all(":" in v and "latest" not in v and any(c.isdigit() for c in v)
-                                             for v in dk.IMAGES.values()), json.dumps(dk.IMAGES))
-    check("the Neo4j password is named, never assigned", "NEO4J_AUTH" in text
-          and "NEO4J_AUTH=" not in text and "NEO4J_AUTH:" not in text)
+                                             for v in images.values()), json.dumps(images))
 
-    print("\n② the password")
+    print("\n② a generated credential")
     with open(_SECRETS, "w", encoding="utf-8") as fh:
         json.dump({"gemini_api_key": "keep-me"}, fh)
-    pw = dk.password()
-    mode = stat.S_IMODE(os.stat(_SECRETS).st_mode)
-    data = json.load(open(_SECRETS))
-    check("generated once, private (0600)", len(pw) >= 24 and mode == 0o600, oct(mode))
-    check("every other key is kept", data.get("gemini_api_key") == "keep-me")
-    check("reused, not replaced", dk.password() == pw)
-    check("and the compose file never holds it", pw not in dk.compose_text(("vector", "graph")))
+    gen = [b for b in DOCKERABLE.values() if b.docker.generate_secret]
+    check("there is a backend whose credential brain generates", bool(gen), ", ".join(b.name for b in gen))
+    for b in gen:
+        pw = dk.generated_secret(b)
+        mode = stat.S_IMODE(os.stat(_SECRETS).st_mode)
+        data = json.load(open(_SECRETS))
+        # ⛔ POSIX modes only: Windows keeps secrets.json private through the profile folder's ACL, and
+        #    reports 0o666 for every file whatever its ACL says (issue #3)
+        check("%s: generated once, private (0600%s)" % (b.name, ", POSIX" if os.name != "nt" else " — n/a on Windows"),
+              len(pw) >= 24 and (mode == 0o600 or os.name == "nt"), oct(mode))
+        check("%s: every other key is kept" % b.name, data.get("gemini_api_key") == "keep-me")
+        check("%s: reused, not replaced" % b.name, dk.generated_secret(b) == pw)
+        check("%s: and the compose file never holds it" % b.name, pw not in dk.compose_text({b.role: b.name}))
 
     print("\n③ a dry run")
     real_run, calls = subprocess.run, []
@@ -105,33 +129,27 @@ def offline() -> None:
     check("says what it would do", len(said) == 2 and all("would" in s for s in said), said[0][:90] if said else "")
 
 
-def same(db, label: str) -> None:
-    c = stores.check(db)
-    v, g = c.get("vector", {}), c.get("graph", {})
-    check("%s: identical answers" % label,
-          v.get("queries") and v.get("top1_agree") == v.get("queries") and v.get("overlap_at_10") == 1.0
-          and g.get("neighbors_same") == g.get("docs") and g.get("edges_same"),
-          json.dumps({"vector": {k: v.get(k) for k in ("queries", "top1_agree", "chunks_store", "error")},
-                      "graph": {k: g.get(k) for k in ("docs", "neighbors_same", "edges_store", "error")}}))
+def same(db, roles, label: str) -> None:
+    contract.same(db, roles, check, label)
 
 
-def compose(*args: str) -> bool:
-    env = dict(os.environ, NEO4J_AUTH="neo4j/" + dk.password())
+def compose(services, *args: str) -> bool:
+    env = dict(os.environ, **dk.environment(services, create=False))
     return subprocess.run(["docker", "compose", "-f", dk.compose_path(), "-p", dk.project()] + list(args),
                           capture_output=True, text=True, env=env, timeout=600).returncode == 0
 
 
-def empty_folder(d: str) -> None:
+def empty_folder(d: str, image: str) -> None:
     """Empty a folder the containers wrote into.
 
-    ⛔ On Linux those files belong to the container's user (root, or Neo4j's own uid), so
+    ⛔ On Linux those files belong to the container's user (root, or the database's own uid), so
        `shutil.rmtree(d, ignore_errors=True)` removed nothing and said nothing — and the refill row then
        measured a database that had never been emptied (CI, 2026-10-07; macOS maps ownership, so it
        passed there). Delete from inside a container, which may, then remove what is left as ourselves.
     """
     if not os.path.isdir(d):
         return
-    subprocess.run(["docker", "run", "--rm", "--entrypoint", "sh", "-v", "%s:/wipe" % d, dk.IMAGES["qdrant"],
+    subprocess.run(["docker", "run", "--rm", "--user", "0:0", "--entrypoint", "sh", "-v", "%s:/wipe" % d, image,
                     "-c", "rm -rf /wipe/* /wipe/.[!.]* 2>/dev/null; true"], capture_output=True, timeout=300)
     shutil.rmtree(d, ignore_errors=True)
 
@@ -143,58 +161,93 @@ def _is_empty(d: str) -> bool:
         return False                                    # unreadable is not empty — say so
 
 
+def chosen_rounds() -> list:
+    """[{role: backend}] — each vector backend paired with each graph backend, round-robin."""
+    want = os.environ.get("BRAIN_TEST_DOCKER", "")
+    pick = None if want == "1" else {x.strip() for x in want.split(",") if x.strip()}
+    per = {r: sorted(n for n, b in DOCKERABLE.items() if b.role == r and (pick is None or n in pick))
+           for r in stores.ROLES}
+    roles = [r for r in stores.ROLES if per[r]]
+    if not roles:
+        return []
+    return [{r: per[r][i % len(per[r])] for r in roles} for i in range(max(len(per[r]) for r in roles))]
+
+
+def live_round(services: dict) -> None:
+    roles = tuple(services)
+    what = " + ".join("%s %s" % kv for kv in services.items())
+    db, _mem = contract.prepare(os.path.join(_TMP, "-".join(services.values())), {})
+    try:
+        print("\n④ [%s] up, sync, restart" % what)
+        r = dk.up(services)
+        check("the databases start and answer", r["ok"], json.dumps(r.get("roles") or r.get("why")))
+        if not r["ok"]:
+            return
+        s = stores.sync(db, roles)
+        check("the first sync sends the local copy", not any(x.get("error") for x in s.values()), json.dumps(s)[:200])
+        same(db, roles, "after the first sync")
+        check("restart", compose(services, "restart") and all(dk.ready(services).values()))
+        s = stores.sync(db, roles)
+        check("after a restart nothing needs sending", all(x.get("unchanged") for x in s.values()),
+              json.dumps({k: (x.get("unchanged"), x.get("healed")) for k, x in s.items()}))
+        same(db, roles, "after a restart")
+        if len(roles) == 2:
+            last = roles[-1]
+            c = stores.choice(last)
+            stores.set_choice(last, c["backend"], c["url"], {"managed": "docker", "namespace": "kept"})
+            stores.sync(db, roles)
+            r = dk.up({last: services[last]})
+            check("starting it again keeps the options chosen for it",
+                  stores.choice(last)["options"].get("namespace") == "kept", json.dumps(stores.choice(last)["options"]))
+            running = {x["service"]: x["state"] for x in dk.status()}
+            check("starting the %s role again leaves the %s role's container running" % (last, roles[0]),
+                  r["ok"] and running.get(services[roles[0]]) == "running", json.dumps(running))
+            s = stores.sync(db, roles)
+            check("…and nothing needs sending to either", all(x.get("unchanged") for x in s.values()),
+                  json.dumps({k: x.get("unchanged") for k, x in s.items()}))
+
+        print("\n⑤ [%s] the containers removed and created again (what a Docker reinstall does)" % what)
+        check("containers removed", compose(services, "down") and not dk.status())
+        r = dk.up(services)
+        check("created again from the same folders", r["ok"], json.dumps(r.get("why", "")))
+        s = stores.sync(db, roles)
+        check("★nothing needs sending — the data survived the containers★",
+              all(x.get("unchanged") for x in s.values()),
+              json.dumps({k: (x.get("unchanged"), x.get("healed")) for k, x in s.items()}))
+        same(db, roles, "after the containers were recreated")
+
+        print("\n⑥ [%s] the data folders emptied" % what)
+        compose(services, "down")
+        folders = []
+        for name in services.values():
+            b = stores.spec(name)
+            for d in dk.data_dirs(b):
+                empty_folder(d, b.docker.image)
+                folders.append(d)
+        left = [d for d in folders if not _is_empty(d)]
+        check("the data folders are really empty", not left, ", ".join(left))
+        r = dk.up(services)
+        s = stores.sync(db, roles)
+        check("the next sync notices and refills both", r["ok"] and all(x.get("healed") for x in s.values()),
+              json.dumps({k: x.get("healed") for k, x in s.items()}))
+        same(db, roles, "after refilling")
+    finally:
+        compose(services, "down", "--remove-orphans")
+        db.close()
+
+
 def live() -> None:
-    if os.environ.get("BRAIN_TEST_DOCKER") != "1":
+    if not os.environ.get("BRAIN_TEST_DOCKER") or os.environ.get("BRAIN_TEST_DOCKER") == "0":
         print("\n(④–⑥ skipped — set BRAIN_TEST_DOCKER=1 to start real containers)")
         return
     state = dk.available()
     if not state["ok"]:
         print("\n(④–⑥ skipped — %s)" % state["why"])
         return
-    fx.write_corpus(_TMP)
-    db = store.connect()
-    store.reindex(db, recalibrate=False, refresh_history=False)
-    fx.fill_vectors(db)
-    fx.fill_questions(db)
-    try:
-        print("\n④ up, sync, restart")
-        r = dk.up()
-        check("both databases start and answer", r["ok"], json.dumps(r.get("roles") or r.get("why")))
-        if not r["ok"]:
-            return
-        s = stores.sync(db)
-        check("the first sync sends the local copy", not any(x.get("error") for x in s.values()))
-        same(db, "after the first sync")
-        check("restart", compose("restart") and dk._wait_ready(("vector", "graph"), dk.password()) and True)
-        s = stores.sync(db)
-        check("after a restart nothing needs sending", all(x.get("unchanged") for x in s.values()),
-              json.dumps({k: (x.get("unchanged"), x.get("healed")) for k, x in s.items()}))
-        same(db, "after a restart")
-
-        print("\n⑤ the containers removed and created again (what a Docker reinstall does)")
-        check("containers removed", compose("down") and not dk.status())
-        r = dk.up()
-        check("created again from the same folders", r["ok"])
-        s = stores.sync(db)
-        check("★nothing needs sending — the data survived the containers★",
-              all(x.get("unchanged") for x in s.values()),
-              json.dumps({k: (x.get("unchanged"), x.get("healed")) for k, x in s.items()}))
-        same(db, "after the containers were recreated")
-
-        print("\n⑥ the data folders emptied")
-        compose("down")
-        folders = [d for dirs in dk.data_dirs().values() for d in dirs]
-        for d in folders:
-            empty_folder(d)
-        left = [d for d in folders if not _is_empty(d)]
-        check("the data folders are really empty", not left, ", ".join(left))
-        r = dk.up()
-        s = stores.sync(db)
-        check("the next sync notices and refills both", r["ok"] and all(x.get("healed") for x in s.values()),
-              json.dumps({k: x.get("healed") for k, x in s.items()}))
-        same(db, "after refilling")
-    finally:
-        compose("down")
+    rounds = chosen_rounds()
+    check("there is something to run", bool(rounds), os.environ.get("BRAIN_TEST_DOCKER", ""))
+    for services in rounds:
+        live_round(services)
 
 
 def main() -> int:

@@ -43,6 +43,10 @@ A memory for coding agents that is **more efficient and performs better than the
 **Storage**
 - Vector search and graph traversal can each be served by a dedicated database: `vector` = sqlite · Qdrant,
   `graph` = sqlite · Neo4j. A ledger sends only the difference; a database answers only once it is in sync.
+- A backend is one file in `brain/backends/` (2026-10-10): its choice, option flags, Docker container,
+  installer flags and status line come from its declaration, and `verify_store_adapters` proves it by
+  dropping two new backends into a copy of brain. Each role installs on its own
+  (`--vector-store`, `--graph-store`, `NAME=URL`). What a backend is sent is decided by its role.
 - `brain stores --docker` runs both in Docker with the data in plain folders under the brain's home, so
   removing containers or reinstalling Docker keeps it; a database that comes back empty is refilled.
 - Measured on the author's notes (1,917 documents): identical answers on every question compared,
@@ -52,7 +56,7 @@ A memory for coding agents that is **more efficient and performs better than the
 - A measurement never changes shared state that other processes read (trial settings stay in-process).
 - Long-running MCP servers pick up new code on disk by themselves.
 - A fresh clone with an empty home passes every check that does not need personal data
-  (`python3 tests/clean_room.py`: 41 green, 13 skipped, 0 red on macOS with a local Qdrant running).
+  (`python3 tests/clean_room.py`: 42 green, 13 skipped, 0 red on macOS with a local Qdrant running, 2026-10-10).
 
 **Release and contribution**
 - Public under Apache-2.0. This repository is the single source: there is no private copy to sync from.
@@ -87,8 +91,8 @@ A memory for coding agents that is **more efficient and performs better than the
 - Verify Windows on real hardware.
 
 ### 3. Storage
-- More backends, one class each: pgvector, Chroma, Milvus (vector); Memgraph (graph).
-- Per-role installer flags (`--vector-store`, `--graph-store`) next to the existing `--stores docker`.
+- More backends, one file each (docs/STORAGE.md): Memgraph (graph — needs a Bolt client in the standard
+  library); pgvector (needs the Postgres wire protocol), Chroma, Milvus (vector).
 
 ### 4. Checks to tighten
 - `verify_vs_grep` should skip (exit 77) when there is no evaluation set, and honour `BRAIN_EVAL_DIR`.

@@ -35,7 +35,7 @@ The principles are in [docs/ROADMAP.md](docs/ROADMAP.md#principles-every-change-
 |---|---|
 | **Measured, not assumed** | A change is done when it wins under the same conditions against what was there before. Put the numbers in the description. |
 | **Checks that can fail** | A new behaviour comes with a check in `tests/verify_*.py` that includes a control case which *must* be red. A check that cannot fail proves nothing. |
-| **Standard library only** | No third-party imports. Each storage backend speaks its service's HTTP API with `urllib`. The PR rules reject a new import outside the standard library. |
+| **Standard library only** | No third-party imports. Each storage backend speaks its database's own protocol with the standard library (one file in `brain/backends/` — [docs/STORAGE.md](docs/STORAGE.md)). The PR rules reject a new import outside the standard library. |
 | **English in the repository** | Code, comments, docs, commit messages. Text a user reads goes through `brain/locales/` — all six languages, literal keys (`i18n.t("cli.x.y")`). |
 | **Measurement code is versioned** | The modules in `brain/calibrate.py` → `RULER_MODULES` decide the threshold. Change one and bump `CODE_GENERATION` in the same pull request, or CI fails. |
 | **Nothing tuned to one person** | Every number is measured on the user's own data or chosen by them — never copied from someone's notes. |
@@ -98,7 +98,7 @@ Open it as a **draft** while you are still working; the checks run, nobody is as
 |---|---|---|---|
 | **clean room** (Linux, macOS; Windows shown) | every push | every `tests/verify_*.py` on the tracked files with an empty home, Python 3.8 – 3.13 | the log names the check; reproduce with `python3 tests/clean_room.py <name>` |
 | **live databases** | every push | the same answers from Qdrant and Neo4j as from the local copy | see `tests/verify_stores_live.py` |
-| **databases in Docker** | every push | data survives removing and recreating the containers | see `tests/verify_docker_stores.py` |
+| **databases in Docker** | every push | for every backend that declares an image: the whole contract, and data that survives removing and recreating the containers | see `tests/verify_docker_stores.py` |
 | **release gates** | every push | measurement code bumped, no secrets (gitleaks), no personal data, history included | the step says which file and line |
 | **PR rules** | title, description, push | title format, description sections, sign-off, standard-library imports | the summary lists each problem |
 | **review gate** | push, every review | enough of the right approvals for the impact | waits until they arrive — not something you fix |

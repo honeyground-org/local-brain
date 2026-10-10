@@ -16,9 +16,11 @@ history or keys. This runs exactly that, the same way locally and in CI:
     python3 tests/clean_room.py --strict verify_stores_live   # a skip is a failure (CI, where the
                                                                # databases are supposed to be there)
 
-Some checks reach outside on purpose and are skipped unless asked for: `verify_stores_live` (needs Qdrant /
-Neo4j — set BRAIN_TEST_QDRANT_URL / NEO4J_PASSWORD) and the Docker half of `verify_docker_stores`
-(BRAIN_TEST_DOCKER=1). Those variables are passed through; nothing else from your environment is.
+Some checks reach outside on purpose and are skipped unless asked for: `verify_stores_live` (needs a running
+database — BRAIN_TEST_<BACKEND>_URL, BRAIN_TEST_<BACKEND>_SECRET or e.g. NEO4J_PASSWORD) and the Docker half
+of `verify_docker_stores` (BRAIN_TEST_DOCKER=1). Every `BRAIN_TEST_…` variable and the few named below are
+passed through — so a new storage backend's test address needs no edit here; nothing else from your
+environment is.
 
 Standard library only; macOS, Linux and Windows.
 """
@@ -32,9 +34,14 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PASS_THROUGH = ("BRAIN_TEST_QDRANT_URL", "BRAIN_TEST_NEO4J_URL", "NEO4J_PASSWORD", "BRAIN_TEST_DOCKER",
-                "BRAIN_SCRUB_TERMS", "BRAIN_GITLEAKS", "PATH", "SYSTEMROOT", "SYSTEMDRIVE", "COMSPEC",
-                "PATHEXT", "TEMP", "TMP", "LANG", "LC_ALL", "TZ")
+PASS_THROUGH = ("NEO4J_PASSWORD", "BRAIN_SCRUB_TERMS", "BRAIN_GITLEAKS", "PATH", "SYSTEMROOT", "SYSTEMDRIVE",
+                "COMSPEC", "PATHEXT", "TEMP", "TMP", "LANG", "LC_ALL", "TZ")
+PASS_PREFIX = "BRAIN_TEST_"        # a check's own switches and addresses (§verify_pr_report: never a paid key)
+
+
+def passed(environ) -> dict:
+    """What a check sees of the environment."""
+    return {k: v for k, v in environ.items() if k in PASS_THROUGH or k.startswith(PASS_PREFIX)}
 
 
 def tracked() -> list:
@@ -89,7 +96,7 @@ def main(argv) -> int:
     for name in checks:
         home = os.path.join(homes, name)
         os.makedirs(home)
-        env = {k: os.environ[k] for k in PASS_THROUGH if k in os.environ}
+        env = passed(os.environ)
         env.update(HOME=home, USERPROFILE=home, PYTHONIOENCODING="utf-8", LANG=env.get("LANG", "en_US.UTF-8"))
         if with_pp:
             env["PYTHONPATH"] = code

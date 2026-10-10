@@ -14,6 +14,10 @@ In-memory stand-ins play the dedicated databases, so the contract is checked any
      and is not asked again for a while
   ⑥ a choice is a person's: written to config, refused for the wrong role, the environment wins
   ⑦ a database that lost its data (a Docker reset, a deleted collection) is noticed and refilled
+  ⑧ document names are the role's decision, not the backend's: none unless `names` is on, and then
+     scrubbed before any backend sees them
+
+Every backend in `brain/backends/` is held to the same contract by `tests/verify_store_adapters.py`.
 
 How to run:  PYTHONPATH=. python3 tests/verify_stores.py
 """
@@ -94,10 +98,11 @@ class FakeVectors:
 
 class FakeGraph:
     """A graph database in memory — every answer is computed from the nodes and edges it was sent."""
-    backend, remote, names = "neo4j", True, False
+    backend, remote = "neo4j", True
 
     def __init__(self):
         self.nodes, self.E, self.calls, self.fail = set(), set(), {"ask": 0, "write": 0}, False
+        self.labels = {}                                 # what it was told each node is called
 
     def target(self):
         return "fake-graph"
@@ -115,6 +120,7 @@ class FakeGraph:
     def upsert_nodes(self, nodes):
         self.calls["write"] += 1
         self.nodes |= {d for d, _ in nodes}
+        self.labels.update(dict(nodes))
 
     def delete_nodes(self, ids):
         self.calls["write"] += 1
@@ -286,11 +292,41 @@ def main() -> int:
     os.environ["BRAIN_VECTOR_STORE"] = "sqlite"
     check("the environment wins over config", stores.choice("vector")["backend"] == "sqlite"
           and stores.choice("vector")["source"] == "env")
-    os.environ["BRAIN_VECTOR_STORE"] = "chroma"
+    for bad in (("vector", "qdrant", {"database": "x"}), ("graph", "neo4j", {"exact": True})):
+        try:
+            stores.set_choice(bad[0], bad[1], "", bad[2])
+            check("refused: %s takes no option %s" % (bad[1], list(bad[2])[0]), False)
+        except ValueError as exc:
+            check("refused: %s takes no option %s" % (bad[1], list(bad[2])[0]), "takes no option" in str(exc))
+    e = stores.set_choice("graph", "neo4j", "", {"names": True, "namespace": "team"})
+    check("a role's own options are taken by every backend of the role", e.get("names") is True
+          and e.get("namespace") == "team" and stores.opt(stores.choice("graph"), "namespace") == "team")
+    check("an option not set reads as the default its backend declares",
+          stores.opt(stores.choice("graph"), "database") == "neo4j"
+          and stores.opt({"backend": "qdrant", "options": {}}, "collection_prefix") == "brain")
+    os.environ["BRAIN_VECTOR_STORE"] = "no_such_database"
     check("an unknown backend is named, and the local copy answers",
           stores.choice("vector")["error"] == "unknown" and isinstance(vecstore.make(stores.choice("vector")),
                                                                      vecstore.SqliteVectors))
     os.environ.pop("BRAIN_VECTOR_STORE")
+
+    print("\n⑧ document names are the role's decision")
+    os.environ["BRAIN_GRAPH_STORE"] = "neo4j"
+    stores.set_choice("graph", "neo4j")                  # names off
+    secretish = "ops-" + "AKIA" + "Q" * 16                  # built here, so no scanner sees a key in this file
+    fx.write_note(mem, secretish, "Links to [[alpha_overview]].")
+    index(db)
+    stores.sync(db, ("graph",), full=True)
+    check("names off → every backend is handed \"\" for every name", FG.labels
+          and set(FG.labels.values()) == {""}, "%d nodes" % len(FG.labels))
+    stores.set_choice("graph", "neo4j", "", {"names": True})
+    stores.sync(db, ("graph",), full=True)
+    got = set(FG.labels.values())
+    check("names on → names are sent", "alpha_overview" in got and "theta_log" in got)
+    check("…★and scrubbed first★ — a key in a name never reaches the backend",
+          not any("AKIA" in n for n in got) and any(n.startswith("ops-") for n in got),
+          " · ".join(sorted(n for n in got if n.startswith("ops-"))))
+    os.environ.pop("BRAIN_GRAPH_STORE")
 
     print("\n" + "=" * 78)
     if FAILS:

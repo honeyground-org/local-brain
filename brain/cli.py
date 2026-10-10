@@ -179,20 +179,25 @@ def stores_text(db) -> str:
                 sync = i18n.t("cli.stores.in_sync") if r.get("in_sync") else i18n.t("cli.stores.not_synced")
                 out.append("         " + i18n.t("cli.stores.status.reachable", version=ping.get("version", ""),
                                                 held=r.get("held", 0), local=r["local_count"], sync=sync))
-            if (r.get("options") or {}).get("managed") == "docker":
+            spec = r.get("spec")
+            if (r.get("options") or {}).get("managed") == "docker" and spec and spec.docker:
                 from brain import dockerstores as _dk
-                state = {x["service"]: x["state"] for x in _dk.status()}.get(_dk.SERVICE[role], "") or "-"
+                state = {x["service"]: x["state"] for x in _dk.status()}.get(spec.name, "") or "-"
                 out.append("         " + i18n.t("cli.stores.docker_line", state=state,
-                                                data=", ".join(_dk.data_dirs()[_dk.SERVICE[role]])))
-            spec = _st.BACKENDS.get(r["backend"], {})
-            if r["backend"] == "neo4j" and not _st.secret(r):
-                out.append("         " + i18n.t("cli.stores.secret_hint", env=spec["secret_env"],
-                                                field=spec["secret_field"], path=_en.secrets_path()))
+                                                data=", ".join(_dk.data_dirs(spec))))
+            if spec and spec.secret and spec.secret.required and not _st.secret(r):
+                out.append("         " + i18n.t("cli.stores.secret_hint", env=spec.secret.env,
+                                                field=spec.secret.field, path=_en.secrets_path()))
             h = r.get("health") or {}
             if h.get("ok") is False and h.get("error"):
                 out.append("         " + i18n.t("cli.stores.last_error", at=h.get("at", ""), error=h["error"][:160]))
         out.append("")
-    out.append(i18n.t("cli.stores.choices"))
+    for module, why in _st.broken():
+        out.append(i18n.t("cli.stores.broken", module=module, why=why))
+    if _st.broken():
+        out.append("")
+    out.append(i18n.t("cli.stores.choices", choices="      ".join(
+        "%s = %s" % (role, " · ".join(_st.names(role))) for role in _st.ROLES)))
     out.append(i18n.t("cli.stores.how_to_change"))
     return "\n".join(out)
 
@@ -355,17 +360,23 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("stores",
                        help="Storage backends — which database serves vector search and the graph")
+    from brain import stores as _st
+    choices = "; ".join("%s = %s" % (r, " · ".join(_st.names(r))) for r in _st.ROLES)
     p.add_argument("--set", nargs="+", default=[], metavar="ROLE=BACKEND",
-                   help="e.g. vector=qdrant graph=neo4j (or =sqlite, the local copy)")
+                   help="choose a backend per role (%s); sqlite is the local copy" % choices)
     p.add_argument("--url", default="", help="the database's address, e.g. http://localhost:6333")
-    p.add_argument("--collection-prefix", default="", help="qdrant: collection name prefix (default brain)")
-    p.add_argument("--exact", action="store_true",
-                   help="qdrant: brute-force search inside Qdrant (the same answers as the local scan)")
-    p.add_argument("--database", default="", help="neo4j: database name (default neo4j)")
-    p.add_argument("--user", default="", help="neo4j: user (default neo4j); the password comes from NEO4J_PASSWORD")
-    p.add_argument("--names", action="store_true", help="neo4j: also send document names (off by default)")
-    p.add_argument("--docker", nargs="*", metavar="ROLE", default=None,
-                   help="run the databases in Docker (both, or: vector · graph); data stays in a folder of your own")
+    # ★one flag per option a backend or a role declares★ — a new backend's options appear here by themselves
+    for name, f in sorted(_st.option_flags().items()):
+        flag = "--" + name.replace("_", "-")
+        if f["kind"] is bool:
+            p.add_argument(flag, dest="opt_" + name, action="store_true", default=None, help=" · ".join(f["help"]))
+        else:
+            p.add_argument(flag, dest="opt_" + name, type=f["kind"], default=None, metavar="VALUE",
+                           help=" · ".join(f["help"]))
+    p.add_argument("--docker", nargs="*", metavar="ROLE|BACKEND", default=None,
+                   help="run databases in Docker — both roles' defaults, or per role: vector · graph · "
+                        "graph=NAME · NAME (%s); data stays in a folder of your own"
+                        % " · ".join(sorted(n for n, b in _st.backends().items() if b.docker)))
     p.add_argument("--docker-stop", action="store_true",
                    help="stop the Docker databases (the data stays; the local copy answers meanwhile)")
     p.add_argument("--sync", action="store_true", help="push the local copy to the chosen databases")
@@ -637,11 +648,13 @@ def main(argv=None) -> int:
         from brain import stores as _st
         if args.docker is not None:
             from brain import dockerstores as _dk
-            roles = args.docker or list(_st.ROLES)
-            if any(r not in _st.ROLES for r in roles):
-                print(i18n.t("cli.stores.bad_role", roles=", ".join(_st.ROLES)))
+            try:
+                wanted = _dk.resolve(args.docker) if args.docker else dict(_st.DOCKER_DEFAULT)
+            except ValueError as exc:
+                print(i18n.t("cli.stores.bad_docker", token=str(exc), roles=", ".join(_st.ROLES),
+                             backends=", ".join(sorted(_dk.dockerable()))))
                 return 2
-            res = _dk.up(roles)
+            res = _dk.up(wanted)
             if not res["ok"]:
                 print(i18n.t("cli.stores.docker_failed", why=res["why"]))
                 return 1
@@ -658,15 +671,11 @@ def main(argv=None) -> int:
             except ValueError as exc:
                 print(str(exc))
                 return 2
-            has_opts = (args.url or args.collection_prefix or args.exact or args.database or args.user
-                        or args.names)
-            if has_opts and len(want) != 1:
+            opts = {k[4:]: v for k, v in vars(args).items() if k.startswith("opt_") and v is not None}
+            if (args.url or opts) and len(want) != 1:
                 print(i18n.t("cli.stores.one_role_for_options"))
                 return 2
             for role, backend in want.items():
-                opts = ({"collection_prefix": args.collection_prefix, "exact": True if args.exact else None}
-                        if role == "vector" else
-                        {"database": args.database, "user": args.user, "names": True if args.names else None})
                 try:
                     entry = _st.set_choice(role, backend, args.url, opts)
                 except ValueError as exc:
