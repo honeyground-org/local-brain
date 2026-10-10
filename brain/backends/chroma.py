@@ -76,7 +76,7 @@ class ChromaVectors:
         try:
             self._call("DELETE", "/collections/%s" % name, timeout=stores.SYNC_TIMEOUT)
         except stores.StoreError as exc:
-            if "HTTP 404" not in str(exc):
+            if not stores.gone(exc):
                 raise
 
     def reset(self, model: str, dim: int) -> None:

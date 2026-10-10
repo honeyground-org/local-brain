@@ -469,7 +469,10 @@ def measure(db: sqlite3.Connection) -> dict:
 #       (§hosts.utf8_stdio), and git's output is decoded as UTF-8. On macOS and Linux nothing changes; on
 #       Windows the hook's prompt and a Korean commit message are no longer read as garbage. Bumped because
 #       `hook` and `store` changed.
-CODE_GENERATION = 21
+#   22 (2026-10-10)  "this is not there" is a type (`stores.StoreGone`), not the text "HTTP 404", so a database
+#       that is not spoken to over HTTP (pgvector) is refilled when its table is gone. Nothing about a
+#       question changed; bumped because `stores` changed.
+CODE_GENERATION = 22
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

@@ -41,7 +41,8 @@ A memory for coding agents that is **more efficient and performs better than the
   matcher that fires them.
 
 **Storage**
-- Vector search and graph traversal can each be served by a dedicated database: `vector` = sqlite · Qdrant · Chroma,
+- Vector search and graph traversal can each be served by a dedicated database: `vector` = sqlite · Qdrant · Chroma ·
+  pgvector (over brain's own Postgres client, `brain/backends/_pgwire.py`),
   `graph` = sqlite · Neo4j · Memgraph (over brain's own Bolt client, `brain/backends/_bolt.py`). A ledger sends only the difference; a database answers only once it is in sync.
 - A backend is one file in `brain/backends/` (2026-10-10): its choice, option flags, Docker container,
   installer flags and status line come from its declaration, and `verify_store_adapters` proves it by
@@ -56,7 +57,7 @@ A memory for coding agents that is **more efficient and performs better than the
 - A measurement never changes shared state that other processes read (trial settings stay in-process).
 - Long-running MCP servers pick up new code on disk by themselves.
 - A fresh clone with an empty home passes every check that does not need personal data
-  (`python3 tests/clean_room.py`: 44 green, 13 skipped, 0 red on macOS with a local Qdrant running, 2026-10-10).
+  (`python3 tests/clean_room.py`: 45 green, 13 skipped, 0 red on macOS with a local Qdrant running, 2026-10-10).
 
 **Release and contribution**
 - Public under Apache-2.0. This repository is the single source: there is no private copy to sync from.
@@ -89,8 +90,8 @@ A memory for coding agents that is **more efficient and performs better than the
   there, §hosts.utf8_stdio), but no person has run brain inside Claude Code or Codex on Windows yet.
 
 ### 3. Storage
-- More backends, one file each (docs/STORAGE.md): pgvector (needs the Postgres wire protocol), Milvus
-  (vector); another Bolt database is one file now that the client exists.
+- More backends, one file each (docs/STORAGE.md): Milvus (vector); another Bolt or Postgres database (Apache
+  AGE for the graph role, for example) is one file now that both clients exist.
 
 ### 4. Checks to tighten
 - `verify_vs_grep` should skip (exit 77) when there is no evaluation set, and honour `BRAIN_EVAL_DIR`.

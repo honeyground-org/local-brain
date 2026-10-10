@@ -300,7 +300,7 @@ Two kinds of question have databases built for them, and brain lets each one be 
 
 | Role | What it answers | Backends | What is sent |
 |---|---|---|---|
-| `vector` | similarity search over note embeddings | `sqlite` (default) · `qdrant` · `chroma` | the vectors and `{doc_id, chunk_no}`, never text |
+| `vector` | similarity search over note embeddings | `sqlite` (default) · `qdrant` · `chroma` · `pgvector` | the vectors and `{doc_id, chunk_no}`, never text |
 | `graph` | the links between notes: neighbours, incoming links, link targets | `sqlite` (default) · `neo4j` · `memgraph` | document ids and links; names only with `--names` |
 
 What is sent is decided by the role, not by the backend: a backend is handed only that, so it cannot send
@@ -343,7 +343,8 @@ brain stores --docker-stop                 # stop them; the data stays, and the 
 ```
 
 - What to run comes from each backend's own declaration: a pinned image (`qdrant/qdrant:v1.19.2`,
-  `neo4j:5.26.31-community`, `memgraph/memgraph:3.13.2`, `chromadb/chroma:1.5.9`), ports bound to 127.0.0.1 only,
+  `neo4j:5.26.31-community`, `memgraph/memgraph:3.13.2`, `chromadb/chroma:1.5.9`,
+  `pgvector/pgvector:0.8.7-pg17`), ports bound to 127.0.0.1 only,
   `restart: unless-stopped`. One service per
   role: starting one leaves the other running; replacing a role's backend removes the old container and
   keeps its data folder.
@@ -406,7 +407,7 @@ Two kinds live side by side. Most run anywhere on fixtures (`verify_host_neutral
 **your own** notes, labelled questions or session history — on a machine without them they stop with
 **exit code 77 (skipped)** and say what is missing, rather than pass on nothing or fail for no reason.
 `python3 tests/clean_room.py` runs every check the way CI does — the tracked files copied into an
-empty folder, a fresh empty home for each check. Measured 2026-10-10 on macOS: 44 green, 13 skipped,
+empty folder, a fresh empty home for each check. Measured 2026-10-10 on macOS: 45 green, 13 skipped,
 0 red (with a local Qdrant running; without one, the live store check is one more skip). CI runs it on
 Linux, macOS and Windows with Python 3.8 – 3.13, and supplies Qdrant, Neo4j and Docker so nothing that
 matters is skipped there.
