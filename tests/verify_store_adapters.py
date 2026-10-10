@@ -331,9 +331,11 @@ check("the status screen shows it answering and in sync", rc == 0 and "plugvec @
       and "plug depth 3" in screen and screen.count("in sync, answering") == 2, screen[:600])
 check("the choices line lists it", "vector = sqlite · plugvec · qdrant" in screen and "pluggraph" in screen)
 text = dk.compose_text({"vector": "plugvec"})
+items = contract.compose_items(text)
 check("`--docker plugvec` would run its pinned image on 127.0.0.1, data under the brain's home, secret by name",
-      "example.invalid/plugvec:1.0" in text and '"127.0.0.1:7001:7001"' in text
-      and os.path.join(dk.base_dir(), "plugvec") in text and "- PLUGVEC_KEY " in text and "PLUGVEC_KEY=" not in text)
+      "example.invalid/plugvec:1.0" in text and items.get("ports") == ["127.0.0.1:7001:7001"]
+      and [contract.mount_host(m) for m in items.get("volumes", [])] == [os.path.join(dk.base_dir(), "plugvec")]
+      and items.get("environment") == ["PLUGVEC_KEY"] and "PLUGVEC_KEY=" not in text, json.dumps(items))
 check("`--docker plugvec` resolves to the vector role", dk.resolve(["plugvec"]) == {"vector": "plugvec"})
 
 print("\n   the whole contract, against the two new files")
