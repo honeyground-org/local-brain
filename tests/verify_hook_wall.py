@@ -96,7 +96,7 @@ def _run(shape: str, doc, log: str, lockdb: str = "") -> dict:
     p = subprocess.run([sys.executable, drv, shape, str(doc[0]) if doc else "",
                         doc[1] if doc else "", log, lockdb, str(BLOCK)],
                        capture_output=True, text=True, timeout=BLOCK + 15,
-                       env=dict(os.environ, ROOT=ROOT))
+                       env=dict(os.environ, ROOT=ROOT), encoding="utf-8", errors="replace")
     rec = []
     if os.path.exists(log):
         with open(log, encoding="utf-8") as fh:

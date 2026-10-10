@@ -64,7 +64,7 @@ def _run(home, args):
                 "BRAIN_HOME": os.path.join(home, ".claude", "brain"),
                 "BRAIN_CONFIG": os.path.join(home, ".claude", "brain", "config.json")})
     return subprocess.run([sys.executable, "-m", "brain.install"] + args,
-                          capture_output=True, text=True, env=env, cwd=ROOT, timeout=180)
+                          capture_output=True, text=True, env=env, cwd=ROOT, timeout=180, encoding="utf-8", errors="replace")
 
 
 def main():

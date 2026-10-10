@@ -83,7 +83,7 @@ def _git(*args):
     """Run git in the repository root · (ok, text). Never raises — no git means ★skipped★, not passed."""
     import subprocess
     try:
-        p = subprocess.run(("git",) + args, cwd=ROOT, capture_output=True, text=True, timeout=20)
+        p = subprocess.run(("git",) + args, cwd=ROOT, capture_output=True, text=True, timeout=20, encoding="utf-8", errors="replace")
     except (OSError, ValueError):
         return False, ""
     return p.returncode == 0, p.stdout

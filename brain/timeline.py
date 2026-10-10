@@ -57,7 +57,7 @@ def _commits(days: int, limit: int) -> List[dict]:
             p = subprocess.run(
                 ["git", "-C", repo, "log", "--no-merges", "--since", since,
                  "-n", str(limit), "--format=%ad%x01%s%x01%an", "--date=short"],
-                capture_output=True, text=True, timeout=30)
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         except Exception:                                    # noqa: BLE001
             continue
         for line in p.stdout.splitlines():

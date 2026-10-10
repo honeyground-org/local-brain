@@ -116,7 +116,7 @@ def offline() -> None:
     for b in gen:
         pw = dk.generated_secret(b)
         mode = stat.S_IMODE(os.stat(_SECRETS).st_mode)
-        data = json.load(open(_SECRETS))
+        data = json.load(open(_SECRETS, encoding="utf-8"))
         # ⛔ POSIX modes only: Windows keeps secrets.json private through the profile folder's ACL, and
         #    reports 0o666 for every file whatever its ACL says (issue #3)
         check("%s: generated once, private (0600%s)" % (b.name, ", POSIX" if os.name != "nt" else " — n/a on Windows"),
@@ -145,7 +145,7 @@ def same(db, roles, label: str) -> None:
 def compose(services, *args: str) -> bool:
     env = dict(os.environ, **dk.environment(services, create=False))
     return subprocess.run(["docker", "compose", "-f", dk.compose_path(), "-p", dk.project()] + list(args),
-                          capture_output=True, text=True, env=env, timeout=600).returncode == 0
+                          capture_output=True, text=True, env=env, timeout=600, encoding="utf-8", errors="replace").returncode == 0
 
 
 def empty_folder(d: str, image: str) -> None:
@@ -195,7 +195,7 @@ def live_round(services: dict) -> None:
         for name in services.values():
             off = stores.spec(name).docker.telemetry_off or ()
             got = subprocess.run(["docker", "inspect", "--format", "{{json .Config.Env}} {{json .Args}}",
-                                  "%s-%s" % (dk.project(), name)], capture_output=True, text=True).stdout
+                                  "%s-%s" % (dk.project(), name)], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
             check("%s: the running container has its usage reporting turned off" % name,
                   all(json.dumps(s) in got for s in off), ", ".join(off) or "(reports nothing)")
         s = stores.sync(db, roles)

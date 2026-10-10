@@ -140,7 +140,7 @@ def _env(home: str, lang_env: dict) -> dict:
 
 def _py(env: dict, code: str, timeout: int = 240):
     return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                          env=env, cwd=ROOT, timeout=timeout)
+                          env=env, cwd=ROOT, timeout=timeout, encoding="utf-8", errors="replace")
 
 
 def first_day(tmp: str, label: str, lang_env: dict, n_docs: int = N_DOCS) -> None:
@@ -160,7 +160,7 @@ def first_day(tmp: str, label: str, lang_env: dict, n_docs: int = N_DOCS) -> Non
         d for d in env.get("PATH", "").split(os.pathsep)
         if not os.path.exists(os.path.join(d, "claude"))))
     r = subprocess.run([sys.executable, "-m", "brain.install", "--with-guard"],
-                       capture_output=True, text=True, env=ienv, cwd=ROOT, timeout=300)
+                       capture_output=True, text=True, env=ienv, cwd=ROOT, timeout=300, encoding="utf-8", errors="replace")
     check("the installer runs to completion on a clean machine", r.returncode == 0,
           "exit %d%s" % (r.returncode, (" · " + (r.stderr or "")[-90:]) if r.returncode else ""))
 
@@ -246,7 +246,7 @@ def first_day(tmp: str, label: str, lang_env: dict, n_docs: int = N_DOCS) -> Non
         body = json.dumps({"tool_name": "Bash", "session_id": "first-day",
                            "tool_input": {"command": cmd_text}})
         return subprocess.run(wired[0], shell=True, input=body, capture_output=True, text=True,
-                              env=env, timeout=60)
+                              env=env, timeout=60, encoding="utf-8", errors="replace")
     if wired:
         for cmd_text in ("terraform plan", "git push origin main", "git rebase origin/main"):
             hr = _hook(cmd_text)

@@ -197,7 +197,7 @@ def environment(services: Dict[str, str], create: bool = True) -> Dict[str, str]
 
 # ── Docker itself ───────────────────────────────────────────────────────────
 def _docker(args: List[str], env: Optional[dict] = None, timeout: float = 600) -> subprocess.CompletedProcess:
-    return subprocess.run(["docker"] + args, capture_output=True, text=True, env=env, timeout=timeout)
+    return subprocess.run(["docker"] + args, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=timeout)
 
 
 def available() -> dict:

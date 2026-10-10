@@ -84,7 +84,7 @@ def main():
     check("  and it says ★why it's red★", "by hand" in j["why"], j["why"][:60])
 
     # ── wiring-only check (kickstart / catch-up): launchd fired, but not at the scheduled time ──
-    open(ld_log, "w").close()                             # launchd-only log = just now
+    open(ld_log, "w", encoding="utf-8").close()                             # launchd-only log = just now
     j = _run(log, _probe(runs=1, stdout=ld_log))
     # ⛔ ★one requirement was folded here★ (2026-09-01) — at first it required "a kickstart wake
     #    is also not green." That requirement was only possible because the window was narrowed to ±5min.

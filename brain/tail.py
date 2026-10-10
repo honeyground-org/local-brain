@@ -68,9 +68,24 @@ _COMMIT_RE = re.compile(r"git\s+(?:-C\s+\S+\s+)?(?:commit|push)\b")
 # Raising the threshold instead of fixing what is counted would miss the real 3 code cases.
 # ⛔ ★The system's own temp folder★, not one host's folder name — an agent's scratch space sits under
 #    it (`$TMPDIR` on macOS, `/tmp` elsewhere). It used to list Claude Code's `/scratchpad/` by name.
+def _norm(p: str) -> str:
+    """One shape for a path, so a comparison holds on every platform: case folded where the filesystem
+    ignores case, `/` as the separator.
+
+    ⛔ Windows (CI, 2026-10-10): the temp folder is a short 8.3 path (`…\\RUNNER~1\\AppData\\Local\\Temp`),
+       a transcript writes backslashes, and `realpath` turns the short name into the long one — so the
+       `/`-only markers below matched nothing there, and a scratch file counted as a tail.
+    """
+    return os.path.normcase(p).replace("\\", "/")
+
+
+def _dir(p: str) -> str:
+    return _norm(p).rstrip("/") + "/"
+
+
 _THROWAWAY = tuple(dict.fromkeys(
     ("/private/tmp/", "/tmp/", "/var/folders/", "/.git/", "/node_modules/", "/__pycache__/",
-     os.path.realpath(tempfile.gettempdir()).rstrip("/") + "/")))
+     _dir(tempfile.gettempdir()), _dir(os.path.realpath(tempfile.gettempdir())))))
 
 
 def _pending_dir() -> str:
@@ -87,7 +102,7 @@ def _cfg() -> dict:
 def _memory_root() -> str:
     for s in _cfg().get("sources", []):
         if s.get("name") == "memory" and s.get("path"):
-            return os.path.expanduser(s["path"]).rstrip("/") + "/"
+            return _dir(os.path.expanduser(s["path"]))
     return ""
 
 
@@ -95,15 +110,14 @@ def _is_memory_path(fp: str) -> bool:
     # Any index file counts, not only the one this brain reads — a host can keep one per project, and
     # a session that wrote to another project's index did remember something (no false alarm).
     root = _memory_root()
-    return bool(root and fp.startswith(root)) or os.path.basename(fp) == store.index_file_name()
+    return bool(root and fp.startswith(root)) or fp.rsplit("/", 1)[-1] == _norm(store.index_file_name())
 
 
 def _indexed_roots() -> list[str]:
     """The roots the brain indexes — `config.json` is canonical (not nailed into the code)."""
     # ⛔ Do not put a personal path in the fallback — if config cannot be read, judge conservatively
     #    as "not an indexed document" (better than judging on a wrong path).
-    return [os.path.expanduser(s["path"]).rstrip("/") + "/"
-            for s in _cfg().get("sources", []) if s.get("path")]
+    return [_dir(os.path.expanduser(s["path"])) for s in _cfg().get("sources", []) if s.get("path")]
 
 
 _ROOTS: list[str] | None = None
@@ -128,6 +142,7 @@ def _classify(fp: str) -> str:
     """'save' = left something the brain will read · 'code' = a tail · 'skip' = throwaway.
     ⛔ A write the brain will read is a save ★wherever it lives★ — checked before the temp-folder rule, so a
        memory folder that happens to sit under a temp directory is not thrown away."""
+    fp = _norm(fp)
     if _is_memory_path(fp) or _is_indexed_doc(fp):
         return "save"
     if any(m in fp for m in _THROWAWAY):
@@ -149,7 +164,7 @@ def _path(session_id: str) -> str:
 
 def load(session_id: str) -> dict | None:
     try:
-        with open(_path(session_id)) as f:
+        with open(_path(session_id), encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return None
@@ -159,7 +174,7 @@ def save(rec: dict) -> None:
     os.makedirs(_pending_dir(), exist_ok=True)
     p = _path(rec["session_id"])
     tmp = p + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(rec, f, ensure_ascii=False)
     os.replace(tmp, p)          # so the next session never reads a half-written file
 
@@ -184,7 +199,7 @@ def scan(transcript: str, rec: dict) -> dict:
         offset, tail, saves = 0, _blank_tail(), 0
 
     try:
-        with open(transcript, errors="replace") as f:
+        with open(transcript, encoding="utf-8", errors="replace") as f:
             f.seek(offset)
             for line in f:
                 if not line.endswith("\n"):     # the last line has not finished being written yet
@@ -290,7 +305,7 @@ def collect(current_session: str) -> list[dict]:
             continue
         p = os.path.join(_pending_dir(), n)
         try:
-            with open(p) as f:
+            with open(p, encoding="utf-8") as f:
                 rec = json.load(f)
         except (OSError, ValueError):
             continue
@@ -450,18 +465,21 @@ def main_notice() -> int:
 #    with no arguments is kept separate — an entry point cannot be passed arguments.
 def cli_stop() -> int:
     from brain import hosts
+    hosts.utf8_stdio()
     hosts.pin_from_argv()                                # the log is read in the calling host's shape
     return _safe(main_stop)
 
 
 def cli_end() -> int:
     from brain import hosts
+    hosts.utf8_stdio()
     hosts.pin_from_argv()
     return _safe(main_end)
 
 
 def cli_notice() -> int:
     from brain import hosts
+    hosts.utf8_stdio()
     hosts.pin_from_argv()                                # ★the session-start hook says who called it★
     return _safe(main_notice)
 

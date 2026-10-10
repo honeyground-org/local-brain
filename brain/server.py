@@ -379,6 +379,8 @@ def _requests():
 
 
 def serve() -> int:
+    from brain import hosts
+    hosts.utf8_stdio()                                   # replies go out as UTF-8 JSON (§hosts.utf8_stdio)
     db = None
     for line in _requests():
         if line is None:                              # about to become the new code (§_requests)

@@ -244,6 +244,8 @@ def fallback(db, prompt: str, strict: bool = False, cache: bool = True):
 
 
 def main() -> int:
+    from brain import hosts
+    hosts.utf8_stdio()                                   # ⛔ before the payload is read (§hosts.utf8_stdio)
     t0 = time.time()
     # ★which host launched us★ — written by the installer as `--host <name>`. Without it, a machine
     # with two hosts installed falls back to "the first one found" and reads the other one's world.

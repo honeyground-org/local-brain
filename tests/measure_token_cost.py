@@ -104,7 +104,7 @@ def usage_volume():
             continue
         sessions += 1
         try:
-            with open(fp, errors="replace") as fh:
+            with open(fp, errors="replace", encoding="utf-8") as fh:
                 for line in fh:
                     if '"type":"user"' not in line and '"type": "user"' not in line:
                         continue

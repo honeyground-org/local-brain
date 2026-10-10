@@ -278,7 +278,7 @@ def main() -> int:
     for k in ("BRAIN_VECTOR_STORE", "BRAIN_GRAPH_STORE"):
         os.environ.pop(k)
     entry = stores.set_choice("vector", "qdrant", "http://127.0.0.1:6333/", {"exact": True, "collection_prefix": ""})
-    cfg = json.load(open(os.environ["BRAIN_CONFIG"]))
+    cfg = json.load(open(os.environ["BRAIN_CONFIG"], encoding="utf-8"))
     check("written to config.json, without empty options", cfg["stores"]["vector"] == entry
           == {"backend": "qdrant", "url": "http://127.0.0.1:6333", "exact": True}, json.dumps(entry))
     check("read back from config", stores.choice("vector")["backend"] == "qdrant"

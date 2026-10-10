@@ -150,7 +150,7 @@ def memory_folder() -> None:
     for d, n in ((small, 1), (big, 3)):
         os.makedirs(d, exist_ok=True)
         for i in range(n):
-            open(os.path.join(d, "n%d.md" % i), "w").close()
+            open(os.path.join(d, "n%d.md" % i), "w", encoding="utf-8").close()
     hosts._active = None
     found = {c.path for c in discover.find_host_memory()}
     check("every detected host's memory folders are found (Codex's too)",
@@ -166,7 +166,7 @@ def memory_folder() -> None:
     seed = os.path.join(ROOT, "brain", "templates", "MEMORY.seed.md")
     planted = os.path.join(want, "NOTES.md")
     check("…with the seed that ships planted as the configured index file",
-          os.path.isfile(planted) and open(planted).read() == open(seed).read(), planted)
+          os.path.isfile(planted) and open(planted, encoding="utf-8").read() == open(seed, encoding="utf-8").read(), planted)
     with open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8") as fh:
         check("the seed ships in the package (package-data names it)", "templates/*.md" in fh.read())
 
@@ -245,6 +245,8 @@ def main() -> int:
           tail._classify(os.path.join(PROJ, "MEMORY.md")) == "code")
     check("the system temp folder is throwaway",
           tail._classify(os.path.join(tempfile.gettempdir(), "probe.py")) == "skip")
+    check("…written with backslashes, as a Windows transcript writes it, too",
+          tail._classify(os.path.join(tempfile.gettempdir(), "probe.py").replace("/", "\\")) == "skip")
     check("the eval sample is in the eval folder",
           scorecard._short_json() == os.path.join(os.environ["BRAIN_EVAL_DIR"], "short.json"),
           scorecard._short_json())

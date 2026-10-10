@@ -262,7 +262,7 @@ def git_repos() -> List[str]:
             continue
         try:
             r = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"],
-                               capture_output=True, text=True, timeout=10)
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
             top = r.stdout.strip()
             if top and top not in seen:
                 seen.append(top)
@@ -808,7 +808,7 @@ def _git_pointers(max_per_repo: int = 400):
             p = subprocess.run(
                 ["git", "-C", repo, "log", "--no-merges", "-n", str(max_per_repo),
                  "--format=%x02%ad%x01%h%x01%s", "--date=short", "--name-only"],
-                capture_output=True, text=True, timeout=90)
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90)
         except Exception:                                # noqa: BLE001
             continue
         if p.returncode != 0:
@@ -910,7 +910,7 @@ def why(path: str, db: sqlite3.Connection, limit: int = 3,
         try:
             p = subprocess.run(["git", "-C", meta["repo_path"], "show", "-s",
                                 "--format=%b", meta["sha"]],
-                               capture_output=True, text=True, timeout=15)
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
             if p.returncode == 0:
                 body = " ".join(p.stdout.split())[:body_chars]
         except Exception:                                # noqa: BLE001

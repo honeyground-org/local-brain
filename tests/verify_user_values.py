@@ -63,7 +63,7 @@ def child(code: str, **env) -> dict:
     for k, v in list(e.items()):
         if v is None:
             e.pop(k)
-    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=e, timeout=120)
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=e, timeout=120, encoding="utf-8", errors="replace")
     try:
         return json.loads(r.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
