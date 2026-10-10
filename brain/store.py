@@ -514,7 +514,13 @@ def _is_worktree(path: str) -> bool:
 
 
 def iter_source_files(cfg: dict) -> Iterable[Tuple[str, str, str]]:
-    """(path, source, root) — walks only what the configuration names. A new corpus is one config.json entry."""
+    """(path, source, root) — walks only what the configuration names. A new corpus is one config.json entry.
+
+    ⛔ ★In sorted order★ — a document's id is the order it was first indexed in, and ties in a ranking and the
+       proxy sample (§proxy.build: `ORDER BY id`) follow ids. `os.walk` yields what the filesystem yields:
+       sorted on macOS, hash order on Linux, so the same corpus and the same code measured hit@3 0.883 on one
+       and 0.833 on the other (2026-10-10). Sorted, a fresh index numbers the same files the same way anywhere.
+    """
     for entry in cfg.get("sources", []):
         root = os.path.expanduser(entry["path"])
         source = entry["name"]
@@ -528,11 +534,11 @@ def iter_source_files(cfg: dict) -> Iterable[Tuple[str, str, str]]:
         for dirpath, dirnames, filenames in os.walk(root):
             if dirpath.count(os.sep) - base_depth >= depth:
                 dirnames[:] = []
-            dirnames[:] = [d for d in dirnames
-                           if not d.startswith(".") and d not in
-                           ("node_modules", "vendor", "dist", "build", "__pycache__")
-                           and not _is_worktree(os.path.join(dirpath, d))]
-            for fn in filenames:
+            dirnames[:] = sorted(d for d in dirnames
+                                 if not d.startswith(".") and d not in
+                                 ("node_modules", "vendor", "dist", "build", "__pycache__")
+                                 and not _is_worktree(os.path.join(dirpath, d)))
+            for fn in sorted(filenames):
                 p = os.path.join(dirpath, fn)
                 if not any(_match(fn, pat) for pat in include):
                     continue
