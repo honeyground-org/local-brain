@@ -18,6 +18,8 @@ paired with each graph backend (round-robin); for every pair:
   ⑤ after the containers are ★removed★ and created again (what a Docker reinstall does), the same answers
      — still without sending anything: the data was in the folders all along
   ⑥ with the data folders emptied, the next sync notices and refills both from the local copy
+  ⑦ the whole contract against the containers (§tests/_store_contract): an edit and a removal through
+     indexing, a full rebuild, a lost copy refilled, an outage answered by the local copy
 
 How to run:  PYTHONPATH=. python3 tests/verify_docker_stores.py
              BRAIN_TEST_DOCKER=1 PYTHONPATH=. python3 tests/verify_docker_stores.py
@@ -183,7 +185,7 @@ def chosen_rounds() -> list:
 def live_round(services: dict) -> None:
     roles = tuple(services)
     what = " + ".join("%s %s" % kv for kv in services.items())
-    db, _mem = contract.prepare(os.path.join(_TMP, "-".join(services.values())), {})
+    db, mem = contract.prepare(os.path.join(_TMP, "-".join(services.values())), {})
     try:
         print("\n④ [%s] up, sync, restart" % what)
         r = dk.up(services)
@@ -244,6 +246,9 @@ def live_round(services: dict) -> None:
         check("the next sync notices and refills both", r["ok"] and all(x.get("healed") for x in s.values()),
               json.dumps({k: x.get("healed") for k, x in s.items()}))
         same(db, roles, "after refilling")
+
+        print("\n⑦ [%s] the whole contract, against the containers" % what)
+        contract.run(db, mem, roles, check)
     finally:
         compose(services, "down", "--remove-orphans")
         db.close()

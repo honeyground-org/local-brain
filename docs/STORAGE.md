@@ -63,7 +63,8 @@ options (`namespace` for both roles, `names` for the graph) are taken by every b
 - **graph** — `target · ping · ensure · reset · drop · upsert_nodes · delete_nodes · add_edges ·
   remove_edges · counts` and the five questions `neighbors · incoming · linked · targets · edges`.
   A database that speaks openCypher can subclass `brain/backends/_cypher.py`'s `CypherGraph` and
-  supply only `run()` and `ping()` — `neo4j.py` is the example.
+  supply only `run()` and `ping()` — `neo4j.py` (over HTTP) and `memgraph.py` (over Bolt, with
+  `brain/backends/_bolt.py`) are the examples.
 
 Rules that hold for every backend:
 
