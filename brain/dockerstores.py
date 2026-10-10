@@ -136,14 +136,19 @@ def compose_text(services: Dict[str, str]) -> str:
                 "    restart: unless-stopped"]
         if d.user == "host" and hasattr(os, "getuid"):
             out.append("    user: %s" % json.dumps("%d:%d" % (os.getuid(), os.getgid())))
-        if d.command:
-            out.append("    command: %s" % json.dumps(list(d.command)))
+        env, args = d.settings()
+        if args:
+            out.append("    command: %s" % json.dumps(list(args)))
         out.append("    ports:")
         out += ["      - %s" % json.dumps("127.0.0.1:%d:%d" % (p[x.name], x.container)) for x in d.ports]
-        if d.env:
+        if env:
             out.append("    environment:")
-            out += ["      - %s          # passed by name: the value comes from the environment, never the file" % k
-                    for k in sorted(d.env)]
+            for k in sorted(env):
+                if "{secret}" in env[k]:
+                    out.append("      - %s          # passed by name: the value comes from the environment, "
+                               "never the file" % k)
+                else:
+                    out.append("      - %s" % json.dumps("%s=%s" % (k, env[k])))
         out.append("    volumes:")
         out += ["      - %s" % json.dumps("%s:%s" % (host, path))
                 for host, (_, path) in zip(data_dirs(b), d.data)]
@@ -186,7 +191,7 @@ def environment(services: Dict[str, str], create: bool = True) -> Dict[str, str]
     for name in services.values():
         b = stores.spec(name)
         sec = _secret_of(b, create)
-        env.update({k: v.replace("{secret}", sec) for k, v in b.docker.env.items()})
+        env.update({k: v.replace("{secret}", sec) for k, v in b.docker.env.items() if "{secret}" in v})
     return env
 
 

@@ -43,8 +43,9 @@ BACKEND = stores.Backend(
         image="example/mygraph:2.4.1",    # pinned: a version tag (or a digest), never latest
         ports=(stores.Port("api", 9999, "BRAIN_MYGRAPH_PORT"),),     # bound to 127.0.0.1
         data=(("data", "/var/lib/mygraph"),),                        # <brain home>/stores/mygraph/data
-        env={"MYGRAPH_AUTH": "admin/{secret}"},                     # handed to Docker by name only
-        generate_secret=True),            # brain creates the password once, in secrets.json (0600)
+        env={"MYGRAPH_AUTH": "admin/{secret}"},                     # a {secret} value goes by name only
+        generate_secret=True,             # brain creates the password once, in secrets.json (0600)
+        telemetry_off=("MYGRAPH_TELEMETRY=off",)),                  # required — () if it reports nothing
 )
 ```
 
@@ -76,6 +77,10 @@ Rules that hold for every backend:
 - **Only what the role hands you leaves the machine.** A vector backend receives vectors and
   `{doc_id, chunk_no}`; a graph backend receives document ids, links, and a name only when the person
   turned `names` on — already scrubbed. Do not read the index yourself to send more.
+- **Nothing reports home.** Many database images send usage statistics by default (Qdrant, Neo4j and
+  Memgraph all do). `telemetry_off` is required: the variable (`NAME=VALUE`) or argument
+  (`--flag=value`) that turns it off, or `()` when the image has none — find it in the image's
+  configuration, then confirm in its log or settings that it took effect.
 - **Standard library only.** Speak the database's own protocol (`stores.http_json` for HTTP). A wire
   protocol several backends would share goes in a `_`-prefixed module next to them.
 

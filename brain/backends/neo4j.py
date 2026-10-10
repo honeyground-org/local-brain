@@ -51,5 +51,6 @@ BACKEND = stores.Backend(
                          ports=(stores.Port("http", 7474, "BRAIN_NEO4J_HTTP_PORT"),
                                 stores.Port("bolt", 7687, "BRAIN_NEO4J_BOLT_PORT")),
                          data=(("data", "/data"), ("logs", "/logs")),
-                         env={"NEO4J_AUTH": "neo4j/{secret}"}, generate_secret=True),
+                         env={"NEO4J_AUTH": "neo4j/{secret}"}, generate_secret=True,
+                         telemetry_off=("NEO4J_dbms_usage__report_enabled=false",)),   # on by default
 )

@@ -463,7 +463,9 @@ def measure(db: sqlite3.Connection) -> dict:
 #       sync instead of inside the Neo4j class. The local copy's questions are the same SQL and every
 #       target string is unchanged (an existing install stays in sync); bumped because `stores` and
 #       `graphstore` changed.
-CODE_GENERATION = 19
+#   20 (2026-10-10)  a backend that runs in Docker must declare how its image's own usage reporting is turned
+#       off (`stores.Docker.telemetry_off`). Nothing about a question changed; bumped because `stores` changed.
+CODE_GENERATION = 20
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

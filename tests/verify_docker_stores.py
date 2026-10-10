@@ -92,9 +92,16 @@ def offline() -> None:
               published and all(p.startswith("127.0.0.1:") for p in published), ", ".join(published))
         check("%s: restarts unless stopped (back after a reboot)" % what,
               text.count("restart: unless-stopped") == len(services))
-        envs = [k for n in services.values() for k in stores.spec(n).docker.env]
+        envs = [k for n in services.values() for k, v in stores.spec(n).docker.env.items() if "{secret}" in v]
         check("%s: credentials named, never assigned" % what,
               all(k in text and ("%s=" % k) not in text and ("%s:" % k) not in text for k in envs), ", ".join(envs))
+    for name, b in sorted(DOCKERABLE.items()):
+        text = dk.compose_text({b.role: name})
+        items = contract.compose_items(text)
+        off = b.docker.telemetry_off or ()
+        check("%s: its own usage reporting is turned off (%s)" % (name, ", ".join(off) or "reports nothing"),
+              b.docker.telemetry_off is not None and all(
+                  (s in text) if s.startswith("--") else (s in items.get("environment", [])) for s in off))
     images = {n: b.docker.image for n, b in DOCKERABLE.items()}
     check("pinned images, never :latest", all(":" in v and "latest" not in v and any(c.isdigit() for c in v)
                                              for v in images.values()), json.dumps(images))
@@ -183,6 +190,12 @@ def live_round(services: dict) -> None:
         check("the databases start and answer", r["ok"], json.dumps(r.get("roles") or r.get("why")))
         if not r["ok"]:
             return
+        for name in services.values():
+            off = stores.spec(name).docker.telemetry_off or ()
+            got = subprocess.run(["docker", "inspect", "--format", "{{json .Config.Env}} {{json .Args}}",
+                                  "%s-%s" % (dk.project(), name)], capture_output=True, text=True).stdout
+            check("%s: the running container has its usage reporting turned off" % name,
+                  all(json.dumps(s) in got for s in off), ", ".join(off) or "(reports nothing)")
         s = stores.sync(db, roles)
         check("the first sync sends the local copy", not any(x.get("error") for x in s.values()), json.dumps(s)[:200])
         same(db, roles, "after the first sync")

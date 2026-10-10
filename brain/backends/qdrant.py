@@ -111,5 +111,6 @@ BACKEND = stores.Backend(
              stores.Option("exact", False, "brute-force search inside Qdrant — the same answers as the local scan")),
     docker=stores.Docker(image="qdrant/qdrant:v1.19.2",
                          ports=(stores.Port("api", 6333, "BRAIN_QDRANT_PORT"),),
-                         data=(("", "/qdrant/storage"),)),
+                         data=(("", "/qdrant/storage"),),
+                         telemetry_off=("QDRANT__TELEMETRY_DISABLED=true",)),   # on by default
 )
