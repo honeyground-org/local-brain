@@ -109,6 +109,11 @@ def main(argv) -> int:
         mark = "✅" if rc == 0 else "⏭ " if skip else "❌"
         print("  %s %-34s %5.1fs%s" % (mark, name, time.time() - t, "" if rc == 0 or skip else "  (exit %d)" % rc),
               flush=True)
+        if only:
+            # a check asked for by name says what it measured, so a green in CI's log is evidence, not a mark
+            with open(os.path.join(logs, name + ".log"), encoding="utf-8", errors="replace") as fh:
+                last = [l.strip() for l in fh if l.strip()][-1:] or [""]
+            print("       └ %s" % last[0][:160], flush=True)
     failed = [c for c, rc in results.items() if rc != 0 and (strict or rc != 77)]
     print("\npass %d · skipped %d · fail %d"
           % (sum(1 for r in results.values() if r == 0), sum(1 for r in results.values() if r == 77 and not strict), len(failed)))
