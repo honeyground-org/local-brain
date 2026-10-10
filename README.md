@@ -301,7 +301,7 @@ Two kinds of question have databases built for them, and brain lets each one be 
 | Role | What it answers | Backends | What is sent |
 |---|---|---|---|
 | `vector` | similarity search over note embeddings | `sqlite` (default) · `qdrant` | the vectors and `{doc_id, chunk_no}`, never text |
-| `graph` | the links between notes: neighbours, incoming links, link targets | `sqlite` (default) · `neo4j` | document ids and links; names only with `--names` |
+| `graph` | the links between notes: neighbours, incoming links, link targets | `sqlite` (default) · `neo4j` · `memgraph` | document ids and links; names only with `--names` |
 
 What is sent is decided by the role, not by the backend: a backend is handed only that, so it cannot send
 more. Each backend is one file in `brain/backends/` — see [Adding a storage backend](docs/STORAGE.md).
@@ -338,12 +338,13 @@ with Qdrant, and one-hop neighbours for every document **3.4 s → 0.48 s** with
 ./install.sh --stores docker               # at install time: every role's default (Qdrant, Neo4j)
 ./install.sh --graph-store neo4j           # or one role on its own; NAME=URL for a server that already runs
 brain stores --docker                      # any time later: both defaults
-brain stores --docker graph=neo4j          # or one role, with the backend you name; the other keeps running
+brain stores --docker graph=memgraph       # or one role, with the backend you name; the other keeps running
 brain stores --docker-stop                 # stop them; the data stays, and the local copy answers meanwhile
 ```
 
 - What to run comes from each backend's own declaration: a pinned image (`qdrant/qdrant:v1.19.2`,
-  `neo4j:5.26.31-community`), ports bound to 127.0.0.1 only, `restart: unless-stopped`. One service per
+  `neo4j:5.26.31-community`, `memgraph/memgraph:3.13.2`), ports bound to 127.0.0.1 only,
+  `restart: unless-stopped`. One service per
   role: starting one leaves the other running; replacing a role's backend removes the old container and
   keeps its data folder.
 - **The data lives in plain folders under the brain's home** (`<home>/stores/<backend>/`),
@@ -354,7 +355,7 @@ brain stores --docker-stop                 # stop them; the data stays, and the 
   with what it was sent; when they differ, the next sync rebuilds it from the local copy.
 - A password a backend needs (Neo4j's) is generated into `secrets.json` (0600) and handed to Docker by
   name, never on a command line.
-- **The databases' own usage reporting is turned off.** Qdrant and Neo4j both report home by default
+- **The databases' own usage reporting is turned off.** Qdrant, Neo4j and Memgraph all report home by default
   (measured 2026-10-10: Qdrant logs *Telemetry reporting enabled*, Neo4j answers
   `dbms.usage_report.enabled = true`); brain starts them with it off, and a backend cannot be added
   without saying how its image's reporting is turned off. Containers started before this change keep
@@ -401,7 +402,7 @@ Two kinds live side by side. Most run anywhere on fixtures (`verify_host_neutral
 **your own** notes, labelled questions or session history — on a machine without them they stop with
 **exit code 77 (skipped)** and say what is missing, rather than pass on nothing or fail for no reason.
 `python3 tests/clean_room.py` runs every check the way CI does — the tracked files copied into an
-empty folder, a fresh empty home for each check. Measured 2026-10-10 on macOS: 42 green, 13 skipped,
+empty folder, a fresh empty home for each check. Measured 2026-10-10 on macOS: 43 green, 13 skipped,
 0 red (with a local Qdrant running; without one, the live store check is one more skip). CI runs it on
 Linux, macOS and Windows with Python 3.8 – 3.13, and supplies Qdrant, Neo4j and Docker so nothing that
 matters is skipped there.

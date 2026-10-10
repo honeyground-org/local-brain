@@ -18,6 +18,8 @@ paired with each graph backend (round-robin); for every pair:
   ⑤ after the containers are ★removed★ and created again (what a Docker reinstall does), the same answers
      — still without sending anything: the data was in the folders all along
   ⑥ with the data folders emptied, the next sync notices and refills both from the local copy
+  ⑦ the whole contract against the containers (§tests/_store_contract): an edit and a removal through
+     indexing, a full rebuild, a lost copy refilled, an outage answered by the local copy
 
 How to run:  PYTHONPATH=. python3 tests/verify_docker_stores.py
              BRAIN_TEST_DOCKER=1 PYTHONPATH=. python3 tests/verify_docker_stores.py
@@ -183,7 +185,7 @@ def chosen_rounds() -> list:
 def live_round(services: dict) -> None:
     roles = tuple(services)
     what = " + ".join("%s %s" % kv for kv in services.items())
-    db, _mem = contract.prepare(os.path.join(_TMP, "-".join(services.values())), {})
+    db, mem = contract.prepare(os.path.join(_TMP, "-".join(services.values())), {})
     try:
         print("\n④ [%s] up, sync, restart" % what)
         r = dk.up(services)
@@ -244,35 +246,42 @@ def live_round(services: dict) -> None:
         check("the next sync notices and refills both", r["ok"] and all(x.get("healed") for x in s.values()),
               json.dumps({k: x.get("healed") for k, x in s.items()}))
         same(db, roles, "after refilling")
+
+        print("\n⑦ [%s] the whole contract, against the containers" % what)
+        contract.run(db, mem, roles, check)
     finally:
         compose(services, "down", "--remove-orphans")
         db.close()
 
 
-def live() -> None:
+def live() -> str:
+    """Run the live rounds; → what was measured, for the last line."""
     if not os.environ.get("BRAIN_TEST_DOCKER") or os.environ.get("BRAIN_TEST_DOCKER") == "0":
-        print("\n(④–⑥ skipped — set BRAIN_TEST_DOCKER=1 to start real containers)")
-        return
+        print("\n(④–⑦ skipped — set BRAIN_TEST_DOCKER=1 to start real containers)")
+        return "offline only (BRAIN_TEST_DOCKER is not set)"
     state = dk.available()
+    # ⛔ asked for and not possible is a failure, not a skip — a green that measured nothing looks like one that did
+    check("Docker is there to run the containers asked for (BRAIN_TEST_DOCKER=%s)" % os.environ["BRAIN_TEST_DOCKER"],
+          state["ok"], state.get("why", ""))
     if not state["ok"]:
-        print("\n(④–⑥ skipped — %s)" % state["why"])
-        return
+        return "not measured (%s)" % state["why"]
     rounds = chosen_rounds()
     check("there is something to run", bool(rounds), os.environ.get("BRAIN_TEST_DOCKER", ""))
     for services in rounds:
         live_round(services)
+    return "measured live: " + ", ".join(" + ".join(s.values()) for s in rounds)
 
 
 def main() -> int:
     offline()
-    live()
+    said = live()
     print("\n" + "=" * 78)
     if FAILS:
         print("❌ %d failure(s)" % len(FAILS))
         for f in FAILS:
             print("  · " + f)
         return 1
-    print("✅ the Docker databases keep their data in a folder of your own")
+    print("✅ the Docker databases keep their data in a folder of your own — %s" % said)
     return 0
 
 
