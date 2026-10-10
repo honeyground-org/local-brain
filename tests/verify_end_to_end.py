@@ -169,8 +169,6 @@ def verify_search(db) -> bool:
 
 
 if __name__ == "__main__":
-    from tests import _needs
-    _needs.private_index()                 # ⛔ it re-indexes and recalibrates — on a copy, never the live index
     db = store.connect()
     a = verify_store(db)
     b = verify_search(db)

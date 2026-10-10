@@ -104,7 +104,6 @@ def agreement(db, gold_pairs, gold_ctrl, pairs, ctrl, real_tops):
 
 
 def main() -> int:
-    _needs.private_index()                 # ⛔ measure on a copy — the hook reads the live index meanwhile
     db = store.connect()
     _needs.proxy_sample(db)
     print("=" * 78)

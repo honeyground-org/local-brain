@@ -38,7 +38,6 @@ def _hook(prompt: str) -> str:
 
 
 def main() -> int:
-    _needs.private_index()                 # ⛔ measure on a copy — the hook reads the live index meanwhile
     db = store.connect()
     _needs.memories(db)
     # ⓞ ★if the file and the table drift apart, does the check catch it, and does the index self-heal★ (a real 2026-08-19 incident)
