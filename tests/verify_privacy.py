@@ -42,6 +42,10 @@ SECRET_IN_TRANSIT = [
     ("AWS key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
     ("PEM", re.compile(r"BEGIN [A-Z ]*PRIVATE KEY")),
+    ("an AI provider's key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")),
+    ("a Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{30,}")),
+    ("a GitHub fine-grained token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}")),
+    ("a JWT", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ")),
     ("a secret assignment", re.compile(r"(?i)\b(password|secret|api[_-]?key|token)\s*[:=]\s*"
                           r"['\"]?[A-Za-z0-9._\-]{8,}")),
 ]
@@ -56,6 +60,12 @@ _AWS = "AKIA" + "ZZ1234567890ABCD"
 _GH = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"
 _URI = "mongodb://admin:" + "S3cr3tPass99" + "@db.example.com:27017/appdb"
 _PEM_B, _PEM_E = "-----BEGIN RSA PRIVATE" + " KEY-----", "-----END RSA PRIVATE" + " KEY-----"
+# the AI providers' own keys (2026-10-10 — they went out whole; only `api_key = …` was caught)
+_OPENAI = "sk-" + "proj-" + "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z_AbCdEfGh"
+_ANTHROPIC = "sk-" + "ant-api03-" + "x7Y2Q" * 16
+_GOOGLE = "AI" + "za" + "Sy0123456789abcdefghijklmnopqrstuvw"
+_GH_PAT = "github" + "_pat_" + "11ABCDEFG0" * 4
+_JWT = "eyJ" + "hbGciOiJIUzI1NiJ9" + ".eyJ" + "zdWIiOiIxMjM0NTY3ODkwIn0" + "." + "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
 
 DIRTY = (
     "connect using %s.\n" % _URI
@@ -63,10 +73,13 @@ DIRTY = (
     + "export GH_TOKEN=%s\n" % _GH
     + "password: hunter2secret\n"
     + "%s\nMIIEow\n%s\n" % (_PEM_B, _PEM_E)
+    + "the OpenAI key we rotated was %s and Anthropic's %s\n" % (_OPENAI, _ANTHROPIC)
+    + "maps: %s · deploy with %s · the session cookie held %s\n" % (_GOOGLE, _GH_PAT, _JWT)
 )
 CLEAN = (
     "the test uses mongodb://localhost:27117/test. ES is at 198.51.100.7:9200.\n"
     "token: str, api_key = ${MY_KEY}, and secret comes from env(APP_SECRET).\n"
+    "we use sk-learn for the task-list and a risk-assessment-for-the-q3-plan; AIzawhat is not a key.\n"
 )
 
 
