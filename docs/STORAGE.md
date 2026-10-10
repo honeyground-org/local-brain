@@ -69,7 +69,10 @@ options (`namespace` for both roles, `names` for the graph) are taken by every b
 Rules that hold for every backend:
 
 - **Answers are identical to the local copy's.** `brain stores --check` and the contract check compare
-  them question by question.
+  them question by question. An approximate index (HNSW) needs its search breadth set so it agrees on a
+  real corpus — `chroma.py` measured 97–98% of the top 10 at `ef_search` 200 and 100% at 1000, and ships
+  1000. A database that groups by document (Qdrant's `query/groups`) is asked to; one that cannot is asked
+  for `n_docs × MAX_CHUNKS_PER_DOC` chunks, and each document's best one is kept.
 - **`target()` is stable** — it is the key of the ledger that records what was sent. It must change when
   the role's `namespace` option changes.
 - **Raise `stores.StoreError`** for anything the database does not do; brain then answers from the local
@@ -81,7 +84,8 @@ Rules that hold for every backend:
 - **Nothing reports home.** Many database images send usage statistics by default (Qdrant, Neo4j and
   Memgraph all do). `telemetry_off` is required: the variable (`NAME=VALUE`) or argument
   (`--flag=value`) that turns it off, or `()` when the image has none — find it in the image's
-  configuration, then confirm in its log or settings that it took effect.
+  configuration, then confirm in its log or settings that it took effect. The Docker check then watches
+  the container's own network for at least 90 seconds and fails on any connection off the machine.
 - **Standard library only.** Speak the database's own protocol (`stores.http_json` for HTTP). A wire
   protocol several backends would share goes in a `_`-prefixed module next to them.
 
