@@ -144,9 +144,14 @@ def windows_like(env: dict) -> dict:
     locale — files whose default encoding is not UTF-8 either."""
     w = dict(env, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
     for lc in ("en_US.ISO8859-1", "en_US.ISO-8859-1", "de_DE.ISO8859-1"):
-        probe = subprocess.run([sys.executable, "-c", "import locale; print(locale.getpreferredencoding(False))"],
+        probe = subprocess.run([sys.executable, "-c", "import locale, sys; print(locale.getpreferredencoding(False), "
+                                "sys.getfilesystemencoding())"],
                                env=dict(w, LC_ALL=lc), capture_output=True, text=True, encoding="utf-8")
-        if probe.stdout.strip().lower().replace("-", "").replace("_", "") not in ("utf8", ""):
+        files, names = (probe.stdout.split() + ["", ""])[:2]
+        norm = lambda e: e.lower().replace("-", "").replace("_", "")  # noqa: E731
+        # ⛔ only a locale that keeps ★file names★ in UTF-8, as Windows always does — a missing locale on Linux
+        #    falls back to ASCII names, which no Windows has (CI, 2026-10-10: a Korean note name could not be stat'ed)
+        if norm(files) not in ("utf8", "") and norm(names) == "utf8":
             w["LC_ALL"] = lc
             break
     return w
