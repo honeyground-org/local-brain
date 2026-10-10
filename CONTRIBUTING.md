@@ -99,6 +99,7 @@ Open it as a **draft** while you are still working; the checks run, nobody is as
 | **clean room** (Linux, macOS, Windows) | every push | every `tests/verify_*.py` on the tracked files with an empty home, Python 3.8 – 3.13 | the log names the check; reproduce with `python3 tests/clean_room.py <name>` |
 | **live databases** | every push | the same answers from Qdrant and Neo4j as from the local copy | see `tests/verify_stores_live.py` |
 | **databases in Docker** | every push | for every backend that declares an image: the whole contract, and data that survives removing and recreating the containers | see `tests/verify_docker_stores.py` |
+| **quality** | every push | the base code and your change answer the same inverse-cloze questions on this repository's own writing, frozen at the base: hit@3, MRR, the hook's automatic score and false firings must not get worse | the step prints both sides; to accept a fall on purpose, add a line `Quality: <why>` to the description |
 | **release gates** | every push | measurement code bumped, no secrets (gitleaks), no personal data, history included | the step says which file and line |
 | **PR rules** | title, description, push | title format, description sections, sign-off, standard-library imports | the summary lists each problem |
 | **review gate** | push, every review | enough of the right approvals for the impact | waits until they arrive — not something you fix |

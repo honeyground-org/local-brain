@@ -407,7 +407,7 @@ Two kinds live side by side. Most run anywhere on fixtures (`verify_host_neutral
 **your own** notes, labelled questions or session history — on a machine without them they stop with
 **exit code 77 (skipped)** and say what is missing, rather than pass on nothing or fail for no reason.
 `python3 tests/clean_room.py` runs every check the way CI does — the tracked files copied into an
-empty folder, a fresh empty home for each check. Measured 2026-10-10 on macOS: 45 green, 13 skipped,
+empty folder, a fresh empty home for each check. Measured 2026-10-10 on macOS: 45 green, 14 skipped,
 0 red (with a local Qdrant running; without one, the live store check is one more skip). CI runs it on
 Linux, macOS and Windows with Python 3.8 – 3.13, and supplies Qdrant, Neo4j and Docker so nothing that
 matters is skipped there.
