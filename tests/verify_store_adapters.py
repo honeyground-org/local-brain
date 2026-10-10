@@ -61,15 +61,16 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 # ── the files the plug test drops in ────────────────────────────────────────
 PLUG_VECTOR = '''"""A vector database in a JSON file — dropped in by tests/verify_store_adapters.py."""
-import json, os, urllib.parse
+import json, os, urllib.parse, urllib.request
 from brain import stores
 
 
 def _path(url):
     p = urllib.parse.urlsplit(url)
-    if p.scheme != "file" or p.netloc or not os.path.isdir(os.path.dirname(p.path)):
+    path = urllib.request.url2pathname(p.path)
+    if p.scheme != "file" or p.netloc or not os.path.isdir(os.path.dirname(path)):
         raise stores.StoreError("plugvec: %s is not reachable" % url)
-    return p.path
+    return path
 
 
 class PlugVectors:
@@ -156,7 +157,7 @@ BACKEND = stores.Backend(
 '''
 
 PLUG_GRAPH = '''"""A graph database in a JSON file — dropped in by tests/verify_store_adapters.py."""
-import json, os, urllib.parse
+import json, os, urllib.parse, urllib.request
 from brain import stores
 
 
@@ -169,9 +170,10 @@ class PlugGraph:
 
     def _path(self):
         p = urllib.parse.urlsplit(self.url)
-        if p.scheme != "file" or p.netloc or not os.path.isdir(os.path.dirname(p.path)):
+        path = urllib.request.url2pathname(p.path)
+        if p.scheme != "file" or p.netloc or not os.path.isdir(os.path.dirname(path)):
             raise stores.StoreError("pluggraph: %s is not reachable" % self.url)
-        return p.path
+        return path
 
     def _load(self):
         path = self._path()
@@ -308,13 +310,14 @@ check("the installer offers it per role: --vector-store … plugvec, --graph-sto
       rc == 0 and "vector: sqlite · plugvec" in flat and "pluggraph" in flat, flat[flat.find("--vector-store"):][:140])
 db_dir = os.path.join(os.environ["BRAIN_HOME"], "plugdb")
 os.makedirs(db_dir, exist_ok=True)
-vurl, gurl = "file://" + os.path.join(db_dir, "vec.json"), "file://" + os.path.join(db_dir, "graph.json")
+import pathlib
+vurl, gurl = pathlib.Path(db_dir, "vec.json").as_uri(), pathlib.Path(db_dir, "graph.json").as_uri()
 db, mem = contract.prepare(os.environ["BRAIN_PLUG_ROOT"])
 rc, out = run("brain.cli", "stores", "--set", "vector=plugvec", "--url", vurl, "--plug-depth", "3")
 cfg = json.load(open(os.environ["BRAIN_CONFIG"]))
 check("brain stores --set vector=plugvec --plug-depth 3 → config.json", rc == 0
       and cfg["stores"]["vector"] == {"backend": "plugvec", "url": vurl, "plug_depth": 3}, json.dumps(cfg.get("stores")))
-check("…and the first sync filled it", "sent" in out and os.path.exists(vurl[7:]), out.strip().splitlines()[-1][:120] if out.strip() else "")
+check("…and the first sync filled it", "sent" in out and os.path.exists(os.path.join(db_dir, "vec.json")), out.strip().splitlines()[-1][:120] if out.strip() else "")
 rc, out = run("brain.cli", "stores", "--set", "graph=pluggraph", "--url", gurl)
 check("brain stores --set graph=pluggraph", rc == 0 and "pluggraph" in json.dumps(json.load(open(os.environ["BRAIN_CONFIG"]))["stores"]))
 rc, out = run("brain.cli", "stores", "--set", "graph=plugvec")
