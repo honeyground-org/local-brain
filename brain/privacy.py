@@ -60,6 +60,18 @@ PATTERNS: List[Tuple[str, "re.Pattern"]] = [
     ("aws-key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("gh-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
     ("slack-token", re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}\b")),
+    # ★the AI providers' own keys★ (2026-10-10) — the engines brain itself talks to; a note holding one
+    # went out whole, because only `api_key = …` was caught. `sk-…`: OpenAI (sk-proj-, sk-svcacct-) and
+    # Anthropic (sk-ant-api03-); a digit is required so a long hyphenated word is not mistaken for one.
+    ("ai-key", re.compile(r"\bsk-(?:ant-[a-z]+\d{2}-|proj-|svcacct-|admin-)?(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}")),
+    ("google-key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])")),
+    ("gh-token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b")),
+    ("gitlab-token", re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b")),
+    ("hf-token", re.compile(r"\bhf_[A-Za-z0-9]{30,}\b")),
+    ("npm-token", re.compile(r"\bnpm_[A-Za-z0-9]{36}\b")),
+    ("stripe-key", re.compile(r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b")),
+    ("slack-webhook", re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/_-]{20,}")),
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")),
     ("bearer", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{20,}")),
     # last — key=value. Masks ★only the value★ (the key name stays for search)
     ("assignment",

@@ -102,7 +102,6 @@ A memory for coding agents that is **more efficient and performs better than the
 ### 4. Checks to tighten
 - `verify_vs_grep` should skip (exit 77) when there is no evaluation set, and honour `BRAIN_EVAL_DIR`.
 - `verify_translit` should not clear the live bridge cache.
-- Mask secret-shaped values in the `sk-…` family in `brain/privacy.py`.
 - Replace absolute millisecond bars in `verify_vectors` with relative ones.
 - Keep checks from writing to the live threshold history.
 

@@ -462,7 +462,9 @@ python3 tests/verify_pr_report.py       # the pull-request rules, the review gat
 Nothing leaves your machine unless you choose an AI engine (`brain engines`) or a database on another
 host (`brain stores`; a database sent vectors or ids, never text). When you choose an engine,
 everything on the way out passes through `brain/privacy.py`, which masks
-credential-shaped **values** while keeping key names searchable. Per-source
+credential-shaped **values** while keeping key names searchable — private keys, credential URIs, the
+AI providers' own keys (`sk-…`, Google `AIza…`), cloud and code-host tokens (AWS, GitHub, GitLab,
+Hugging Face, npm, Stripe, Slack), JWTs and `secret = …` assignments. Per-source
 (`--no-embed`) and per-document (`embed: false`) opt-outs exist for anything that
 should never be sent at all. `brain privacy` audits what is still exposed —
 and never prints the values themselves.
