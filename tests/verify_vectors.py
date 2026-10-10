@@ -47,6 +47,8 @@ def check(label, cond, detail=""):
     print("  %s %s%s" % ("✅" if cond else "❌", label, ("  " + detail) if detail else ""))
 
 
+from tests import _needs  # noqa: E402
+_needs.private_index()                 # ⛔ a measurement on a copy — the hook reads the live index meanwhile
 db = store.connect()
 cov = vectors.coverage(db)
 thr_cos = vectors.min_cos(db)
@@ -184,14 +186,34 @@ else:
 
 print()
 print("⑤ cost")
-t0 = time.time()
-search.semantic(db, "한도를 걸었는데 왜 안 막혔지", k=3)
-d1 = (time.time() - t0) * 1000
-t0 = time.time()
-search.semantic(db, "한도를 걸었는데 왜 안 막혔지", k=3)
-d2 = (time.time() - t0) * 1000
-print("  first call %.0fms · repeat call for the same query %.0fms (query cache)" % (d1, d2))
-check("a cached query has no round trip (<120ms)", d2 < 120, "%.0fms" % d2)
+# ⛔ ★counted, not timed★ (2026-10-10) — "no round trip" used to be "under 120 ms", a bar that a busy
+#    machine fails and a fast network passes. What the cache promises is that nothing is asked of the
+#    engine, so the requests are counted; the times are printed for reading only.
+import urllib.parse as _up  # noqa: E402
+import urllib.request as _ur  # noqa: E402
+_real_open, _calls = _ur.urlopen, []
+
+
+def _counting_open(req, *a, **k):
+    url = req.full_url if hasattr(req, "full_url") else str(req)
+    if (_up.urlsplit(url).hostname or "") not in ("localhost", "127.0.0.1", "::1"):
+        _calls.append(url)                          # the engine — a store on this machine is not a round trip
+    return _real_open(req, *a, **k)
+
+
+_ur.urlopen = _counting_open
+try:
+    t0 = time.time()
+    search.semantic(db, "한도를 걸었는데 왜 안 막혔지", k=3)
+    d1, n1 = (time.time() - t0) * 1000, len(_calls)
+    t0 = time.time()
+    search.semantic(db, "한도를 걸었는데 왜 안 막혔지", k=3)
+    d2, n2 = (time.time() - t0) * 1000, len(_calls) - n1
+finally:
+    _ur.urlopen = _real_open
+print("  first call %.0fms (%d request%s to the engine) · repeat call for the same query %.0fms (query cache)"
+      % (d1, n1, "" if n1 == 1 else "s", d2))
+check("a cached query asks the engine nothing (0 requests on the repeat call)", n2 == 0, "%d request(s) · %.0fms" % (n2, d2))
 
 print()
 print("=" * 74)

@@ -91,12 +91,14 @@ def grep(docs, words):
 
 
 def cases():
+    """Every labelled question this person has — from the one place the eval set lives (§evalinit.eval_dir,
+    which honours BRAIN_EVAL_DIR), not a path of this repository's own."""
     out = []
-    p1 = os.path.join(ROOT, "tests", "eval", "recall.json")
+    p1 = os.path.join(_ei.eval_dir(), "recall.json")
     if os.path.exists(p1):
         d = json.load(open(p1, encoding="utf-8"))
         out += [(c["q"], c["gold"], c.get("terms") or []) for c in d["cases"] if c.get("gold")]
-    p2 = os.path.join(ROOT, "tests", "eval", "short.json")
+    p2 = os.path.join(_ei.eval_dir(), "short.json")
     if os.path.exists(p2):
         d = json.load(open(p2, encoding="utf-8"))
         out += [(c["q"], c["gold"], c.get("terms") or [])
@@ -108,13 +110,17 @@ FULL = os.environ.get("BRAIN_SCORECARD_FULL", "") == "1"
 
 
 def main() -> int:
+    from tests import _needs
+    _needs.private_index()                 # ⛔ calibrate.threshold may re-measure — on a copy, never the live index
     db = store.connect()
     thr = calibrate.threshold(db)
     docs = load_files()
     cs = cases()
     if not cs:
-        print("no eval set — run `brain eval-init` to build your own set.")
-        return 0
+        # ⛔ a skip, not a pass — a green that compared nothing would read as "brain beats grep"
+        from tests import _needs
+        _needs.skip("no labelled questions in %s" % _ei.eval_dir(),
+                    "`brain eval-init`, then pick the right answer for each question")
 
     print("=" * 78)
     print("the old way (grep) vs the brain — %d of the same questions · %d memory files" % (len(cs), len(docs)))
