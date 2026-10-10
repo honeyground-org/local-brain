@@ -31,9 +31,9 @@ NOISE = ["안녕", "커밋해줘", "고마워", "다시 해줘"]
 
 
 def _hook(prompt: str) -> str:
-    p = subprocess.run([os.path.join(ROOT, "bin", "brain-hook")],
+    p = subprocess.run(_needs.entry("brain-hook", "brain.hook"),
                        input=json.dumps({"prompt": prompt}), capture_output=True,
-                       text=True, timeout=30)
+                       text=True, timeout=30, encoding="utf-8", errors="replace")
     return p.stdout or ""
 
 

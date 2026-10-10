@@ -465,7 +465,11 @@ def measure(db: sqlite3.Connection) -> dict:
 #       `graphstore` changed.
 #   20 (2026-10-10)  a backend that runs in Docker must declare how its image's own usage reporting is turned
 #       off (`stores.Docker.telemetry_off`). Nothing about a question changed; bumped because `stores` changed.
-CODE_GENERATION = 20
+#   21 (2026-10-10)  every entry point reads and writes UTF-8 whatever the platform's default
+#       (§hosts.utf8_stdio), and git's output is decoded as UTF-8. On macOS and Linux nothing changes; on
+#       Windows the hook's prompt and a Korean commit message are no longer read as garbage. Bumped because
+#       `hook` and `store` changed.
+CODE_GENERATION = 21
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

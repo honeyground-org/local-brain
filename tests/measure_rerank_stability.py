@@ -57,7 +57,7 @@ def main() -> int:
         return 2
 
     ev = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                     "eval", "short.json")))
+                                     "eval", "short.json"), encoding="utf-8"))
 
     def qs(key):
         return [r if isinstance(r, str) else r["q"] for r in ev[key]]
@@ -168,7 +168,7 @@ def main() -> int:
     print("⚠️ a gold label accepts only one right answer — being 'outside gold' does not make it wrong.")
     print("daily budget %s" % json.dumps(rerank.budget(db), ensure_ascii=False))
     if OUT:
-        json.dump(rows, open(OUT, "w"), ensure_ascii=False, indent=1)
+        json.dump(rows, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         print("raw data %s" % OUT)
     return 0
 

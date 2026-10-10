@@ -309,6 +309,8 @@ def _help_body() -> list:
 
 
 def main(argv=None) -> int:
+    from brain import hosts
+    hosts.utf8_stdio()
     ap = argparse.ArgumentParser(prog="brain", description="local brain")
     sub = ap.add_subparsers(dest="cmd", required=True)
 

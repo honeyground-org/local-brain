@@ -243,14 +243,14 @@ _saved_home = os.environ.get("BRAIN_HOME")
 tmpdir = tempfile.mkdtemp()
 try:
     os.environ["BRAIN_HOME"] = tmpdir
-    with open(rd.rules_path(), "w") as fh:
+    with open(rd.rules_path(), "w", encoding="utf-8") as fh:
         fh.write("{ broken JSON")
     check(rd.all_rules() == [] and guard.active_rules() == [],
           "a broken file reads as no rules — never an exception inside the hook")
     check(guard.match_rules("Bash", {"command": "git push"}) == [], "…and nothing matches")
     rd.save({"version": 1, "learned": [], "disabled": []})
     kept = [f for f in os.listdir(tmpdir) if f.startswith("rules.json.unreadable-")]
-    check(len(kept) == 1 and open(os.path.join(tmpdir, kept[0])).read() == "{ broken JSON",
+    check(len(kept) == 1 and open(os.path.join(tmpdir, kept[0]), encoding="utf-8").read() == "{ broken JSON",
           "★the unreadable file is kept aside, byte for byte★, before anything is written", str(kept))
     rd.save({"version": 1, "learned": [], "disabled": []})
     kept2 = [f for f in os.listdir(tmpdir) if f.startswith("rules.json.unreadable-")]

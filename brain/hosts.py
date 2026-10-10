@@ -61,7 +61,29 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from typing import Dict, List, Optional
+
+
+def utf8_stdio() -> None:
+    """Read and write UTF-8 on stdin, stdout and stderr, whatever the platform's default — first thing in
+    every entry point.
+
+    ⛔ A Windows pipe defaults to the ANSI code page (cp1252 and the like). The recall hook printed a Korean
+       memory into it, raised UnicodeEncodeError, and the host got ★nothing★: exit 0, no error, recall
+       silently gone (reproduced 2026-10-10 with PYTHONIOENCODING=cp1252 — 3,786 bytes under UTF-8,
+       0 under cp1252). The host writes UTF-8 JSON to us and reads it back the same way; a console shows
+       UTF-8 too. A character that cannot be read is replaced rather than ending the process.
+    """
+    for name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        enc = (getattr(stream, "encoding", "") or "").lower().replace("-", "").replace("_", "")
+        if stream is None or enc == "utf8" or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):                    # a stream already read from, or one that is closed
+            pass
 
 # ★canonical action names★ — rules are written with these, and the adapter translates them to each host's tool names.
 # ⛔ Write a host's own tool name directly into a rule and it ★silently fires on nothing at all★ on a different host.

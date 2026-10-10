@@ -74,13 +74,13 @@ def full_scan(path: str) -> dict:
 
 def incremental_scan(path: str, chunks: int = 25, split_lines: bool = True) -> dict:
     """Appends a little at a time, line by line, scanning on each — mimics a real Stop call."""
-    lines = open(path, errors="replace").readlines()
+    lines = open(path, errors="replace", encoding="utf-8").readlines()
     tmpdir = tempfile.mkdtemp()
     tmp = os.path.join(tmpdir, "t.jsonl")
     rec = fresh()
     step = max(1, len(lines) // chunks)
     try:
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             for i in range(0, len(lines), step):
                 block = lines[i:i + step]
                 # ★actually creates a half-written line★: writes the last line halfway, then scans
@@ -144,7 +144,7 @@ commit_ev = {"type": "assistant", "message": {"content": [
 for label, save_ev in cases:
     d = tempfile.mkdtemp()
     tmp = os.path.join(d, "t.jsonl")
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         for ev in (code_ev, code_ev, code_ev, commit_ev, save_ev):
             f.write(json.dumps(ev) + "\n")
     r = full_scan(tmp)
@@ -155,7 +155,7 @@ for label, save_ev in cases:
           % ("✅" if ok else "❌", label, r["tail"]["code_writes"],
              r["tail"]["commits"], r["saves"]))
     # working again after a save stands the tail back up
-    with open(tmp, "a") as f:
+    with open(tmp, "a", encoding="utf-8") as f:
         f.write(json.dumps(code_ev) + "\n")
         f.write(json.dumps(commit_ev) + "\n")
     r2 = tail.scan(tmp, r)
@@ -245,7 +245,7 @@ else:
 print("\n★5. protecting a live session (idle threshold %d min)" % (tail.IDLE_DEAD_SEC // 60))
 d = tempfile.mkdtemp()
 tmp = os.path.join(d, "live.jsonl")
-open(tmp, "w").write(json.dumps(code_ev) + "\n")
+open(tmp, "w", encoding="utf-8").write(json.dumps(code_ev) + "\n")
 alive = {"session_id": "alive", "transcript": tmp, "updated_at": int(time.time()),
          "closed": False, "tail": {"code_writes": 5, "commits": 0}}
 dead_closed = dict(alive, session_id="closed", closed=True)

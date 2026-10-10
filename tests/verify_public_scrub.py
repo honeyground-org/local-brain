@@ -84,7 +84,7 @@ PRIVATE_HINTS = [
 
 
 def _git(args, cwd=ROOT):
-    p = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+    p = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return p.stdout
 
 
@@ -284,16 +284,16 @@ def selftest():
         subprocess.run(["git", "config", "user.name", "Canary"], cwd=d, check=True)
         # commit 1: a secret + an internal name (removed later → survives only in history)
         os.makedirs(os.path.join(d, "tests", "eval"), exist_ok=True)
-        with open(os.path.join(d, "gone.txt"), "w") as fh:
+        with open(os.path.join(d, "gone.txt"), "w", encoding="utf-8") as fh:
             fh.write(f"{CANARY} project\nAKIA0123456789ABCDEF\n")
         subprocess.run(["git", "add", "-A"], cwd=d, check=True)
         subprocess.run(["git", "commit", "-qm", f"init {CANARY}"], cwd=d, check=True)
         # commit 2: remove it, and leave the current file · personal data · a home path · an email
         os.remove(os.path.join(d, "gone.txt"))
-        with open(os.path.join(d, "here.py"), "w") as fh:
+        with open(os.path.join(d, "here.py"), "w", encoding="utf-8") as fh:
             fh.write(f"# using {CANARY}\n# /Users/{_C_HOME}/x\n# {_C_MAIL}\n"
                      f"# {_C_IP}:9200 · {_C_HOST}\n")
-        with open(os.path.join(d, "tests", "eval", "short.json"), "w") as fh:
+        with open(os.path.join(d, "tests", "eval", "short.json"), "w", encoding="utf-8") as fh:
             fh.write("{}\n")
         subprocess.run(["git", "add", "-Af"], cwd=d, check=True)
         subprocess.run(["git", "commit", "-qm", "second"], cwd=d, check=True)

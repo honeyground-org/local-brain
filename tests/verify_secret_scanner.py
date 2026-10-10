@@ -64,7 +64,7 @@ def _run(exe: str, mode: str, path: str) -> list:
         try:
             subprocess.run([exe, mode, path, "--no-banner", "--redact",
                             "--report-format", "json", "--report-path", report],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
         except OSError:
             # ⛔ a binary that will not start must not read as "found nothing" —
             #    the control group is what turns this into `unknown`.
@@ -115,7 +115,7 @@ def main() -> int:
         # ⏭ 77 = skipped, not passed: this is the publisher's gate, and its tool is not here.
         return 77
     try:
-        ver = subprocess.run([exe, "version"], capture_output=True, text=True).stdout.strip()
+        ver = subprocess.run([exe, "version"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
     except OSError as exc:                                # ⛔ a path that points at nothing
         print(f"\n⛔⛔ NOT MEASURED — `{exe}` will not start ({exc.strerror}).")
         print("    Fix BRAIN_GITLEAKS, or unset it to use the one on PATH.")

@@ -444,7 +444,7 @@ def main():
     out = os.environ.get("OUT", "")
     if out:
         json.dump({"variant": which, "ctrl": ctrl, "pos": pos, "rows": rows},
-                  open(out, "w"), ensure_ascii=False)
+                  open(out, "w", encoding="utf-8"), ensure_ascii=False)
         print("  raw data %s" % out)
     return 0
 

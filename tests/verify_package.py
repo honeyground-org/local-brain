@@ -47,21 +47,21 @@ def main():
     try:
         venv = os.path.join(tmp, "venv")
         r = subprocess.run([sys.executable, "-m", "venv", venv],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
         if r.returncode != 0:
             print("⚠️ couldn't build a venv — skipping this check on this machine")
             return 0
         pybin = os.path.join(venv, "Scripts" if os.name == "nt" else "bin")
         pip = os.path.join(pybin, "pip")
         py = os.path.join(pybin, "python")
-        r = subprocess.run([pip, "install", "-q", ROOT], capture_output=True, text=True)
+        r = subprocess.run([pip, "install", "-q", ROOT], capture_output=True, text=True, encoding="utf-8", errors="replace")
         check("`pip install .` succeeds", r.returncode == 0,
               (r.stderr or "")[-200:] if r.returncode else "")
         if r.returncode != 0:
             return 1
 
         # ── ① is the dependency count really 0 ────────────────────────────────────────
-        r = subprocess.run([pip, "list", "--format=freeze"], capture_output=True, text=True)
+        r = subprocess.run([pip, "list", "--format=freeze"], capture_output=True, text=True, encoding="utf-8", errors="replace")
         pkgs = [l.split("==")[0].lower() for l in r.stdout.splitlines() if "==" in l]
         extra = [p for p in pkgs if p not in
                  ("pip", "setuptools", "wheel", "local-brain", "pkg-resources")]
@@ -84,7 +84,7 @@ def main():
         clean_env.pop("PYTHONPATH", None)
         sp = subprocess.run(
             [py, "-c", "import brain,os;print(os.path.dirname(os.path.dirname(brain.__file__)))"],
-            capture_output=True, text=True, cwd=tmp, env=clean_env).stdout.strip()
+            capture_output=True, text=True, cwd=tmp, env=clean_env, encoding="utf-8", errors="replace").stdout.strip()
         allowed = ("brain", "pip", "setuptools", "wheel", "pkg_resources",
                    "_distutils_hack", "distutils-precedence.pth", "__pycache__")
         junk = [n for n in os.listdir(sp)
@@ -97,21 +97,21 @@ def main():
         env = dict(os.environ, BRAIN_LANG="en")
         env.pop("PYTHONPATH", None)
         r = subprocess.run([os.path.join(pybin, "brain"), "i18n"],
-                           capture_output=True, text=True, cwd=tmp, env=env)
+                           capture_output=True, text=True, cwd=tmp, env=env, encoding="utf-8", errors="replace")
         check("`brain` runs outside the repo", r.returncode == 0, (r.stderr or "")[-150:])
         check("★the English catalog reads correctly from inside the installed package★",
               "Translation catalogues" in r.stdout, (r.stdout.splitlines() or [""])[0])
 
         env["BRAIN_LANG"] = "ko"
         r2 = subprocess.run([os.path.join(pybin, "brain"), "i18n"],
-                            capture_output=True, text=True, cwd=tmp, env=env)
+                            capture_output=True, text=True, cwd=tmp, env=env, encoding="utf-8", errors="replace")
         check("★another language also reads from inside the installed package★ (the catalog lives inside the package)",
               "번역 카탈로그" in r2.stdout, (r2.stdout.splitlines() or [""])[0])
 
         # ── ⑤ ★does the installed package avoid writing a person's config into site-packages★ ────
         out = subprocess.run(
             [py, "-c", "from brain import store; print(store.default_config_path())"],
-            capture_output=True, text=True, cwd=tmp, env=env).stdout.strip()
+            capture_output=True, text=True, cwd=tmp, env=env, encoding="utf-8", errors="replace").stdout.strip()
         check("config lives ★outside site-packages★ (deleting the package leaves the config behind)",
               sp not in out, out)
 
@@ -120,7 +120,7 @@ def main():
         #    but the local copy would be gone, and `brain stores` would not say why
         out = subprocess.run(
             [py, "-c", "from brain import stores; print(sorted(stores.backends()), stores.broken())"],
-            capture_output=True, text=True, cwd=tmp, env=env)
+            capture_output=True, text=True, cwd=tmp, env=env, encoding="utf-8", errors="replace")
         check("★the storage backends ship inside the package★ (one file each in brain/backends/)",
               out.returncode == 0 and "'qdrant'" in out.stdout and "'neo4j'" in out.stdout
               and out.stdout.strip().endswith("[]"), (out.stdout.strip() or out.stderr.strip()[-150:]))

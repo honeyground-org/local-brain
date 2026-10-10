@@ -549,6 +549,8 @@ def step_schedule(enable: bool) -> None:
 # ── wrap-up ─────────────────────────────────────────────────────────────────
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
+    from brain import hosts
+    hosts.utf8_stdio()
     ap = argparse.ArgumentParser(
         prog="python3 -m brain.install",
         description="Install the local brain (macOS / Windows / Linux).")

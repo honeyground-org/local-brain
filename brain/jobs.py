@@ -146,6 +146,8 @@ def _run(env_key: str, name: str, body) -> int:
     A body says "I failed" by returning something truthy, or by raising. Anything else is 0.
     The start and the result also go to stdout (§_say) — that is the scheduler's evidence.
     """
+    from brain import hosts
+    hosts.utf8_stdio()
     try:
         fh = _open_log(env_key, name)
     except OSError:

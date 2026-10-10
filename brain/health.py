@@ -500,7 +500,7 @@ def _launchd_macos_only(label: str) -> dict:
     try:
         p = subprocess.run(
             ["launchctl", "print", "gui/%d/%s" % (os.getuid(), label)],
-            capture_output=True, text=True, timeout=5)
+            capture_output=True, text=True, errors="replace", timeout=5)
     except (OSError, subprocess.SubprocessError):
         return out
     if p.returncode != 0:

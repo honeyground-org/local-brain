@@ -31,8 +31,10 @@ def main():
     print("=" * 72 + "\nhelp ↔ actual commands\n" + "=" * 72)
     ap = cli.build_parser() if hasattr(cli, "build_parser") else None
     # the actually-registered subcommands are read from the usage line (never relying on parser internals)
-    out = subprocess.run([os.path.join(ROOT, "bin", "brain"), "--help"],
-                         capture_output=True, text=True).stdout
+    from tests import _needs
+    brain = _needs.entry("brain", "brain.cli")          # Windows: python -m brain.cli (no sh there)
+    out = subprocess.run(brain + ["--help"],
+                         capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     m = re.search(r"\{([a-z0-9,\-]+)\}", out)
     real = set(m.group(1).split(",")) if m else set()
     check("read the real command list", len(real) > 5, "%d found" % len(real))
@@ -82,13 +84,16 @@ def main():
 
     import subprocess as _sp
     import tempfile as _tf
-    with _tf.TemporaryDirectory() as td:
-        link = os.path.join(td, "brain")
-        os.symlink(os.path.join(ROOT, "bin", "brain"), link)
-        r = _sp.run([link, "help"], capture_output=True, text=True, cwd=td)
-        check("★runs from a different folder through the link★ (measured)",
-              r.returncode == 0 and "brain —" in r.stdout,
-              "exit code %d %s" % (r.returncode, (r.stderr or "")[:60]))
+    if os.name == "nt":
+        print("   (the launcher through a link: n/a on Windows — `brain` is a pip-installed .exe there)")
+    else:
+        with _tf.TemporaryDirectory() as td:
+            link = os.path.join(td, "brain")
+            os.symlink(os.path.join(ROOT, "bin", "brain"), link)
+            r = _sp.run([link, "help"], capture_output=True, text=True, cwd=td, encoding="utf-8", errors="replace")
+            check("★runs from a different folder through the link★ (measured)",
+                  r.returncode == 0 and "brain —" in r.stdout,
+                  "exit code %d %s" % (r.returncode, (r.stderr or "")[:60]))
 
     check("the 'Where things live' section is written", "Where things live" in txt)
     check("how to check the scheduled jobs is written", "launchd" in txt and "status" in txt)
@@ -97,8 +102,7 @@ def main():
     check("the data location is written — the real home", store.brain_home() in txt, store.brain_home())
 
     # calling it with no argument shows help (not an error)
-    p = subprocess.run([os.path.join(ROOT, "bin", "brain")],
-                       capture_output=True, text=True)
+    p = subprocess.run(brain, capture_output=True, text=True, encoding="utf-8", errors="replace")
     check("★help comes up even with no argument★ (not an error)",
           p.returncode == 0 and "brain —" in p.stdout, "exit code %d" % p.returncode)
 

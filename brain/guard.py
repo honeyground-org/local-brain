@@ -150,7 +150,7 @@ def _already_said(session: str, rule_id: str) -> bool:
         return True
     try:
         os.makedirs(STATE_DIR, exist_ok=True)
-        with open(mark, "w") as fh:
+        with open(mark, "w", encoding="utf-8") as fh:
             fh.write("1")
     except OSError:
         pass                                  # a failed suppression still attaches the guidance
@@ -254,6 +254,8 @@ def _rehome() -> None:
 
 
 def main() -> int:
+    from brain import hosts
+    hosts.utf8_stdio()                                   # ⛔ before the payload is read (§hosts.utf8_stdio)
     # ⛔ ★before the payload★ — the tool name in it is resolved through the host's own names
     #    (measured 2026-09-21: Codex sends `Bash` for shell but ★`apply_patch`★ for edits, so
     #    without this every edit-side rule goes silent there while the shell ones still fire —

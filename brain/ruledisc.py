@@ -307,7 +307,7 @@ def usage_from_transcripts(pattern: str = "",
     n_calls = 0
     for host, f in pairs:
         try:
-            fh = open(f, errors="replace")
+            fh = open(f, encoding="utf-8", errors="replace")
         except OSError:
             continue
         with fh:
@@ -814,7 +814,7 @@ def measure_fire(cands: "Sequence[dict]", pattern: str = "") -> dict:
     per_session: List[int] = []
     for host, f in transcript_pairs(pattern):
         try:
-            fh = open(f, errors="replace")
+            fh = open(f, encoding="utf-8", errors="replace")
         except OSError:
             continue
         seen_live: set = set()
@@ -1018,7 +1018,7 @@ def measure_active(pattern: str = "") -> dict:
     calls = collections.Counter()
     for host, f in transcript_pairs(pattern):
         try:
-            fh = open(f, errors="replace")
+            fh = open(f, encoding="utf-8", errors="replace")
         except OSError:
             continue
         with fh:

@@ -40,7 +40,7 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 
 def tracked() -> list:
-    out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout
+    out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     return [p for p in out.splitlines() if p]
 
 

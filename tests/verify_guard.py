@@ -29,7 +29,10 @@ os.environ["BRAIN_HOST"] = "claude-code"
 from brain import guard, hosts, ruledisc  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HOOK = os.path.join(ROOT, "bin", "brain-guard")
+from tests import _needs  # noqa: E402
+HOOK = _needs.entry("brain-guard", "brain.guard")      # Windows: python -m brain.guard (no sh there)
+SCRIPT = os.path.join(ROOT, "bin", "brain-guard")       # the POSIX shell prefilter, read as text
+POSIX = os.name != "nt"
 ok = True
 
 
@@ -124,7 +127,7 @@ def run_hook(payload: dict, compact: bool = True, home=FHOME, args=(), env_home=
         env["HOME"] = FAKE_HOME
     if env_home:
         env["BRAIN_HOME"] = home
-    p = subprocess.run([HOOK] + list(args), input=body, capture_output=True, text=True, env=env)
+    p = subprocess.run(HOOK + list(args), input=body, capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
     return p.stdout.strip()
 
 
@@ -133,7 +136,7 @@ print("① brain ships no rules, and the shell holds no list of its own")
 print("=" * 72)
 check("★no built-in rules★ (guard.RULES is empty — a rule names one person's memories)",
       guard.RULES == [], "%d rule(s)" % len(guard.RULES))
-sh = open(HOOK, encoding="utf-8").read()
+sh = open(SCRIPT, encoding="utf-8").read()
 # ⛔ Caught regardless of quoting — a check sensitive to formatting raises a false alarm, and once a
 #    false alarm is seen once, the next real one is not believed either (actually happened 2026-08-18).
 in_shell = set(re.findall(r"\*'([^']+)'\*", sh)) | \
@@ -315,8 +318,11 @@ print("=" * 72)
 #    breaking the `case` statement, and PreToolUse hook exit code 2 means ★block★, so every shell call
 #    and edit was blocked — the hook had ★locked away its own path to being fixed★. A human had to
 #    roll it back with git. Syntax must be checked before the file is written.
-_sh = subprocess.run(["sh", "-n", HOOK], capture_output=True, text=True)
-check("bin/brain-guard syntax OK (sh -n)", _sh.returncode == 0, (_sh.stderr or "").strip()[:120])
+if POSIX:
+    _sh = subprocess.run(["sh", "-n", SCRIPT], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    check("bin/brain-guard syntax OK (sh -n)", _sh.returncode == 0, (_sh.stderr or "").strip()[:120])
+else:
+    print("   (sh -n: n/a on Windows — the guard runs as `python -m brain.guard`, without the shell prefilter)")
 _live = run_hook({"tool_name": SHELL_TOOL, "session_id": SID + "shell",
                   "tool_input": {"command": "terraform plan"}})
 check("the shell → Python path is alive", "additionalContext" in (_live or ""), (_live or "")[:80])
@@ -361,30 +367,34 @@ def _median_ms(argv, stdin_text=None, n=20):
     ts = []
     for _ in range(n):
         _t0 = time.time()
-        subprocess.run(argv, input=stdin_text, text=True, capture_output=True, env=_FENV)
+        subprocess.run(argv, input=stdin_text, text=True, capture_output=True, env=_FENV, encoding="utf-8", errors="replace")
         ts.append((time.time() - _t0) * 1000)
     return _stat.median(ts), min(ts), max(ts)
 
-_BASE, _bmin, _bmax = _median_ms(["/bin/sh", "-c", "exit 0"])
+if not POSIX:
+    # the prefilter is a POSIX shell script; Windows has no shell in front of Python to measure
+    print("   (prefilter cost: n/a on Windows — every call starts Python there)")
+_BASE, _bmin, _bmax = _median_ms(["/bin/sh", "-c", "exit 0"] if POSIX else [sys.executable, "-c", "pass"])
 _MISS = json.dumps({"tool_name": SHELL_TOOL, "session_id": SID + "cost",
                     "tool_input": {"command": "echo hello"}})
-_UNCAUGHT, _umin, _umax = _median_ms([HOOK], _MISS)
+_UNCAUGHT, _umin, _umax = _median_ms(HOOK, _MISS)
 # A call that ★does★ match is the second pole: it genuinely starts Python.
 _HIT = json.dumps({"tool_name": SHELL_TOOL, "session_id": SID + "cost2",
                    "tool_input": {"command": "terraform plan"}})
-_CAUGHT, _cmin, _cmax = _median_ms([HOOK], _HIT, n=8)
+_CAUGHT, _cmin, _cmax = _median_ms(HOOK, _HIT, n=8)
 
 # ⛔ ★No magic constant.★ A ratio needed one (2.5× failed at exactly 2.5 on the third run), and any
 #    constant here is really a guess about this machine. With ★both poles measured★ the question
 #    answers itself: an uncaught call must sit nearer the bare process than the matching call does.
 _to_bare, _to_python = _UNCAUGHT - _BASE, _CAUGHT - _UNCAUGHT
 check("an uncaught shell call never pays for a Python start "
-      "(nearer a bare process than a matching call)",
-      _to_bare < _to_python,
+      "(nearer a bare process than a matching call)" + ("" if POSIX else " — n/a on Windows"),
+      _to_bare < _to_python or not POSIX,
       "bare %.1f → uncaught %.1f (+%.1f) → matched %.1f (+%.1f) ms"
       % (_BASE, _UNCAUGHT, _to_bare, _CAUGHT, _to_python))
-check("(control) the two poles are actually apart — otherwise the row above proves nothing",
-      _CAUGHT > _BASE * 2, "matched %.1fms vs bare %.1fms" % (_CAUGHT, _BASE))
+check("(control) the two poles are actually apart — otherwise the row above proves nothing"
+      + ("" if POSIX else " — n/a on Windows"),
+      _CAUGHT > _BASE * 2 or not POSIX, "matched %.1fms vs bare %.1fms" % (_CAUGHT, _BASE))
 per = _UNCAUGHT
 
 shutil.rmtree(FIX, ignore_errors=True)
@@ -414,10 +424,10 @@ try:
     check("with no firing-rate table, ★no cap is applied★ (no value ≠ common)",
           guard.within_budget("S", "any-rule"))
 
-    with open(guard.RATES, "w") as fh:
+    with open(guard.RATES, "w", encoding="utf-8") as fh:
         _j.dump({"common": 6.0, "rare": 0.2}, fh)
     for i in range(guard.SESSION_CAP):
-        open(os.path.join(guard.STATE_DIR, "S.filler%d" % i), "w").close()
+        open(os.path.join(guard.STATE_DIR, "S.filler%d" % i), "w", encoding="utf-8").close()
     check("counts what has fired this session via markers",
           guard._session_spent("S") == guard.SESSION_CAP, "%d" % guard._session_spent("S"))
     check("past the budget, ★common rules are blocked★ (6%)",

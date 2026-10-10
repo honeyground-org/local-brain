@@ -72,7 +72,7 @@ class Launchd(Scheduler):
         out = Scheduler.query(self, job, label)
         try:
             p = subprocess.run(["launchctl", "print", "gui/%d/%s" % (os.getuid(), label)],
-                               capture_output=True, text=True, timeout=TIMEOUT)
+                               capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
         except (OSError, subprocess.SubprocessError, AttributeError):
             return out
         if p.returncode != 0:
@@ -120,7 +120,7 @@ class Launchd(Scheduler):
             subprocess.run(["launchctl", "bootout", "gui/%d/%s" % (os.getuid(), label)],
                            capture_output=True, timeout=TIMEOUT)
             p = subprocess.run(["launchctl", "bootstrap", "gui/%d" % os.getuid(), plist],
-                               capture_output=True, text=True, timeout=TIMEOUT)
+                               capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
         except (OSError, subprocess.SubprocessError) as exc:      # noqa: BLE001
             return {"ok": False, "why": str(exc)[:120]}
         return {"ok": p.returncode == 0, "path": plist,
@@ -141,7 +141,7 @@ class Schtasks(Scheduler):
         out = Scheduler.query(self, job, label)
         try:
             p = subprocess.run(["schtasks", "/query", "/tn", label, "/fo", "LIST", "/v"],
-                               capture_output=True, text=True, timeout=TIMEOUT)
+                               capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
         except (OSError, subprocess.SubprocessError):
             return out
         if p.returncode != 0:
@@ -169,7 +169,7 @@ class Schtasks(Scheduler):
             p = subprocess.run(
                 ["schtasks", "/create", "/tn", label, "/tr", wrapped,
                  "/sc", "daily", "/st", "%02d:%02d" % at, "/f"],
-                capture_output=True, text=True, timeout=TIMEOUT)
+                capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
         except (OSError, subprocess.SubprocessError) as exc:      # noqa: BLE001
             return {"ok": False, "why": str(exc)[:120]}
         return {"ok": p.returncode == 0, "why": (p.stderr or p.stdout or "").strip()[:120]}
@@ -188,7 +188,7 @@ class Cron(Scheduler):
     def query(self, job: str, label: str) -> dict:
         out = Scheduler.query(self, job, label)
         try:
-            p = subprocess.run(["crontab", "-l"], capture_output=True, text=True,
+            p = subprocess.run(["crontab", "-l"], capture_output=True, text=True, errors="replace",
                                timeout=TIMEOUT)
         except (OSError, subprocess.SubprocessError):
             return out

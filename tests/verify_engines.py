@@ -100,7 +100,7 @@ def child(code: str, env_extra: dict, config_engines=None) -> dict:
     """Run `code` in a fresh process with its own home and config; it prints one JSON line."""
     home = tempfile.mkdtemp(dir=TMP)
     cfg = os.path.join(home, "config.json")
-    with open(cfg, "w") as fh:
+    with open(cfg, "w", encoding="utf-8") as fh:
         json.dump({"sources": [], **({"engines": config_engines} if config_engines else {})}, fh)
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("BRAIN_", "GEMINI_", "OPENAI_", "ANTHROPIC_"))}
@@ -108,7 +108,7 @@ def child(code: str, env_extra: dict, config_engines=None) -> dict:
                 "BRAIN_LANG": "en"})
     env.update(env_extra)
     p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env,
-                       cwd=ROOT, timeout=60)
+                       cwd=ROOT, timeout=60, encoding="utf-8", errors="replace")
     try:
         return json.loads(p.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -251,12 +251,12 @@ home = tempfile.mkdtemp(dir=TMP)
 
 def shared(env):
     cfg = os.path.join(home, "config.json")
-    json.dump({"sources": []}, open(cfg, "w"))
+    json.dump({"sources": []}, open(cfg, "w", encoding="utf-8"))
     e = {k: v for k, v in os.environ.items()
          if not k.startswith(("BRAIN_", "GEMINI_", "OPENAI_", "ANTHROPIC_"))}
     e.update({"HOME": home, "BRAIN_HOME": home, "BRAIN_CONFIG": cfg, "PYTHONPATH": ROOT}, **env)
     p = subprocess.run([sys.executable, "-c", CACHE], capture_output=True, text=True, env=e,
-                       cwd=ROOT, timeout=60)
+                       cwd=ROOT, timeout=60, encoding="utf-8", errors="replace")
     return p.stdout.strip()
 
 
