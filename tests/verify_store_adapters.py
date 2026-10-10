@@ -49,6 +49,7 @@ for _k in _KEYS[3:7]:
     os.environ.pop(_k, None)
 
 from brain import dockerstores as dk, stores  # noqa: E402
+from tests import _store_contract as contract  # noqa: E402
 
 FAILS: list = []
 
@@ -292,7 +293,8 @@ from brain import cli, dockerstores as dk, install, stores
 from tests import _store_contract as contract
 
 def run(*args):
-    r = subprocess.run([sys.executable, "-m"] + list(args), capture_output=True, text=True, env=os.environ)
+    r = subprocess.run([sys.executable, "-m"] + list(args), capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", env=os.environ)
     return r.returncode, r.stdout + r.stderr
 
 print("② the plug test — two new files, nothing else edited")
@@ -367,13 +369,11 @@ def shipped() -> None:
     home = os.path.realpath(dk.base_dir())
     for name, b in sorted(dk.dockerable().items()):
         text = dk.compose_text({b.role: name})
-        lines = text.splitlines()
-        mounts = [l.split('"')[1] for l in lines if l.strip().startswith('- "') and ":/" in l
-                  and not l.strip().startswith('- "127.')]
-        published = [l for l in lines if l.strip().startswith('- "') and l.count(":") == 2]
+        lines, items = text.splitlines(), contract.compose_items(text)
+        mounts, published = items.get("volumes", []), items.get("ports", [])
         check("%s: pinned image, 127.0.0.1 only, data in plain folders under the brain's home, no Docker volume"
-              % name, mounts and published and all("127.0.0.1:" in l for l in published)
-              and all(os.path.realpath(m.split(":/")[0]).startswith(home) for m in mounts)
+              % name, mounts and published and all(p.startswith("127.0.0.1:") for p in published)
+              and all(os.path.realpath(contract.mount_host(m)).startswith(home) for m in mounts)
               and not any(l.startswith("volumes:") for l in lines) and "restart: unless-stopped" in text
               and not b.docker.image.endswith(":latest"), b.docker.image)
         check("%s: every value Docker reads is named, never written" % name,

@@ -80,16 +80,16 @@ def offline() -> None:
     home = os.path.realpath(dk.base_dir())
     for services in rounds:
         text = dk.compose_text(services)
-        lines = text.splitlines()
+        lines, items = text.splitlines(), contract.compose_items(text)
         what = " + ".join(services.values())
-        mounts = [l.split('"')[1] for l in lines if l.strip().startswith('- "') and ":/" in l
-                  and not l.strip().startswith('- "127.')]
+        mounts, published = items.get("volumes", []), items.get("ports", [])
         check("%s: every mount is a plain folder under the brain's home" % what, mounts
-              and all(os.path.realpath(m.split(":/")[0]).startswith(home) for m in mounts), "%d mounts" % len(mounts))
+              and all(os.path.realpath(contract.mount_host(m)).startswith(home) for m in mounts),
+              "%d mounts" % len(mounts))
         check("%s: ★no Docker volume★ (a Docker reset deletes those)" % what,
               not any(l.startswith("volumes:") for l in lines))
-        check("%s: ports bound to 127.0.0.1 only" % what, all("127.0.0.1:" in l for l in lines
-                                                            if l.strip().startswith('- "') and l.count(":") == 2))
+        check("%s: ports bound to 127.0.0.1 only" % what,
+              published and all(p.startswith("127.0.0.1:") for p in published), ", ".join(published))
         check("%s: restarts unless stopped (back after a reboot)" % what,
               text.count("restart: unless-stopped") == len(services))
         envs = [k for n in services.values() for k in stores.spec(n).docker.env]
@@ -108,7 +108,10 @@ def offline() -> None:
         pw = dk.generated_secret(b)
         mode = stat.S_IMODE(os.stat(_SECRETS).st_mode)
         data = json.load(open(_SECRETS))
-        check("%s: generated once, private (0600)" % b.name, len(pw) >= 24 and mode == 0o600, oct(mode))
+        # ⛔ POSIX modes only: Windows keeps secrets.json private through the profile folder's ACL, and
+        #    reports 0o666 for every file whatever its ACL says (issue #3)
+        check("%s: generated once, private (0600%s)" % (b.name, ", POSIX" if os.name != "nt" else " — n/a on Windows"),
+              len(pw) >= 24 and (mode == 0o600 or os.name == "nt"), oct(mode))
         check("%s: every other key is kept" % b.name, data.get("gemini_api_key") == "keep-me")
         check("%s: reused, not replaced" % b.name, dk.generated_secret(b) == pw)
         check("%s: and the compose file never holds it" % b.name, pw not in dk.compose_text({b.role: b.name}))

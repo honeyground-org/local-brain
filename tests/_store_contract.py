@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.parse
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 from tests import _stores_fixture as fx
 
@@ -75,6 +75,30 @@ def drop_all(roles) -> None:
                 stores.graph_backend(c).drop()
         except stores.StoreError as exc:
             print("  (cleanup: %s)" % exc)
+
+
+def compose_items(text: str) -> Dict[str, List[str]]:
+    """The compose file's list items by section — {"ports": [...], "volumes": [...], "environment": [...]}.
+
+    ⛔ Read by section, not by counting colons: a Windows mount (`C:\\…:/data`) has as many colons as a
+       port mapping, and was counted as one (CI, 2026-10-10).
+    """
+    out: Dict[str, List[str]] = {}
+    key = ""
+    for line in text.splitlines():
+        s = line.strip()
+        if s.endswith(":") and not s.startswith("-"):
+            key = s[:-1]
+            continue
+        if s.startswith("- ") and key:
+            item = s[2:].split("#", 1)[0].strip()
+            out.setdefault(key, []).append(json.loads(item) if item.startswith('"') else item)   # written by json.dumps
+    return out
+
+
+def mount_host(item: str) -> str:
+    """`<host folder>:<container path>` → the host folder (which may itself hold a drive's colon)."""
+    return item.rsplit(":/", 1)[0]
 
 
 def unreachable(url: str) -> str:
