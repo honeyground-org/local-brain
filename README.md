@@ -300,7 +300,7 @@ Two kinds of question have databases built for them, and brain lets each one be 
 
 | Role | What it answers | Backends | What is sent |
 |---|---|---|---|
-| `vector` | similarity search over note embeddings | `sqlite` (default) · `qdrant` · `chroma` · `pgvector` | the vectors and `{doc_id, chunk_no}`, never text |
+| `vector` | similarity search over note embeddings | `sqlite` (default) · `qdrant` · `chroma` · `pgvector` · `milvus` | the vectors and `{doc_id, chunk_no}`, never text |
 | `graph` | the links between notes: neighbours, incoming links, link targets | `sqlite` (default) · `neo4j` · `memgraph` | document ids and links; names only with `--names` |
 
 What is sent is decided by the role, not by the backend: a backend is handed only that, so it cannot send
@@ -344,7 +344,7 @@ brain stores --docker-stop                 # stop them; the data stays, and the 
 
 - What to run comes from each backend's own declaration: a pinned image (`qdrant/qdrant:v1.19.2`,
   `neo4j:5.26.31-community`, `memgraph/memgraph:3.13.2`, `chromadb/chroma:1.5.9`,
-  `pgvector/pgvector:0.8.7-pg17`), ports bound to 127.0.0.1 only,
+  `pgvector/pgvector:0.8.7-pg17`, `milvusdb/milvus:v2.6.25`), ports bound to 127.0.0.1 only,
   `restart: unless-stopped`. One service per
   role: starting one leaves the other running; replacing a role's backend removes the old container and
   keeps its data folder.
