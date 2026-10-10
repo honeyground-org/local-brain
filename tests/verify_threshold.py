@@ -112,6 +112,7 @@ def top1(db, q):
 
 
 def main() -> int:
+    _needs.private_index()                 # ⛔ measure on a copy — the hook reads the live index meanwhile
     read = "--read" in sys.argv
     db = store.connect()
     _needs.labelled_sample()               # measures ★your★ labelled questions

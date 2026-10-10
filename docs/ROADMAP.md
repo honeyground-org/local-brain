@@ -57,7 +57,7 @@ A memory for coding agents that is **more efficient and performs better than the
 - A measurement never changes shared state that other processes read (trial settings stay in-process).
 - Long-running MCP servers pick up new code on disk by themselves.
 - A fresh clone with an empty home passes every check that does not need personal data
-  (`python3 tests/clean_room.py`: 45 green, 14 skipped, 0 red on macOS with a local Qdrant running, 2026-10-10).
+  (`python3 tests/clean_room.py`: 44 green, 16 skipped, 0 red on macOS with a local Qdrant running, 2026-10-10).
 
 **Release and contribution**
 - Public under Apache-2.0. This repository is the single source: there is no private copy to sync from.
@@ -100,10 +100,8 @@ A memory for coding agents that is **more efficient and performs better than the
   exist.
 
 ### 4. Checks to tighten
-- `verify_vs_grep` should skip (exit 77) when there is no evaluation set, and honour `BRAIN_EVAL_DIR`.
-- `verify_translit` should not clear the live bridge cache.
-- Replace absolute millisecond bars in `verify_vectors` with relative ones.
-- Keep checks from writing to the live threshold history.
+- None open: the five listed on 2026-10-07 were closed on 2026-10-10 (provider keys masked in #16; checks
+  measure a private copy of the index, skip without a set, and count requests instead of timing them).
 
 ## Working on brain
 

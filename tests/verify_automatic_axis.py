@@ -50,6 +50,7 @@ def sweep(db, A, C, t):
 
 
 def main():
+    _needs.private_index()                 # ⛔ measure on a copy — the hook reads the live index meanwhile
     print("=" * 72 + "\nAutomatic axis — does it count hits and noise ★together★\n" + "=" * 72)
     db = store.connect()
     _needs.labelled_sample()               # measures ★your★ labelled questions
