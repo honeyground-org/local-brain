@@ -20,7 +20,7 @@ jobs:
   clean-room:
     name: clean room · ${{ matrix.os }} · py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    # Windows is measured and shown, not yet required (docs/ROADMAP.md → Quality).
+    # every entry is required (Windows since 2026-10-10); `informational: true` would show one without requiring it
     continue-on-error: ${{ matrix.informational == true }}
     timeout-minutes: 30
     strategy:
@@ -31,7 +31,7 @@ jobs:
           - { os: ubuntu-latest, python: "3.10" }
           - { os: ubuntu-latest, python: "3.13", pythonpath: true }
           - { os: macos-latest, python: "3.13" }
-          - { os: windows-latest, python: "3.13", informational: true }
+          - { os: windows-latest, python: "3.13" }
     steps:
       - uses: actions/checkout@v7
         with:

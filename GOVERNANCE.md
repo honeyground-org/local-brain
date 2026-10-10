@@ -69,7 +69,7 @@ or raises the English-only ratchet.
 | high | 2, at least 1 maintainer | code owners; all five sections with measured numbers; the summary for reviewers |
 
 What the branch ruleset on `main` enforces: changes arrive by pull request only; the required checks
-pass (clean room on Linux and macOS, live databases, databases in Docker, release gates, PR rules,
+pass (clean room on Linux, macOS and Windows, live databases, databases in Docker, release gates, PR rules,
 review gate); one approval and the code owners; approvals are dismissed by a new push; review threads
 are resolved; history is linear (squash merges); no force pushes or deletion; merges go through the
 merge queue. The **review gate** adds what the ruleset cannot express — the second approval and the
