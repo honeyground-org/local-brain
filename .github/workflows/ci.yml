@@ -20,8 +20,8 @@ jobs:
   clean-room:
     name: clean room · ${{ matrix.os }} · py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    # every entry is required (Windows since 2026-10-10); `informational: true` would show one without requiring it
-    continue-on-error: ${{ matrix.informational == true }}
+    # every entry is required (Windows since 2026-10-10). To measure a new platform before requiring it, give its
+    # entry `informational: true` and add `continue-on-error: ${{ matrix.informational == true }}` here.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -93,6 +93,34 @@ jobs:
         env:
           BRAIN_TEST_DOCKER: "1"
         run: python tests/clean_room.py --strict verify_docker_stores
+
+  quality:
+    name: quality · recall on a frozen corpus, base vs head
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: the same questions to the base code and to this change (tests/verify_quality_ab.py)
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.base_ref }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          case "$EVENT" in
+            pull_request) set -- --base "origin/$PR_BASE" ;;
+            merge_group)  set -- --base "$QUEUE_BASE" --report ;;
+            push)         set -- --base "$BEFORE" --report ;;
+            *)            set -- --report ;;
+          esac
+          if [ "$EVENT" = push ] && [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then set -- --report; fi
+          PYTHONPATH=. python tests/verify_quality_ab.py "$@"
 
   gates:
     name: release gates · history, secrets, measurement code

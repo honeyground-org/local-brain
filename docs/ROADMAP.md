@@ -57,7 +57,7 @@ A memory for coding agents that is **more efficient and performs better than the
 - A measurement never changes shared state that other processes read (trial settings stay in-process).
 - Long-running MCP servers pick up new code on disk by themselves.
 - A fresh clone with an empty home passes every check that does not need personal data
-  (`python3 tests/clean_room.py`: 45 green, 13 skipped, 0 red on macOS with a local Qdrant running, 2026-10-10).
+  (`python3 tests/clean_room.py`: 45 green, 14 skipped, 0 red on macOS with a local Qdrant running, 2026-10-10).
 
 **Release and contribution**
 - Public under Apache-2.0. This repository is the single source: there is no private copy to sync from.
@@ -72,9 +72,14 @@ A memory for coding agents that is **more efficient and performs better than the
 ## What comes next
 
 ### 1. Open contribution
-- **A public evaluation corpus** — quality checks today run on the author's notes and skip in CI. A synthetic,
-  shareable corpus with labelled questions lets CI catch a change that lowers recall,
-  and lets the PR report show a recall number for every pull request.
+- **Labelled quality checks on someone else's notes** — the checks that judge the threshold against
+  labelled questions (`verify_threshold`, `verify_short`, `verify_score_honesty`, `verify_automatic_axis`)
+  still skip without a person's own sample. A synthetic labelled set was considered and rejected: this
+  repository never invents an evaluation query (§brain/proxy.py). Since 2026-10-10 CI catches a change that
+  lowers recall another way — `tests/verify_quality_ab.py` asks the base code and the change the same
+  inverse-cloze questions on this repository's own writing, frozen at the base (115 documents, 60
+  questions). It catches a fall; a rise there is not evidence of an improvement. What would close this
+  item is real people's labelled samples, shared with consent.
 - **More reviewers** — area owners for storage, retrieval, privacy and the behaviour layer, so a
   high-impact change no longer needs an admin bypass (GOVERNANCE.md → *Adding a maintainer or an area
   owner — how*; the `Bypass: roster` record narrows by itself as the roster grows).
