@@ -74,6 +74,9 @@ Rules that hold for every backend:
   real corpus — `chroma.py` measured 97–98% of the top 10 at `ef_search` 200 and 100% at 1000, and ships
   1000. A database that groups by document (Qdrant's `query/groups`) is asked to; one that cannot is asked
   for `n_docs × MAX_CHUNKS_PER_DOC` chunks, and each document's best one is kept.
+- **`ping()` means "it can answer", not "it is listening".** Milvus lists its collections at once after a
+  restart but cannot search for ~6 seconds; its ping searches one collection, so brain's readiness check
+  and `brain stores` wait for the real thing.
 - **`target()` is stable** — it is the key of the ledger that records what was sent. It must change when
   the role's `namespace` option changes.
 - **Raise `stores.StoreError`** for anything the database does not do; brain then answers from the local

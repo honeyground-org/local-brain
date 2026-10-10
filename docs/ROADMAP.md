@@ -42,7 +42,7 @@ A memory for coding agents that is **more efficient and performs better than the
 
 **Storage**
 - Vector search and graph traversal can each be served by a dedicated database: `vector` = sqlite · Qdrant · Chroma ·
-  pgvector (over brain's own Postgres client, `brain/backends/_pgwire.py`),
+  pgvector (over brain's own Postgres client, `brain/backends/_pgwire.py`) · Milvus,
   `graph` = sqlite · Neo4j · Memgraph (over brain's own Bolt client, `brain/backends/_bolt.py`). A ledger sends only the difference; a database answers only once it is in sync.
 - A backend is one file in `brain/backends/` (2026-10-10): its choice, option flags, Docker container,
   installer flags and status line come from its declaration, and `verify_store_adapters` proves it by
@@ -90,8 +90,9 @@ A memory for coding agents that is **more efficient and performs better than the
   there, §hosts.utf8_stdio), but no person has run brain inside Claude Code or Codex on Windows yet.
 
 ### 3. Storage
-- More backends, one file each (docs/STORAGE.md): Milvus (vector); another Bolt or Postgres database (Apache
-  AGE for the graph role, for example) is one file now that both clients exist.
+- More backends, one file each (docs/STORAGE.md): every vector database the roadmap named is in. Another
+  Bolt or Postgres database (Apache AGE for the graph role, for example) is one file now that both clients
+  exist.
 
 ### 4. Checks to tighten
 - `verify_vs_grep` should skip (exit 77) when there is no evaluation set, and honour `BRAIN_EVAL_DIR`.
