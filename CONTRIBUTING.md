@@ -96,7 +96,7 @@ Open it as a **draft** while you are still working; the checks run, nobody is as
 
 | Check | Runs on | What it does | When it is red |
 |---|---|---|---|
-| **clean room** (Linux, macOS; Windows shown) | every push | every `tests/verify_*.py` on the tracked files with an empty home, Python 3.8 – 3.13 | the log names the check; reproduce with `python3 tests/clean_room.py <name>` |
+| **clean room** (Linux, macOS, Windows) | every push | every `tests/verify_*.py` on the tracked files with an empty home, Python 3.8 – 3.13 | the log names the check; reproduce with `python3 tests/clean_room.py <name>` |
 | **live databases** | every push | the same answers from Qdrant and Neo4j as from the local copy | see `tests/verify_stores_live.py` |
 | **databases in Docker** | every push | for every backend that declares an image: the whole contract, and data that survives removing and recreating the containers | see `tests/verify_docker_stores.py` |
 | **release gates** | every push | measurement code bumped, no secrets (gitleaks), no personal data, history included | the step says which file and line |
