@@ -204,6 +204,10 @@ check("there are workflows to look at", bool(flows), " · ".join(flows))
 from tests import clean_room  # noqa: E402
 leak = [k for k in clean_room.PASS_THROUGH if r.PAID_SECRET.search("secrets." + k)]
 check("the clean room passes no paid key to a check", not leak, ", ".join(leak))
+probe = {"BRAIN_TEST_QDRANT_URL": "x", "BRAIN_TEST_ANY_NEW_DB_URL": "x", "ANTHROPIC_API_KEY": "x", "OPENAI_API_KEY": "x"}
+check("…and its BRAIN_TEST_ prefix lets a new backend's address through, but no key",
+      sorted(clean_room.passed(probe)) == ["BRAIN_TEST_ANY_NEW_DB_URL", "BRAIN_TEST_QDRANT_URL"]
+      and not r.PAID_SECRET.search("secrets." + clean_room.PASS_PREFIX), str(sorted(clean_room.passed(probe))))
 for label, text in [
         ("⛔ an AI review action", "    - uses: anthropics/claude-code-action@v1\n"),
         ("⛔ a paid key", "      api_key: ${{ secrets.ANTHROPIC_API_KEY }}\n"),

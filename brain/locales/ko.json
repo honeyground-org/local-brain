@@ -589,7 +589,7 @@
  "unit.pct": "%",
  "vectors.progress": "{done}/{total} 문서 · {chunks} 청크 · {sec}초 · 분당 {rate} 청크 · {waited}초 대기",
  "vectors.rate_limit_wait": "⏳ 한도 — {wait}초 대기(시도 {attempt}/5) · 다른 프로세스가 같은 할당량을 쓰는지 확인하라",
- "cli.help.cmd.stores": "저장소 백엔드 — 벡터 검색과 그래프를 어느 DB가 맡는가 (sqlite · qdrant · neo4j)",
+ "cli.help.cmd.stores": "저장소 백엔드 — 벡터 검색과 그래프를 어느 DB가 맡는가 (`brain stores` 로 목록 확인)",
  "cli.stores.title": "저장소 — 어떤 질문을 어느 DB가 답하는가 (로컬 사본은 항상 남는다)",
  "cli.stores.role.vector.what": "노트 임베딩 위의 유사도 검색",
  "cli.stores.role.graph.what": "노트 사이 링크 탐색",
@@ -609,8 +609,8 @@
  "cli.stores.not_synced": "동기화 전 — `brain stores --sync` 전까지 로컬 사본이 답한다",
  "cli.stores.last_error": "마지막 오류 {at}: {error}",
  "cli.stores.secret_hint": "비밀번호  {env}, 또는 {path} 의 \"{field}\"",
- "cli.stores.choices": "선택지    vector = sqlite · qdrant      graph = sqlite · neo4j",
- "cli.stores.how_to_change": "바꾸기    brain stores --set vector=qdrant --url http://localhost:6333   ·   --sync   ·   --check",
+ "cli.stores.choices": "선택지    {choices}",
+ "cli.stores.how_to_change": "바꾸기    brain stores --set vector=qdrant --url http://localhost:6333   ·   --docker graph=이름   ·   --sync   ·   --check",
  "cli.stores.set": "{role} 설정 → {entry}",
  "cli.stores.one_role_for_options": "--url 과 백엔드 옵션은 한 번에 한 역할에만 적용된다",
  "cli.stores.sync.title": "동기화",
@@ -640,5 +640,9 @@
  "cli.stores.docker_failed": "도커 DB 를 시작하지 못함: {why}",
  "cli.stores.docker_stopped": "도커 DB 를 멈췄다 — 데이터는 {data} 에 그대로, 다시 켤 때까지 로컬 사본이 답한다",
  "cli.stores.healed": "{role}  DB 가 보낸 것을 잃어버렸다 ({expected} 중 {held}) — 로컬 사본으로 다시 채움",
- "cli.stores.bad_role": "역할은 {roles} 중 하나"
+ "cli.stores.bad_docker": "역할도, 도커로 띄울 수 있는 백엔드도 아닙니다: {token} — 역할: {roles} · 백엔드: {backends}",
+ "cli.stores.broken": "제공 안 됨  {module}: {why}",
+ "install.stores_set": "{role} → {backend} ({url})",
+ "install.stores_no_docker": "{backend} 는 brain 에 도커 이미지가 없습니다 — 대신 주소를 주세요: --{role}-store {backend}=URL",
+ "install.stores_bad": "--{role}-store {value}: {choices} 중에서 고르세요"
 }

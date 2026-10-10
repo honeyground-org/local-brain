@@ -589,7 +589,7 @@
  "unit.pct": "%",
  "vectors.progress": "{done}/{total}文書 · {chunks}チャンク · {sec}秒 · 分あたり{rate}チャンク · {waited}秒待機",
  "vectors.rate_limit_wait": "⏳ 上限 — {wait}秒待機(試行{attempt}/5) · 別プロセスが同じ割当を使っていないか確認せよ",
- "cli.help.cmd.stores": "ストレージのバックエンド — ベクトル検索とグラフをどのDBが担うか (sqlite · qdrant · neo4j)",
+ "cli.help.cmd.stores": "ストレージのバックエンド — ベクトル検索とグラフをどのDBが担うか (`brain stores` で一覧)",
  "cli.stores.title": "ストレージ — どの問いにどのDBが答えるか (ローカルの写しは常に残る)",
  "cli.stores.role.vector.what": "ノートの埋め込みに対する類似検索",
  "cli.stores.role.graph.what": "ノート間のリンクの探索",
@@ -609,8 +609,8 @@
  "cli.stores.not_synced": "未同期 — `brain stores --sync` まではローカルの写しが答える",
  "cli.stores.last_error": "最後のエラー {at}: {error}",
  "cli.stores.secret_hint": "パスワード  {env}、または {path} の \"{field}\"",
- "cli.stores.choices": "選択肢    vector = sqlite · qdrant      graph = sqlite · neo4j",
- "cli.stores.how_to_change": "変更      brain stores --set vector=qdrant --url http://localhost:6333   ·   --sync   ·   --check",
+ "cli.stores.choices": "選択肢    {choices}",
+ "cli.stores.how_to_change": "変更      brain stores --set vector=qdrant --url http://localhost:6333   ·   --docker graph=名前   ·   --sync   ·   --check",
  "cli.stores.set": "{role} を設定 → {entry}",
  "cli.stores.one_role_for_options": "--url とバックエンドのオプションは一度に一つの役割にだけ適用される",
  "cli.stores.sync.title": "同期",
@@ -640,5 +640,9 @@
  "cli.stores.docker_failed": "Docker のDBを起動できなかった: {why}",
  "cli.stores.docker_stopped": "Docker のDBを停止 — データは {data} に残る。戻るまではローカルの写しが答える",
  "cli.stores.healed": "{role}  DBが送られたものを失っていた ({expected} 中 {held}) — ローカルの写しから入れ直した",
- "cli.stores.bad_role": "役割は {roles}"
+ "cli.stores.bad_docker": "役割でも Docker で動くバックエンドでもありません: {token} — 役割: {roles} · バックエンド: {backends}",
+ "cli.stores.broken": "使えません  {module}: {why}",
+ "install.stores_set": "{role} → {backend} ({url})",
+ "install.stores_no_docker": "{backend} には brain の Docker イメージがありません — 代わりにアドレスを指定: --{role}-store {backend}=URL",
+ "install.stores_bad": "--{role}-store {value}: {choices} から選んでください"
 }

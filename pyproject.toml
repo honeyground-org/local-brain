@@ -44,7 +44,8 @@ brain-rules-daily = "brain.jobs:rules_daily"
 brain-install = "brain.install:main"
 
 [tool.setuptools]
-packages = ["brain"]
+# ⛔ every subpackage by name — `brain.backends` holds one file per storage backend (§brain/stores.py)
+packages = ["brain", "brain.backends"]
 
 # ⛔ ★only goes inside the package★ — something like `../i18n/*.json` that climbs upward makes pip unpack it
 #    at ★the top of site-packages★, polluting someone else's namespace.

@@ -5,23 +5,33 @@ Every backend answers one question the same way: for a unit query vector, the do
 ratio its gate uses, so a backend never has to know about gates.
 
   sqlite   a full scan of the local `vectors` table (the canonical copy) — the default
-  qdrant   Qdrant's HTTP API; one collection per (embedding model, dimension); grouped by document
+  others   one file each in `brain/backends/` (§stores "One file per backend")
 
-Add a backend: a class with `backend`, `remote`, `target`, `ping`, `search` (and, if remote,
-`ensure`, `reset`, `upsert`, `delete_docs`, `count`), then a row in `make`.
+A dedicated vector backend is a class with the methods in `CONTRACT`:
+
+  target(model, dim) → str        where this copy lives — the ledger's key, so it must be stable; it must
+                                  include the role's `namespace` option when one is set (§stores.ROLE_OPTIONS)
+  ping() → {ok, version}          raises StoreError when the database does not answer
+  ensure(model, dim)              create the collection (or table, or index) when it is not there
+  reset(model, dim)               empty it and ensure it again
+  drop(model, dim)                remove everything this brain wrote there
+  upsert(model, dim, rows)        rows = [(doc_id, chunk_no, unit vector)] — ★all it is ever sent★
+  delete_docs(model, dim, ids)    every chunk of these documents
+  search(db, q, model, dim, n)    [(doc_id, cosine of its closest chunk)], best first, ties by doc_id
+  count(db, model, dim) → int     chunks held — compared with the ledger to notice a lost copy
 """
 from __future__ import annotations
 
 import array
 import operator
-import re
 import sqlite3
 from typing import Dict, List, Sequence, Tuple
 
 from brain import stores
 
 DOCS_PER_BATCH = 32            # one upsert request — ≈150 chunks of 768 floats, about 1–2 MB of JSON
-POINT_STRIDE = 1000            # point id = doc_id × stride + chunk_no (a document has at most 12 chunks)
+
+CONTRACT = ("target", "ping", "ensure", "reset", "drop", "upsert", "delete_docs", "search", "count")
 
 
 def _unpack(blob: bytes) -> array.array:
@@ -62,94 +72,12 @@ class SqliteVectors:
                           "WHERE v.model=? AND v.dim=?", (model, dim)).fetchone()[0]
 
 
-class QdrantVectors:
-    """Qdrant over its HTTP API. What it is sent: the vectors and `{doc_id, chunk_no}` — never text."""
-    backend = "qdrant"
-    remote = True
-
-    def __init__(self, c: dict):
-        o = c.get("options") or {}
-        self.url = c["url"]
-        self.prefix = re.sub(r"[^A-Za-z0-9_-]", "_", str(o.get("collection_prefix") or "brain"))
-        # exact = brute force inside Qdrant (the same answers as the local scan); otherwise HNSW
-        self.exact = bool(o.get("exact", False))
-        key = stores.secret(c)
-        self.headers = {"api-key": key} if key else {}
-
-    def collection(self, model: str, dim: int) -> str:
-        return "%s_%s_%d" % (self.prefix, re.sub(r"[^A-Za-z0-9_-]", "_", model), dim)
-
-    def target(self, model: str, dim: int) -> str:
-        return "qdrant:%s/%s" % (self.url, self.collection(model, dim))
-
-    def _call(self, method: str, path: str, body=None, timeout: float = 0.0) -> dict:
-        return stores.http_json(method, self.url + path, body, self.headers,
-                                timeout or stores.QUERY_TIMEOUT)
-
-    def ping(self) -> dict:
-        r = self._call("GET", "/")
-        return {"ok": True, "version": r.get("version", "")}
-
-    def ensure(self, model: str, dim: int) -> None:
-        name = self.collection(model, dim)
-        try:
-            info = self._call("GET", "/collections/%s" % name, timeout=stores.SYNC_TIMEOUT)
-            size = (((info.get("result") or {}).get("config") or {}).get("params") or {}) \
-                .get("vectors", {}).get("size")
-            if size and int(size) != int(dim):
-                raise stores.StoreError("collection %s holds %s-dimensional vectors, not %d" % (name, size, dim))
-            return
-        except stores.StoreError as exc:
-            if "HTTP 404" not in str(exc):
-                raise
-        # Cosine: Qdrant normalises on the way in — the vectors already are unit length (§vectors._unit)
-        self._call("PUT", "/collections/%s" % name, {"vectors": {"size": int(dim), "distance": "Cosine"}},
-                   timeout=stores.SYNC_TIMEOUT)
-        self._call("PUT", "/collections/%s/index?wait=true" % name,
-                   {"field_name": "doc_id", "field_schema": "integer"}, timeout=stores.SYNC_TIMEOUT)
-
-    def reset(self, model: str, dim: int) -> None:
-        try:
-            self._call("DELETE", "/collections/%s" % self.collection(model, dim), timeout=stores.SYNC_TIMEOUT)
-        except stores.StoreError as exc:
-            if "HTTP 404" not in str(exc):
-                raise
-        self.ensure(model, dim)
-
-    def delete_docs(self, model: str, dim: int, doc_ids: Sequence[int]) -> None:
-        if doc_ids:
-            self._call("POST", "/collections/%s/points/delete?wait=true" % self.collection(model, dim),
-                       {"filter": {"must": [{"key": "doc_id", "match": {"any": [int(i) for i in doc_ids]}}]}},
-                       timeout=stores.SYNC_TIMEOUT)
-
-    def upsert(self, model: str, dim: int, rows: Sequence[Tuple[int, int, Sequence[float]]]) -> None:
-        if rows:
-            self._call("PUT", "/collections/%s/points?wait=true" % self.collection(model, dim),
-                       {"points": [{"id": int(d) * POINT_STRIDE + int(c), "vector": [float(x) for x in v],
-                                    "payload": {"doc_id": int(d), "chunk_no": int(c)}} for d, c, v in rows]},
-                       timeout=stores.SYNC_TIMEOUT)
-
-    def search(self, db: sqlite3.Connection, q: Sequence[float], model: str, dim: int,
-               n_docs: int) -> List[Tuple[int, float]]:
-        r = self._call("POST", "/collections/%s/points/query/groups" % self.collection(model, dim),
-                       {"query": [float(x) for x in q], "group_by": "doc_id", "group_size": 1,
-                        "limit": int(n_docs), "with_payload": False, "params": {"exact": self.exact}})
-        out = []
-        for g in ((r.get("result") or {}).get("groups") or []):
-            hits = g.get("hits") or []
-            if hits:
-                out.append((int(g["id"]), float(hits[0]["score"])))
-        return sorted(out, key=lambda kv: (-kv[1], kv[0]))
-
-    def count(self, db: sqlite3.Connection, model: str, dim: int) -> int:
-        r = self._call("POST", "/collections/%s/points/count" % self.collection(model, dim), {"exact": True})
-        return int((r.get("result") or {}).get("count") or 0)
-
-
 def make(c: dict):
-    if c.get("backend") == "qdrant" and not c.get("error"):
-        return QdrantVectors(c)
-    return SqliteVectors(c)
+    """The backend a choice names (§stores.backends) — the local copy when it names none that loads."""
+    b = None if c.get("error") else stores.backends("vector").get(c.get("backend", ""))
+    if b is None or b.make is None:
+        return SqliteVectors(c)
+    return b.make(c)
 
 
 def sync(db: sqlite3.Connection, backend, full: bool = False, progress: bool = False) -> dict:

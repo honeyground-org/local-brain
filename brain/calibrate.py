@@ -458,7 +458,12 @@ def measure(db: sqlite3.Connection) -> dict:
 #   18 (2026-10-07)  a sync compares what a dedicated database holds with what its ledger says it was sent and
 #       refills it from the local copy when they differ; an answer of "not found" marks the target out of sync.
 #       No question is answered differently; bumped because `stores` and `graphstore` changed.
-CODE_GENERATION = 18
+#   19 (2026-10-10)  ★a storage backend is one file★ (§stores "One file per backend"): Qdrant and Neo4j moved into
+#       `brain/backends/`, the registry discovers them, and a document's name is scrubbed by the graph role's
+#       sync instead of inside the Neo4j class. The local copy's questions are the same SQL and every
+#       target string is unchanged (an existing install stays in sync); bumped because `stores` and
+#       `graphstore` changed.
+CODE_GENERATION = 19
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

@@ -589,7 +589,7 @@
  "unit.pct": "%",
  "vectors.progress": "{done}/{total} docs · {chunks} chunks · {sec}s · {rate} chunks/min · attente {waited}s",
  "vectors.rate_limit_wait": "⏳ limite — attente {wait}s (tentative {attempt}/5) · vérifiez si un autre processus utilise le même quota",
- "cli.help.cmd.stores": "Backends de stockage — quelle base sert la recherche vectorielle et le graphe (sqlite · qdrant · neo4j)",
+ "cli.help.cmd.stores": "Backends de stockage — quelle base sert la recherche vectorielle et le graphe (`brain stores` les liste)",
  "cli.stores.title": "Stockage — quelle base répond à chaque type de question (la copie locale reste toujours)",
  "cli.stores.role.vector.what": "recherche par similarité sur les embeddings des notes",
  "cli.stores.role.graph.what": "parcours des liens entre les notes",
@@ -609,8 +609,8 @@
  "cli.stores.not_synced": "non synchronisé — la copie locale répond jusqu'à `brain stores --sync`",
  "cli.stores.last_error": "dernière erreur {at} : {error}",
  "cli.stores.secret_hint": "mot de passe  {env}, ou \"{field}\" dans {path}",
- "cli.stores.choices": "choix     vector = sqlite · qdrant      graph = sqlite · neo4j",
- "cli.stores.how_to_change": "changer   brain stores --set vector=qdrant --url http://localhost:6333   ·   --sync   ·   --check",
+ "cli.stores.choices": "choix     {choices}",
+ "cli.stores.how_to_change": "changer   brain stores --set vector=qdrant --url http://localhost:6333   ·   --docker graph=NOM   ·   --sync   ·   --check",
  "cli.stores.set": "{role} défini → {entry}",
  "cli.stores.one_role_for_options": "--url et les options du backend s'appliquent à un rôle à la fois",
  "cli.stores.sync.title": "synchronisation",
@@ -640,5 +640,9 @@
  "cli.stores.docker_failed": "bases Docker non démarrées : {why}",
  "cli.stores.docker_stopped": "bases Docker arrêtées — les données restent dans {data} ; la copie locale répond jusqu'à leur retour",
  "cli.stores.healed": "{role}  la base n'avait plus ce qu'elle avait reçu ({held} sur {expected}) — remplie à nouveau depuis la copie locale",
- "cli.stores.bad_role": "rôles possibles : {roles}"
+ "cli.stores.bad_docker": "ni un rôle ni un backend qui tourne dans Docker : {token} — rôles : {roles} ; backends : {backends}",
+ "cli.stores.broken": "non proposé  {module} : {why}",
+ "install.stores_set": "{role} → {backend} à {url}",
+ "install.stores_no_docker": "{backend} n'a pas d'image Docker dans brain — donnez plutôt son adresse : --{role}-store {backend}=URL",
+ "install.stores_bad": "--{role}-store {value} : choisissez parmi {choices}"
 }

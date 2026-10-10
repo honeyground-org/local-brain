@@ -146,7 +146,7 @@ All commands work from any directory once installed (`brain <command>`).
 | Command | What it does |
 |---|---|
 | `brain engines` | Which AI engine fills each role (embed · judge), what it is sent, how to change it |
-| `brain stores` | Which database serves vector search and the graph (sqlite · qdrant · neo4j); `--sync` · `--check` |
+| `brain stores` | Which database serves vector search and the graph (the local copy · any backend in `brain/backends/`); `--sync` · `--check` |
 | `brain vec status\|build\|calibrate\|search` | Meaning-based search via remote embeddings; `calibrate` also re-measures the judge |
 | `brain calibrate` | Re-measure the lexical threshold against this corpus |
 | `brain eval-init` | Draft an evaluation set from *your* history (someone else's gold is theirs) |
@@ -244,6 +244,7 @@ The server also picks up new code on disk by itself: after an update there is no
 ./install.sh --all --embed gemini --judge gemini        # + meaning-based search (GEMINI_API_KEY)
 ./install.sh --all --embed openai --judge anthropic     # mix providers (OPENAI_API_KEY, ANTHROPIC_API_KEY)
 ./install.sh --all --stores docker      # + vector search on Qdrant and the graph on Neo4j, both in Docker
+./install.sh --all --graph-store neo4j  # + only the graph, in Docker — each role is chosen on its own
 ./install.sh --help                     # choose what to enable
 ```
 
@@ -302,10 +303,14 @@ Two kinds of question have databases built for them, and brain lets each one be 
 | `vector` | similarity search over note embeddings | `sqlite` (default) · `qdrant` | the vectors and `{doc_id, chunk_no}`, never text |
 | `graph` | the links between notes: neighbours, incoming links, link targets | `sqlite` (default) · `neo4j` | document ids and links; names only with `--names` |
 
+What is sent is decided by the role, not by the backend: a backend is handed only that, so it cannot send
+more. Each backend is one file in `brain/backends/` — see [Adding a storage backend](docs/STORAGE.md).
+
 ```bash
 brain stores                                                   # which database answers each role, and whether it is in sync
 brain stores --set vector=qdrant --url http://localhost:6333   # choose, then sync the local copy across
 brain stores --set graph=neo4j --url http://localhost:7474     # password from NEO4J_PASSWORD or secrets.json
+brain stores --help                                            # every backend's options, one flag each
 brain stores --check                                           # the same questions to both, compared
 brain stores --set vector=sqlite                               # back to the local copy
 ```
@@ -330,26 +335,32 @@ with Qdrant, and one-hop neighbours for every document **3.4 s → 0.48 s** with
 ### Run them in Docker
 
 ```bash
-./install.sh --stores docker      # at install time
-brain stores --docker             # any time later: both, or just `vector` / `graph`
-brain stores --docker-stop        # stop them; the data stays, and the local copy answers meanwhile
+./install.sh --stores docker               # at install time: every role's default (Qdrant, Neo4j)
+./install.sh --graph-store neo4j           # or one role on its own; NAME=URL for a server that already runs
+brain stores --docker                      # any time later: both defaults
+brain stores --docker graph=neo4j          # or one role, with the backend you name; the other keeps running
+brain stores --docker-stop                 # stop them; the data stays, and the local copy answers meanwhile
 ```
 
-- Pinned images (`qdrant/qdrant:v1.19.2`, `neo4j:5.26.31-community`), ports bound to 127.0.0.1 only,
-  `restart: unless-stopped`.
-- **The data lives in plain folders under the brain's home** (`<home>/stores/qdrant`, `<home>/stores/neo4j/`),
+- What to run comes from each backend's own declaration: a pinned image (`qdrant/qdrant:v1.19.2`,
+  `neo4j:5.26.31-community`), ports bound to 127.0.0.1 only, `restart: unless-stopped`. One service per
+  role: starting one leaves the other running; replacing a role's backend removes the old container and
+  keeps its data folder.
+- **The data lives in plain folders under the brain's home** (`<home>/stores/<backend>/`),
   not in Docker volumes, so removing the containers, the images or Docker itself leaves it in place.
   Measured: with the containers removed and created again, nothing had to be sent again and every answer
   matched.
 - **If a database ever comes back empty, it refills itself.** Each sync compares what the database holds
   with what it was sent; when they differ, the next sync rebuilds it from the local copy.
-- The Neo4j password is generated into `secrets.json` (0600) and handed to Docker by name, never on a
-  command line.
+- A password a backend needs (Neo4j's) is generated into `secrets.json` (0600) and handed to Docker by
+  name, never on a command line.
 - After a reboot the containers come back as soon as Docker starts. On macOS and Windows, turn on
   *Start Docker Desktop when you sign in*; until Docker is up, the local copy answers.
 
-Adding another database is one class in `brain/vecstore.py` or `brain/graphstore.py` and one row in
-`brain/stores.py`; `tests/verify_stores.py` states the contract it must meet.
+Adding another database is one file in `brain/backends/` and nothing else: its choice, its option flags,
+its Docker container, the installer's `--vector-store` / `--graph-store` and the status screen all come
+from that file, and `tests/verify_store_adapters.py` proves it by dropping two new backends into a copy
+of brain and running the whole contract against them. How to write one: [docs/STORAGE.md](docs/STORAGE.md).
 
 ## Who sets which number
 
@@ -385,7 +396,7 @@ Two kinds live side by side. Most run anywhere on fixtures (`verify_host_neutral
 **your own** notes, labelled questions or session history — on a machine without them they stop with
 **exit code 77 (skipped)** and say what is missing, rather than pass on nothing or fail for no reason.
 `python3 tests/clean_room.py` runs every check the way CI does — the tracked files copied into an
-empty folder, a fresh empty home for each check. Measured 2026-10-07 on macOS: 41 green, 13 skipped,
+empty folder, a fresh empty home for each check. Measured 2026-10-10 on macOS: 42 green, 13 skipped,
 0 red (with a local Qdrant running; without one, the live store check is one more skip). CI runs it on
 Linux, macOS and Windows with Python 3.8 – 3.13, and supplies Qdrant, Neo4j and Docker so nothing that
 matters is skipped there.

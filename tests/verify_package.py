@@ -114,6 +114,16 @@ def main():
             capture_output=True, text=True, cwd=tmp, env=env).stdout.strip()
         check("config lives ★outside site-packages★ (deleting the package leaves the config behind)",
               sp not in out, out)
+
+        # ── ⑥ ★do the storage backends ship★ — they are a subpackage, which `packages` must list ──────
+        # ⛔ with `packages = ["brain"]` alone, brain/backends/ is left out of the install: every database
+        #    but the local copy would be gone, and `brain stores` would not say why
+        out = subprocess.run(
+            [py, "-c", "from brain import stores; print(sorted(stores.backends()), stores.broken())"],
+            capture_output=True, text=True, cwd=tmp, env=env)
+        check("★the storage backends ship inside the package★ (one file each in brain/backends/)",
+              out.returncode == 0 and "'qdrant'" in out.stdout and "'neo4j'" in out.stdout
+              and out.stdout.strip().endswith("[]"), (out.stdout.strip() or out.stderr.strip()[-150:]))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         for d in ("build", "local_brain.egg-info"):

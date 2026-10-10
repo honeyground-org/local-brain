@@ -589,7 +589,7 @@
  "unit.pct": "%",
  "vectors.progress": "{done}/{total} Dok. · {chunks} Chunks · {sec}s · {rate} Chunks/min · gewartet {waited}s",
  "vectors.rate_limit_wait": "⏳ Limit — warte {wait}s (Versuch {attempt}/5) · prüfen, ob ein anderer Prozess dasselbe Kontingent nutzt",
- "cli.help.cmd.stores": "Speicher-Backends — welche Datenbank Vektorsuche und Graph bedient (sqlite · qdrant · neo4j)",
+ "cli.help.cmd.stores": "Speicher-Backends — welche Datenbank Vektorsuche und Graph bedient (`brain stores` listet sie auf)",
  "cli.stores.title": "Speicher — welche Datenbank welche Fragen beantwortet (die lokale Kopie bleibt immer)",
  "cli.stores.role.vector.what": "Ähnlichkeitssuche über Notiz-Embeddings",
  "cli.stores.role.graph.what": "Durchlaufen der Links zwischen Notizen",
@@ -609,8 +609,8 @@
  "cli.stores.not_synced": "nicht synchron — die lokale Kopie antwortet bis `brain stores --sync`",
  "cli.stores.last_error": "letzter Fehler {at}: {error}",
  "cli.stores.secret_hint": "Passwort  {env} oder \"{field}\" in {path}",
- "cli.stores.choices": "Auswahl   vector = sqlite · qdrant      graph = sqlite · neo4j",
- "cli.stores.how_to_change": "ändern    brain stores --set vector=qdrant --url http://localhost:6333   ·   --sync   ·   --check",
+ "cli.stores.choices": "Auswahl   {choices}",
+ "cli.stores.how_to_change": "ändern    brain stores --set vector=qdrant --url http://localhost:6333   ·   --docker graph=NAME   ·   --sync   ·   --check",
  "cli.stores.set": "{role} gesetzt → {entry}",
  "cli.stores.one_role_for_options": "--url und Backend-Optionen gelten jeweils für eine Rolle",
  "cli.stores.sync.title": "Synchronisierung",
@@ -640,5 +640,9 @@
  "cli.stores.docker_failed": "Docker-Datenbanken nicht gestartet: {why}",
  "cli.stores.docker_stopped": "Docker-Datenbanken gestoppt — die Daten bleiben in {data}; bis sie zurück sind, antwortet die lokale Kopie",
  "cli.stores.healed": "{role}  die Datenbank hielt nicht mehr, was sie bekam ({held} von {expected}) — aus der lokalen Kopie neu gefüllt",
- "cli.stores.bad_role": "Rollen: {roles}"
+ "cli.stores.bad_docker": "weder eine Rolle noch ein Backend, das in Docker läuft: {token} — Rollen: {roles}; Backends: {backends}",
+ "cli.stores.broken": "nicht angeboten  {module}: {why}",
+ "install.stores_set": "{role} → {backend} unter {url}",
+ "install.stores_no_docker": "{backend} hat in brain kein Docker-Image — gib stattdessen seine Adresse an: --{role}-store {backend}=URL",
+ "install.stores_bad": "--{role}-store {value}: wähle eines von {choices}"
 }
