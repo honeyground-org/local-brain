@@ -20,6 +20,11 @@ paired with each graph backend (round-robin); for every pair:
   ⑥ with the data folders emptied, the next sync notices and refills both from the local copy
   ⑦ the whole contract against the containers (§tests/_store_contract): an edit and a removal through
      indexing, a full rebuild, a lost copy refilled, an outage answered by the local copy
+  ⑧ ★nothing leaves the machine★ — every container is watched from inside its own network namespace for
+     the whole round, and opens no connection to an address off this machine (a control container that
+     does connect out must be seen first, or the watch proves nothing). Measured 2026-10-10: Qdrant and
+     Memgraph with their reporting on connect to telemetry.qdrant.io / telemetry.memgraph.com within a
+     minute; with brain's settings, nothing
 
 How to run:  PYTHONPATH=. python3 tests/verify_docker_stores.py
              BRAIN_TEST_DOCKER=1 PYTHONPATH=. python3 tests/verify_docker_stores.py
@@ -33,6 +38,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -138,6 +144,73 @@ def offline() -> None:
     check("says what it would do", len(said) == 2 and all("would" in s for s in said), said[0][:90] if said else "")
 
 
+WATCH_IMAGE = "alpine:3.20"          # a shell and /proc — joined to the watched container's network namespace
+# ⛔ how long each backend is watched, at least — Qdrant and Memgraph with reporting on connected out within
+#    40–75 s (2026-10-10); a round that ends sooner is topped up with the containers idle
+MIN_WATCH = float(os.environ.get("BRAIN_TEST_EGRESS_SEC", "90") or 90)
+SEEN: dict = {}
+WATCHED: dict = {}
+
+
+class Egress:
+    """Every TCP connection a container's network namespace opens to an address off this machine.
+
+    A second container joins its network namespace (`--net container:<name>`) and reads /proc/net/tcp and
+    tcp6 five times a second. A connection is seen even if it never completes (SYN_SENT), so a blocked
+    attempt to report home counts too.
+    """
+
+    def __init__(self, container: str):
+        import threading
+        self.container, self.seen, self.t0 = container, set(), time.time()
+        self.p = subprocess.Popen(["docker", "run", "--rm", "--net", "container:" + container, WATCH_IMAGE, "sh", "-c",
+                                   "while :; do cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; sleep 0.2; done"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+                                  errors="replace")
+        self.thread = threading.Thread(target=self._read, daemon=True)
+        self.thread.start()
+
+    def _read(self) -> None:
+        import ipaddress
+        for line in self.p.stdout:
+            f = line.split()
+            if len(f) < 3 or not f[0].endswith(":") or ":" not in f[2]:
+                continue
+            h, port = f[2].split(":")
+            try:
+                if len(h) == 8:
+                    addr = ipaddress.ip_address(bytes.fromhex(h)[::-1])
+                else:
+                    addr = ipaddress.ip_address(b"".join(bytes.fromhex(h[i:i + 8])[::-1] for i in range(0, 32, 8)))
+                    addr = addr.ipv4_mapped or addr
+            except ValueError:
+                continue
+            if addr.is_global:
+                self.seen.add("%s:%d" % (addr, int(port, 16)))
+
+    def stop(self) -> set:
+        self.p.kill()
+        self.thread.join(timeout=10)
+        self.watched = time.time() - self.t0
+        return self.seen
+
+
+def egress_control() -> bool:
+    """The watch must see a container that does connect out — else a green ⑧ would be a watch that sees nothing."""
+    name = "%s-egress-probe" % dk.project()
+    subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+    subprocess.run(["docker", "run", "-d", "--name", name, WATCH_IMAGE, "sh", "-c",
+                    "while :; do wget -q -T 1 -O /dev/null http://1.1.1.1/ 2>/dev/null; sleep 0.3; done"],
+                   capture_output=True, timeout=300)
+    w = Egress(name)
+    time.sleep(6)
+    seen = w.stop()
+    subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+    check("(control) the watch sees a container that connects off the machine", any(s.startswith("1.1.1.1:")
+                                                                                   for s in seen), ", ".join(sorted(seen)))
+    return any(s.startswith("1.1.1.1:") for s in seen)
+
+
 def same(db, roles, label: str) -> None:
     contract.same(db, roles, check, label)
 
@@ -182,10 +255,23 @@ def chosen_rounds() -> list:
     return [{r: per[r][i % len(per[r])] for r in roles} for i in range(max(len(per[r]) for r in roles))]
 
 
-def live_round(services: dict) -> None:
+def live_round(services: dict, watching: bool) -> None:
     roles = tuple(services)
     what = " + ".join("%s %s" % kv for kv in services.items())
     db, mem = contract.prepare(os.path.join(_TMP, "-".join(services.values())), {})
+    watches: dict = {}
+
+    def watch(on: bool) -> None:
+        """Watch every container of the round while it runs; a restart or removal ends a watch."""
+        if not watching:
+            return
+        for n, w in list(watches.items()):
+            SEEN[n] = SEEN.get(n, set()) | w.stop()
+            WATCHED[n] = WATCHED.get(n, 0.0) + w.watched
+            del watches[n]
+        if on:
+            for n in services.values():
+                watches[n] = Egress("%s-%s" % (dk.project(), n))
     try:
         print("\n④ [%s] up, sync, restart" % what)
         r = dk.up(services)
@@ -198,10 +284,13 @@ def live_round(services: dict) -> None:
                                   "%s-%s" % (dk.project(), name)], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
             check("%s: the running container has its usage reporting turned off" % name,
                   all(json.dumps(s) in got for s in off), ", ".join(off) or "(reports nothing)")
+        watch(True)
         s = stores.sync(db, roles)
         check("the first sync sends the local copy", not any(x.get("error") for x in s.values()), json.dumps(s)[:200])
         same(db, roles, "after the first sync")
+        watch(False)
         check("restart", compose(services, "restart") and all(dk.ready(services).values()))
+        watch(True)
         s = stores.sync(db, roles)
         check("after a restart nothing needs sending", all(x.get("unchanged") for x in s.values()),
               json.dumps({k: (x.get("unchanged"), x.get("healed")) for k, x in s.items()}))
@@ -222,9 +311,11 @@ def live_round(services: dict) -> None:
                   json.dumps({k: x.get("unchanged") for k, x in s.items()}))
 
         print("\n⑤ [%s] the containers removed and created again (what a Docker reinstall does)" % what)
+        watch(False)
         check("containers removed", compose(services, "down") and not dk.status())
         r = dk.up(services)
         check("created again from the same folders", r["ok"], json.dumps(r.get("why", "")))
+        watch(True)
         s = stores.sync(db, roles)
         check("★nothing needs sending — the data survived the containers★",
               all(x.get("unchanged") for x in s.values()),
@@ -232,6 +323,7 @@ def live_round(services: dict) -> None:
         same(db, roles, "after the containers were recreated")
 
         print("\n⑥ [%s] the data folders emptied" % what)
+        watch(False)
         compose(services, "down")
         folders = []
         for name in services.values():
@@ -242,6 +334,7 @@ def live_round(services: dict) -> None:
         left = [d for d in folders if not _is_empty(d)]
         check("the data folders are really empty", not left, ", ".join(left))
         r = dk.up(services)
+        watch(True)
         s = stores.sync(db, roles)
         check("the next sync notices and refills both", r["ok"] and all(x.get("healed") for x in s.values()),
               json.dumps({k: x.get("healed") for k, x in s.items()}))
@@ -249,7 +342,14 @@ def live_round(services: dict) -> None:
 
         print("\n⑦ [%s] the whole contract, against the containers" % what)
         contract.run(db, mem, roles, check)
+        if watching and watches:
+            short = max(MIN_WATCH - WATCHED.get(n, 0.0) - (time.time() - w.t0) for n, w in watches.items())
+            if short > 0:
+                print("\n   (watching the containers idle %.0f s more, so each is watched %.0f s)" % (short, MIN_WATCH))
+                time.sleep(short)
+        watch(False)
     finally:
+        watch(False)
         compose(services, "down", "--remove-orphans")
         db.close()
 
@@ -267,8 +367,15 @@ def live() -> str:
         return "not measured (%s)" % state["why"]
     rounds = chosen_rounds()
     check("there is something to run", bool(rounds), os.environ.get("BRAIN_TEST_DOCKER", ""))
+    subprocess.run(["docker", "pull", "-q", WATCH_IMAGE], capture_output=True, timeout=300)
+    watching = egress_control()
     for services in rounds:
-        live_round(services)
+        live_round(services, watching)
+    if watching:
+        print("\n⑧ nothing leaves the machine")
+        for n in sorted(WATCHED):
+            check("%s: no connection off this machine while it ran (%.0f s watched)" % (n, WATCHED[n]),
+                  WATCHED[n] >= MIN_WATCH - 1 and not SEEN.get(n), ", ".join(sorted(SEEN.get(n, ()))) or "none")
     return "measured live: " + ", ".join(" + ".join(s.values()) for s in rounds)
 
 

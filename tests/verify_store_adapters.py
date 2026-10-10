@@ -312,8 +312,15 @@ check("its option became a flag: brain stores --plug-depth", rc == 0 and "--plug
 check("`--set` and `--docker` offer it", "plugvec" in help_text and "pluggraph" in help_text)
 rc, ihelp = run("brain.install", "--help")
 flat = " ".join(ihelp.split())
+def offered(text, flag):
+    """The backends a help line lists after `flag` — `<role>: a · b · c`."""
+    import re as _re
+    m = _re.search(_re.escape(flag) + r" NAME\[=URL\]\s+\w+: ([a-z0-9_ ·]+?) —", text)
+    return [x.strip() for x in m.group(1).split("·")] if m else []
 check("the installer offers it per role: --vector-store … plugvec, --graph-store … pluggraph",
-      rc == 0 and "vector: sqlite · plugvec" in flat and "pluggraph" in flat, flat[flat.find("--vector-store"):][:140])
+      rc == 0 and "plugvec" in offered(flat, "--vector-store") and "pluggraph" in offered(flat, "--graph-store")
+      and "pluggraph" not in offered(flat, "--vector-store"),
+      "vector: %s · graph: %s" % (offered(flat, "--vector-store"), offered(flat, "--graph-store")))
 db_dir = os.path.join(os.environ["BRAIN_HOME"], "plugdb")
 os.makedirs(db_dir, exist_ok=True)
 import pathlib
@@ -333,7 +340,12 @@ check("refused: an option it does not declare", rc != 0 and "takes no option 'da
 rc, screen = run("brain.cli", "stores")
 check("the status screen shows it answering and in sync", rc == 0 and "plugvec @ " in screen
       and "plug depth 3" in screen and screen.count("in sync, answering") == 2, screen[:600])
-check("the choices line lists it", "vector = sqlite · plugvec · qdrant" in screen and "pluggraph" in screen)
+line = next((l for l in screen.splitlines() if l.startswith("choices")), "")
+vec = line.split("vector = ")[1].split("graph =")[0].split(" · ") if "vector = " in line else []
+gra = line.split("graph = ")[1].split(" · ") if "graph = " in line else []
+check("the choices line lists each under its own role",
+      "plugvec" in [x.strip() for x in vec] and "pluggraph" in [x.strip() for x in gra]
+      and "pluggraph" not in [x.strip() for x in vec], line.strip()[:140])
 text = dk.compose_text({"vector": "plugvec"})
 items = contract.compose_items(text)
 check("`--docker plugvec` would run its pinned image on 127.0.0.1, data under the brain's home, secret by name",
