@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import random
 import shutil
 import sys
 import tempfile
@@ -59,13 +58,14 @@ def main() -> int:
     real_walk = os.walk
 
     def shuffled_walk(top, *a, **k):
-        """What a hash-ordered filesystem hands back: the same entries, in no particular order."""
-        rnd = random.Random(top)
+        """What a hash-ordered filesystem may hand back: the same entries, ★reversed★ — never sorted.
+
+        ⛔ A seeded shuffle of six names came out sorted on one CI run (the seed was a random temp path),
+           and the control below went red for nothing. Reversed is unsorted every time.
+        """
         for dirpath, dirnames, filenames in real_walk(top, *a, **k):
-            rnd.shuffle(dirnames)
-            filenames = list(filenames)
-            rnd.shuffle(filenames)
-            yield dirpath, dirnames, filenames
+            dirnames.sort(reverse=True)
+            yield dirpath, dirnames, sorted(filenames, reverse=True)
     store.os.walk = shuffled_walk
     try:
         got = [os.path.relpath(p, mem) for p, _s, _r in store.iter_source_files(store.load_config())]

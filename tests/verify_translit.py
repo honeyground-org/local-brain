@@ -31,9 +31,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from brain import store, translit  # noqa: E402
+from brain import evalinit, store, translit  # noqa: E402
+from tests import _needs  # noqa: E402
 
-SET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval", "translit.json")
+SET_PATH = os.path.join(evalinit.eval_dir(), "translit.json")      # honours BRAIN_EVAL_DIR (§evalinit.eval_dir)
 
 # Judgement floor. ⛔ Don't tune it to exactly match the measurement (do that and it freezes into "this is already the best").
 MAX_FALSE_BRIDGE = 3      # measured 1/150(새로→share) · 2/156 including the added labels
@@ -42,8 +43,8 @@ MIN_LOAN_HIT = 24         # measured 27/45. Most remaining misses fall under §t
 
 def main() -> int:
     if not os.path.exists(SET_PATH):
-        print("no set: %s (see bin/brain eval-init — it builds one from your own prompts)" % SET_PATH)
-        return 0
+        _needs.skip("no transliteration set at %s" % SET_PATH, "`brain eval-init` builds one from your own prompts")
+    _needs.private_index()                 # ⛔ the bridge cache below is emptied — on a copy, never the live one
     S = json.load(open(SET_PATH, encoding="utf-8"))
     loan, native = S["loan"], S["native"]
     db = store.connect()

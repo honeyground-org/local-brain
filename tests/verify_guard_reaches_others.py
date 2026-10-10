@@ -58,6 +58,7 @@ def check(label, cond, detail=""):
 
 
 def main():
+    _needs.private_index()                 # ⛔ measure on a copy — the hook reads the live index meanwhile
     print("=" * 72 + "\nimpersonating someone else's machine — does the guard ★speak up★ with no sample\n" + "=" * 72)
     db = store.connect()
     _needs.proxy_sample(db)

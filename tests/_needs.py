@@ -83,3 +83,35 @@ def entry(script: str, module: str) -> list:
     if os.name != "nt" and os.path.isfile(local):
         return [local]
     return [sys.executable, "-m", module]
+
+
+def private_index() -> str:
+    """Measure this person's own data on ★a private copy of the index★ — first thing in a check that writes.
+
+    The hook, the MCP server and the daily jobs read the live index while a check runs. ⛔ Measured
+    2026-10-10: `verify_automatic_axis` set the live threshold to 13.21 and then 20.0 for seconds at a time
+    (a prompt typed meanwhile was answered by that ruler), every calibration a check ran appended a line to
+    the live threshold history, and `verify_translit` emptied the live bridge cache. A copy measures the
+    same data and leaves the person's state as it was.
+
+    Call it before the first `store.connect()`. The config and the labelled sample stay where they are.
+    Returns the copy's home.
+    """
+    import atexit
+    import shutil
+    import sqlite3
+    import tempfile
+    from brain import evalinit, store
+    os.environ.setdefault("BRAIN_CONFIG", store.default_config_path())
+    os.environ.setdefault("BRAIN_EVAL_DIR", evalinit.eval_dir())
+    live = store.db_path()
+    home = tempfile.mkdtemp(prefix="brain-private-")
+    if os.path.exists(live):
+        src, dst = sqlite3.connect(live), sqlite3.connect(os.path.join(home, "index.db"))
+        src.backup(dst)                                   # a consistent copy, even while another process writes
+        dst.close()
+        src.close()
+    os.environ["BRAIN_HOME"] = home
+    atexit.register(shutil.rmtree, home, True)
+    return home
+
