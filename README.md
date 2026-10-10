@@ -354,6 +354,11 @@ brain stores --docker-stop                 # stop them; the data stays, and the 
   with what it was sent; when they differ, the next sync rebuilds it from the local copy.
 - A password a backend needs (Neo4j's) is generated into `secrets.json` (0600) and handed to Docker by
   name, never on a command line.
+- **The databases' own usage reporting is turned off.** Qdrant and Neo4j both report home by default
+  (measured 2026-10-10: Qdrant logs *Telemetry reporting enabled*, Neo4j answers
+  `dbms.usage_report.enabled = true`); brain starts them with it off, and a backend cannot be added
+  without saying how its image's reporting is turned off. Containers started before this change keep
+  reporting until `brain stores --docker` recreates them (the data stays).
 - After a reboot the containers come back as soon as Docker starts. On macOS and Windows, turn on
   *Start Docker Desktop when you sign in*; until Docker is up, the local copy answers.
 

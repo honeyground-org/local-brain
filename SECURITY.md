@@ -23,6 +23,7 @@ brain reads people's private notes and runs inside their coding tools, so these 
 - **Secrets**: keys written where others can read them, printed, logged, passed on a command line, or
   committed.
 - **Code execution** through the hooks, the MCP server, the installer, or the files brain indexes.
-- **Local services**: the Docker-run databases must listen on `127.0.0.1` only.
+- **Local services**: the Docker-run databases must listen on `127.0.0.1` only, and must not report
+  usage anywhere (each backend declares how its image's reporting is turned off).
 - **This repository's automation**: a pull request that could make a workflow running with write
   permissions (`pull_request_target`) execute its code or read a secret.

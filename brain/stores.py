@@ -116,19 +116,37 @@ class Docker:
     image            pinned — a tag with a version, never `latest`
     ports            `Port`s; `url_port` names the one brain talks to (default: the first), over `scheme`
     data             (subfolder, path in the container) — kept in `<brain home>/stores/<name>/<subfolder>`
-    env              {NAME: template} handed to Docker ★by name★; `{secret}` becomes the credential
+    env              {NAME: value}; a value holding `{secret}` is handed to Docker ★by name★ and becomes the
+                     credential, any other value is written into the compose file
     generate_secret  create the credential once into secrets.json when there is none
     command          arguments for the image's entry point
     user             "host" runs the container as your own user (files in the data folder stay yours)
+    telemetry_off    ★required★ — how the image's own usage reporting is turned off: "NAME=VALUE" (a
+                     variable) or "--flag=value" (an argument), or () when the image reports nothing.
+                     ⛔ Qdrant, Neo4j and Memgraph all report home by default (measured 2026-10-10): a
+                     database brain starts must not send anything off the machine that nobody chose.
     """
 
     def __init__(self, image: str, ports: Sequence[Port], data: Sequence[Tuple[str, str]],
                  scheme: str = "http", url_port: str = "", env: Optional[Dict[str, str]] = None,
-                 generate_secret: bool = False, command: Sequence[str] = (), user: str = ""):
+                 generate_secret: bool = False, command: Sequence[str] = (), user: str = "",
+                 telemetry_off: Optional[Sequence[str]] = None):
         self.image, self.ports, self.data = image, tuple(ports), tuple(data)
         self.scheme, self.url_port = scheme, url_port or (ports[0].name if ports else "")
         self.env, self.generate_secret = dict(env or {}), generate_secret
         self.command, self.user = tuple(command), user
+        self.telemetry_off = None if telemetry_off is None else tuple(telemetry_off)
+
+    def settings(self) -> Tuple[Dict[str, str], Tuple[str, ...]]:
+        """(environment, arguments) the container runs with — the declared ones plus the reporting switch."""
+        env, args = dict(self.env), list(self.command)
+        for s in self.telemetry_off or ():
+            if s.startswith("--"):
+                args.append(s)
+            else:
+                k, _, v = s.partition("=")
+                env[k] = v
+        return env, tuple(args)
 
 
 class Backend:
@@ -223,6 +241,12 @@ def problems(b, module: str, seen: Dict[str, Backend]) -> str:
                 return "a data folder must be a subfolder here and an absolute path in the container"
         if d.generate_secret and b.secret is None:
             return "generate_secret needs BACKEND.secret (where to keep it)"
+        if d.telemetry_off is None:
+            return ("say how the image's own usage reporting is turned off — telemetry_off=(\"NAME=VALUE\" "
+                    "or \"--flag=value\",), or () when it reports nothing")
+        for s in d.telemetry_off:
+            if not re.match(r"^(?:--[A-Za-z0-9][\w.-]*|[A-Za-z_][A-Za-z0-9_]*)=\S+$", s):
+                return "telemetry_off %r is not NAME=VALUE or --flag=value" % s
     return ""
 
 

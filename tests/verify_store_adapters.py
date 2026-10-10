@@ -18,7 +18,8 @@ installable on its own."*
          difference sent, refilled after a loss, the local copy answering through an outage
   ③ controls — files that must ★not★ be offered, each with its reason on the screen, the rest unharmed:
        a missing contract method · a file that does not load · a name that is not its file · an image
-       pinned to `latest` · an option whose kind clashes with another backend's
+       pinned to `latest` · an image that does not say how its usage reporting is turned off · an
+       option whose kind clashes with another backend's
   ④ each role installs on its own: `--graph-store` alone touches only the graph, `--stores docker` is
      both defaults, `NAME=URL` points at a server that runs already — and starting one role in Docker
      keeps the other role's container in the compose file
@@ -152,7 +153,7 @@ BACKEND = stores.Backend(
     options=(stores.Option("plug_depth", 2, "how deep the plug test digs"),),
     docker=stores.Docker(image="example.invalid/plugvec:1.0",
                          ports=(stores.Port("api", 7001, "BRAIN_PLUGVEC_PORT"),), data=(("", "/data"),),
-                         env={"PLUGVEC_KEY": "{secret}"}, generate_secret=True),
+                         env={"PLUGVEC_KEY": "{secret}"}, generate_secret=True, telemetry_off=()),
     secret=stores.Secret(env="PLUGVEC_KEY", field="plugvec_key"),
 )
 '''
@@ -275,6 +276,9 @@ CONTROLS = {
     "plugbroken_latest": ("not pinned", PLUG_VECTOR.replace("plugvec", "plugbroken_latest")
                           .replace("plugbroken_latest:1.0", "plugbroken_latest:latest")
                           .replace("BRAIN_PLUGVEC_PORT", "BRAIN_PLUGLATEST_PORT")),
+    "plugbroken_telemetry": ("usage reporting", PLUG_VECTOR.replace("plugvec", "plugbroken_telemetry")
+                             .replace("BRAIN_PLUGVEC_PORT", "BRAIN_PLUGTELEMETRY_PORT")
+                             .replace(", telemetry_off=()", "")),
     # sorts after qdrant on purpose: the shipped backend that declared `exact` first keeps it (§stores.problems)
     "zplug_kind": ("one flag cannot be both", PLUG_GRAPH.replace("pluggraph", "zplug_kind").replace(
         'make=PlugGraph, url=""', 'make=PlugGraph, url="", options=(stores.Option("exact", "yes", "clashes"),)')),
@@ -378,8 +382,14 @@ def shipped() -> None:
               and all(os.path.realpath(contract.mount_host(m)).startswith(home) for m in mounts)
               and not any(l.startswith("volumes:") for l in lines) and "restart: unless-stopped" in text
               and not b.docker.image.endswith(":latest"), b.docker.image)
-        check("%s: every value Docker reads is named, never written" % name,
-              all(("- %s " % k) in text and ("%s=" % k) not in text and ("%s:" % k) not in text for k in b.docker.env))
+        secret_env = [k for k, v in b.docker.env.items() if "{secret}" in v]
+        check("%s: every credential Docker reads is named, never written" % name,
+              all(("- %s " % k) in text and ("%s=" % k) not in text and ("%s:" % k) not in text for k in secret_env))
+        env, args = b.docker.settings()
+        off = b.docker.telemetry_off
+        check("%s: its own usage reporting is turned off in the compose file" % name, off is not None and all(
+            (s in text) if s.startswith("--") else (s in items.get("environment", [])) for s in off),
+            ", ".join(off or ()) or "(reports nothing)")
 
 
 def installer() -> None:
