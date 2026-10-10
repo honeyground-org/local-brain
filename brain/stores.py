@@ -84,6 +84,19 @@ class StoreError(RuntimeError):
     """A dedicated database did not answer, or answered with an error."""
 
 
+class StoreGone(StoreError):
+    """The database answered that what was asked for is not there — an HTTP 404, a missing table.
+
+    The copy it held is gone (a deleted collection, a Docker reset): the next sync refills it from the
+    local copy, and until then the local copy answers.
+    """
+
+
+def gone(exc: BaseException) -> bool:
+    """Does this failure mean "not there" — by its type, or (for a backend written before the type) its text."""
+    return isinstance(exc, StoreGone) or "HTTP 404" in str(exc)
+
+
 # ── what a backend declares ─────────────────────────────────────────────────
 class Option:
     """One setting a backend takes: `brain stores --<name>` on the command line, a key in config.json.
@@ -114,7 +127,8 @@ class Docker:
     """How `brain stores --docker` runs a backend (§dockerstores).
 
     image            pinned — a tag with a version, never `latest`
-    ports            `Port`s; `url_port` names the one brain talks to (default: the first), over `scheme`
+    ports            `Port`s; `url_port` names the one brain talks to (default: the first), over `scheme`,
+                     with `url_path` after it (a Postgres database name, for example)
     data             (subfolder, path in the container) — kept in `<brain home>/stores/<name>/<subfolder>`
     env              {NAME: value}; a value holding `{secret}` is handed to Docker ★by name★ and becomes the
                      credential, any other value is written into the compose file
@@ -128,11 +142,11 @@ class Docker:
     """
 
     def __init__(self, image: str, ports: Sequence[Port], data: Sequence[Tuple[str, str]],
-                 scheme: str = "http", url_port: str = "", env: Optional[Dict[str, str]] = None,
+                 scheme: str = "http", url_port: str = "", url_path: str = "", env: Optional[Dict[str, str]] = None,
                  generate_secret: bool = False, command: Sequence[str] = (), user: str = "",
                  telemetry_off: Optional[Sequence[str]] = None):
         self.image, self.ports, self.data = image, tuple(ports), tuple(data)
-        self.scheme, self.url_port = scheme, url_port or (ports[0].name if ports else "")
+        self.scheme, self.url_port, self.url_path = scheme, url_port or (ports[0].name if ports else ""), url_path
         self.env, self.generate_secret = dict(env or {}), generate_secret
         self.command, self.user = tuple(command), user
         self.telemetry_off = None if telemetry_off is None else tuple(telemetry_off)
@@ -460,7 +474,8 @@ def http_json(method: str, url: str, body=None, headers: Optional[Dict[str, str]
             raw = r.read()
     except urllib.error.HTTPError as exc:
         detail = exc.read()[:300].decode("utf-8", "replace")
-        raise StoreError("%s %s → HTTP %d %s" % (method, _redact(url), exc.code, detail)) from None
+        kind = StoreGone if exc.code == 404 else StoreError
+        raise kind("%s %s → HTTP %d %s" % (method, _redact(url), exc.code, detail)) from None
     except (urllib.error.URLError, OSError, ValueError) as exc:
         raise StoreError("%s %s → %s" % (method, _redact(url), getattr(exc, "reason", exc))) from None
     if not raw:
@@ -555,7 +570,7 @@ def serve(db: sqlite3.Connection, role: str, target: str, remote: Callable[[], o
         return remote()
     except StoreError as exc:
         _DOWN[role] = time.time()
-        lost = {"synced": ""} if "HTTP 404" in str(exc) else {}   # it no longer holds this copy — the next sync heals it
+        lost = {"synced": ""} if gone(exc) else {}       # it no longer holds this copy — the next sync heals it
         record(db, role, ok=False, error=str(exc)[:300], fallbacks=int(h.get("fallbacks") or 0) + 1, **lost)
         return local()
 

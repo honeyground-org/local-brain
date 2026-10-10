@@ -69,7 +69,7 @@ def data_dirs(b) -> List[str]:
 
 
 def url(b) -> str:
-    return "%s://127.0.0.1:%d" % (b.docker.scheme, ports(b)[b.docker.url_port])
+    return "%s://127.0.0.1:%d%s" % (b.docker.scheme, ports(b)[b.docker.url_port], b.docker.url_path)
 
 
 def resolve(tokens: Sequence[str]) -> Dict[str, str]:

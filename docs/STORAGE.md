@@ -64,7 +64,8 @@ options (`namespace` for both roles, `names` for the graph) are taken by every b
   remove_edges · counts` and the five questions `neighbors · incoming · linked · targets · edges`.
   A database that speaks openCypher can subclass `brain/backends/_cypher.py`'s `CypherGraph` and
   supply only `run()` and `ping()` — `neo4j.py` (over HTTP) and `memgraph.py` (over Bolt, with
-  `brain/backends/_bolt.py`) are the examples.
+  `brain/backends/_bolt.py`) are the examples. A database that lives in Postgres can use
+  `brain/backends/_pgwire.py` — `pgvector.py` is the example.
 
 Rules that hold for every backend:
 
@@ -76,8 +77,8 @@ Rules that hold for every backend:
 - **`target()` is stable** — it is the key of the ledger that records what was sent. It must change when
   the role's `namespace` option changes.
 - **Raise `stores.StoreError`** for anything the database does not do; brain then answers from the local
-  copy and records the failure. An answer that means *"this is gone"* should contain `HTTP 404`, so the
-  next sync refills it.
+  copy and records the failure. Raise `stores.StoreGone` when the answer means *"this is not there"* (a
+  missing collection or table) — the next sync refills it. `stores.http_json` raises it for an HTTP 404.
 - **Only what the role hands you leaves the machine.** A vector backend receives vectors and
   `{doc_id, chunk_no}`; a graph backend receives document ids, links, and a name only when the person
   turned `names` on — already scrubbed. Do not read the index yourself to send more.

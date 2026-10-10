@@ -55,7 +55,7 @@ class QdrantVectors:
                 raise stores.StoreError("collection %s holds %s-dimensional vectors, not %d" % (name, size, dim))
             return
         except stores.StoreError as exc:
-            if "HTTP 404" not in str(exc):
+            if not stores.gone(exc):
                 raise
         # Cosine: Qdrant normalises on the way in — the vectors already are unit length (§vectors._unit)
         self._call("PUT", "/collections/%s" % name, {"vectors": {"size": int(dim), "distance": "Cosine"}},
@@ -67,7 +67,7 @@ class QdrantVectors:
         try:
             self._call("DELETE", "/collections/%s" % self.collection(model, dim), timeout=stores.SYNC_TIMEOUT)
         except stores.StoreError as exc:
-            if "HTTP 404" not in str(exc):
+            if not stores.gone(exc):
                 raise
 
     def reset(self, model: str, dim: int) -> None:

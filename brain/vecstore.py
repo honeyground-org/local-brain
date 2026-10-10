@@ -102,7 +102,7 @@ def sync(db: sqlite3.Connection, backend, full: bool = False, progress: bool = F
         try:
             held = backend.count(db, model, dim)
         except stores.StoreError as exc:
-            if "HTTP 404" not in str(exc):
+            if not stores.gone(exc):
                 raise
             held = 0
         if held != expected:
