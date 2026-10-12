@@ -23,6 +23,9 @@ warm, any time budget. Two shared-state writes were behind it:
      trying nothing
   ② connecting to an index whose `name_map` is current runs ★no DROP★ — and (control) a missing or
      outdated view is still rebuilt
+  ④ (the other direction) what a measurement ★spends★ is counted where the live hook reads it — the
+     provider counts calls per key, not per index copy (2026-10-12: the live count read 190 of 500
+     while about 480 calls had gone out, and the hook's second stage hit the wall)
   ③ a process of ★another code generation★ (a long-running MCP server holding old code) writing the
      bridge cache leaves the current generation's rows alone — and (control) a newer one does clear
      the older generation's rows, so the table does not grow with every generation
@@ -42,7 +45,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 _TMP = tempfile.mkdtemp(prefix="brain-isolation-")
-_ENV_BEFORE = {k: os.environ.get(k) for k in ("BRAIN_HOME", "BRAIN_EVAL_DIR", "BRAIN_LEXICON")}
+_ENV_BEFORE = {k: os.environ.get(k) for k in ("BRAIN_HOME", "BRAIN_EVAL_DIR", "BRAIN_LEXICON",
+                                               "BRAIN_LEDGER")}
+os.environ.pop("BRAIN_LEDGER", None)                 # the live ledger here is the temp home's
 os.environ["BRAIN_HOME"] = os.path.join(_TMP, "home")
 os.environ["BRAIN_EVAL_DIR"] = os.path.join(_TMP, "eval")
 os.environ.pop("BRAIN_LEXICON", None)                # a human override would skip the sweep
@@ -151,10 +156,54 @@ def bridge_generations() -> None:
         translit._code_stamp = real_stamp
 
 
+_SPEND = """
+import json, os
+from tests import _needs
+_needs.private_index()
+from brain import rerank, store
+db = store.connect()
+for _ in range(3):
+    rerank._note_call(db)
+print(json.dumps({"home": os.environ["BRAIN_HOME"]}))
+"""
+
+
+def quota_with_the_key() -> None:
+    print("\n④ a measurement on a private copy spends from the count the live hook reads")
+    import subprocess
+    from brain import rerank
+    store.connect().close()                          # the live index the copy is taken from
+    live = os.environ["BRAIN_HOME"]
+
+    def spend(extra):
+        env = {k: v for k, v in os.environ.items() if k != "BRAIN_LEDGER"}
+        env.update({"PYTHONPATH": ROOT, "BRAIN_HOME": live}, **extra)
+        p = subprocess.run([sys.executable, "-c", _SPEND], capture_output=True, text=True, env=env,
+                           cwd=ROOT, timeout=60, encoding="utf-8", errors="replace")
+        try:
+            return json.loads(p.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            return {"_err": (p.stderr or p.stdout)[-300:]}
+
+    before = rerank.budget()["used"]
+    r = spend({})
+    after = rerank.budget()["used"]
+    check("the measurement ran on a copy, not on the live index", r.get("home") not in (None, live), str(r))
+    check("★3 calls spent on the copy are counted in the live ledger★", after - before == 3,
+          "live %d → %d" % (before, after))
+    # control — a count kept apart (the old place: inside whatever index the process opened) does not
+    # reach the live ledger, so the row above is not green by accident
+    apart = os.path.join(_TMP, "apart-ledger.db")
+    spend({"BRAIN_LEDGER": apart})
+    check("(control) a count kept apart from the live ledger leaves it as it was",
+          rerank.budget()["used"] == after, "live %d" % rerank.budget()["used"])
+
+
 def main() -> int:
     lexicon_sweep()
     name_map_view()
     bridge_generations()
+    quota_with_the_key()
     print("\n" + "=" * 78)
     if FAILS:
         print("❌ %d failure(s)" % len(FAILS))

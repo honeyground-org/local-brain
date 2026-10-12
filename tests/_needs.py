@@ -94,7 +94,8 @@ def private_index() -> str:
     the live threshold history, and `verify_translit` emptied the live bridge cache. A copy measures the
     same data and leaves the person's state as it was.
 
-    Call it before the first `store.connect()`. The config and the labelled sample stay where they are.
+    Call it before the first `store.connect()`. The config, the labelled sample and the judge's daily
+    count stay where they are.
     Returns the copy's home.
     """
     import atexit
@@ -104,6 +105,10 @@ def private_index() -> str:
     from brain import evalinit, store
     os.environ.setdefault("BRAIN_CONFIG", store.default_config_path())
     os.environ.setdefault("BRAIN_EVAL_DIR", evalinit.eval_dir())
+    # ⛔ ★and the judge's daily count stays with the key★ (2026-10-12) — a copy that counts its own calls
+    #    lets a measurement spend the provider's quota where the live hook never sees it (§rerank.ledger_path)
+    from brain import rerank
+    os.environ.setdefault("BRAIN_LEDGER", rerank.ledger_path())
     live = store.db_path()
     home = tempfile.mkdtemp(prefix="brain-private-")
     if os.path.exists(live):

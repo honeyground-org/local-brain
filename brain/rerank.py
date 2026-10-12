@@ -326,6 +326,68 @@ def _open_db():
     return store.connect()
 
 
+# ── ★the daily count lives beside the key, not inside an index★ (2026-10-12) ─────────────────────
+#
+# It used to live in the index's `meta`. Checks measure on ★a private copy of the index★
+# (`tests/_needs.private_index`), so every call a measurement spent went to the copy's counter and
+# vanished with it. On 2026-10-12 the live counter read 190 of 500 while about 480 real calls had gone
+# out — the provider's wall came first, and the hook's second stage went quiet for the rest of the
+# Pacific day. The provider counts per key, so the count is kept in one ledger file that every copy of
+# an index shares: `BRAIN_LEDGER` names it (a private copy points it at the live one), otherwise it is
+# `judge-ledger.db` in the brain's home. The first time it is read, today's count is carried over from
+# the index it used to live in, so nothing restarts at zero.
+_LEDGER_KEYS = ("rerank_day", "rerank_used", "rerank_daily_hit", "rerank_rpd")
+
+
+def ledger_path() -> str:
+    from brain import store
+    return os.environ.get("BRAIN_LEDGER") or os.path.join(store.brain_home(), "judge-ledger.db")
+
+
+def _ledger():
+    import sqlite3
+    conn = sqlite3.connect(ledger_path(), timeout=15, isolation_level=None)
+    conn.execute("CREATE TABLE IF NOT EXISTS ledger(k TEXT PRIMARY KEY, v TEXT NOT NULL)")
+    return conn
+
+
+def ledger_get(k: str, default: str = "") -> str:
+    conn = _ledger()
+    try:
+        row = conn.execute("SELECT v FROM ledger WHERE k=?", (k,)).fetchone()
+        return row[0] if row else default
+    finally:
+        conn.close()
+
+
+def ledger_set(k: str, v) -> None:
+    conn = _ledger()
+    try:
+        conn.execute("INSERT OR REPLACE INTO ledger(k, v) VALUES(?, ?)", (k, str(v)))
+    finally:
+        conn.close()
+
+
+def ledger_clear() -> None:
+    conn = _ledger()
+    try:
+        conn.execute("DELETE FROM ledger")
+    finally:
+        conn.close()
+
+
+def _carry_over(db) -> None:
+    """Move what an index's `meta` still holds into the ledger, once."""
+    if db is None or ledger_get("carried", ""):
+        return
+    from brain import store
+    for k in _LEDGER_KEYS:
+        v = store.get_meta(db, k, "")
+        if v and not ledger_get(k, ""):
+            ledger_set(k, v)
+    ledger_set("carried", "1")
+
+
 def budget(db=None) -> dict:
     """How much was spent today (Pacific) and how much is left. ⛔ The point is knowing ★before★ the 429.
 
@@ -337,16 +399,16 @@ def budget(db=None) -> dict:
     own = db is None
     db = db or _open_db()
     try:
-        from brain import store
+        _carry_over(db)
         day = _pt_day()
-        limit = int(float(store.get_meta(db, "rerank_rpd", "") or RPD))
+        limit = int(float(ledger_get("rerank_rpd", "") or RPD))
         # ⛔ `limit` 0 = ★no daily wall we know of★ (§engines.JUDGE_RPD) — `left` is then None, not a number
         #    we made up; a wall actually hit still answers 0.
-        if store.get_meta(db, "rerank_day", "") != day:
+        if ledger_get("rerank_day", "") != day:
             return {"day": day, "used": 0, "limit": limit, "left": limit if limit > 0 else None,
                     "wall": False}
-        used = int(float(store.get_meta(db, "rerank_used", "0") or 0))
-        wall = store.get_meta(db, "rerank_daily_hit", "") == day
+        used = int(float(ledger_get("rerank_used", "0") or 0))
+        wall = ledger_get("rerank_daily_hit", "") == day
         return {"day": day, "used": used, "limit": limit,
                 "left": 0 if wall else (max(0, limit - used) if limit > 0 else None), "wall": wall}
     finally:
@@ -449,24 +511,35 @@ def cache_clear(db=None) -> int:
 
 def _note_call(db) -> None:
     """Count a request as sent. ⛔ Count it even on failure — the provider counts ★what was sent★, not what succeeded."""
-    from brain import store
+    _carry_over(db)
     day = _pt_day()
-    with db:
-        if store.get_meta(db, "rerank_day", "") != day:
-            store.set_meta(db, "rerank_day", day)
-            store.set_meta(db, "rerank_used", "0")
-            store.set_meta(db, "rerank_daily_hit", "")
-        used = int(float(store.get_meta(db, "rerank_used", "0") or 0))
-        store.set_meta(db, "rerank_used", str(used + 1))
+    conn = _ledger()
+    try:
+        # ★one transaction that holds the write lock★ — the hook, the MCP servers and a measurement
+        #  count into the same file, and a read-then-write between two of them would lose a call
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT v FROM ledger WHERE k='rerank_day'").fetchone()
+        if not row or row[0] != day:
+            conn.executemany("INSERT OR REPLACE INTO ledger(k, v) VALUES(?, ?)",
+                             [("rerank_day", day), ("rerank_used", "0"), ("rerank_daily_hit", "")])
+        row = conn.execute("SELECT v FROM ledger WHERE k='rerank_used'").fetchone()
+        used = int(float(row[0])) if row and row[0] else 0
+        conn.execute("INSERT OR REPLACE INTO ledger(k, v) VALUES('rerank_used', ?)", (str(used + 1),))
+        conn.execute("COMMIT")
+    except Exception:                                    # noqa: BLE001
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
 
 
 def _note_wall(db, limit: float) -> None:
     """The provider told us about the daily wall — ★no more calls★ today."""
-    from brain import store
-    with db:
-        store.set_meta(db, "rerank_daily_hit", _pt_day())
-        if limit:                                        # the ceiling is learnt from the provider
-            store.set_meta(db, "rerank_rpd", str(int(limit)))
+    _carry_over(db)
+    ledger_set("rerank_daily_hit", _pt_day())
+    if limit:                                            # the ceiling is learnt from the provider
+        ledger_set("rerank_rpd", int(limit))
 
 
 # ★Ask in small groups of candidates★ — 0 turns it off (current: 20 in one list).

@@ -39,9 +39,10 @@ sys.path.insert(0, ROOT)
 
 _TMP = tempfile.mkdtemp(prefix="brain-uservalues-")
 _KEYS = ("BRAIN_HOME", "BRAIN_CONFIG", "BRAIN_HOST", "BRAIN_JUDGE_PROVIDER", "BRAIN_EMBED_PROVIDER",
-         "BRAIN_RULE_AUTO_MIN")
+         "BRAIN_RULE_AUTO_MIN", "BRAIN_LEDGER")
 _SAVED = {k: os.environ.get(k) for k in _KEYS}
 os.environ["BRAIN_HOME"] = os.path.join(_TMP, "home")
+os.environ["BRAIN_LEDGER"] = os.path.join(_TMP, "judge-ledger.db")   # ⛔ never the live ledger
 os.environ["BRAIN_CONFIG"] = os.path.join(_TMP, "config.json")
 with open(os.environ["BRAIN_CONFIG"], "w", encoding="utf-8") as _fh:
     json.dump({"sources": []}, _fh)
@@ -102,7 +103,7 @@ def main() -> int:
     check("⛔ another embedder is not paced by Gemini's minute", o.get("rpm_items") == 0
           and o.get("waited") == 0, str(o))
     gate = ("import json; from brain import rerank, store; db = store.connect(); "
-            "store.set_meta(db, 'rerank_day', rerank._pt_day()); store.set_meta(db, 'rerank_used', '480'); "
+            "rerank.ledger_set('rerank_day', rerank._pt_day()); rerank.ledger_set('rerank_used', '480'); "
             "b = rerank.budget(db); "
             "print(json.dumps({'left': b['left'], 'blocked': bool(b['left'] is not None and b['left'] <= 150)}))")
     check("the reserve still guards Gemini's last calls",
@@ -110,7 +111,7 @@ def main() -> int:
     check("⛔ and does not invent a reserve for a judge with no known wall",
           child(gate, BRAIN_JUDGE_PROVIDER="openai").get("blocked") is False)
     learned = ("import json; from brain import rerank, store; db = store.connect(); "
-               "store.set_meta(db, 'rerank_rpd', '1000'); print(json.dumps(rerank.budget(db)))")
+               "rerank.ledger_set('rerank_rpd', '1000'); print(json.dumps(rerank.budget(db)))")
     check("a wall learned from a refusal is the one used",
           child(learned, BRAIN_JUDGE_PROVIDER="openai").get("limit") == 1000)
 
