@@ -16,7 +16,7 @@ whether each language's queries put ★their own★ document first.
 
 ## Why synthetic is allowed here, when the rule says never invent an evaluation query
 
-`lesson_an_evaluation_set_i_invented_measured_my_imagination` forbids ★made-up queries★ for measuring
+The rule that an invented evaluation set measures its author forbids ★made-up queries★ for measuring
 ★quality★ (threshold · recall rate), because they measure the author. This check measures a ★mechanism★
 (do the two sides share terms) where the fixture's job is to be a controlled specimen, not a sample of
 real use. The rows marked △ below are known gaps recorded on purpose, not counted as passes.

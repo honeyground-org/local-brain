@@ -8,7 +8,7 @@ name appeared 17 more times in commit messages and 34 more in past diffs.
 Deleting it from the current file still ships it.
 
 ★This repository has met this exact failure before★ — "an under-counting instrument calls itself done"
-(2026-09-02: it said 24 when the real number was 67). So this check counts ★five axes★.
+(2026-09-02: it said 24 when the real number was 67). So this check counts ★six axes★.
 
 | axis | what | why counted separately |
 |---|---|---|
@@ -17,6 +17,7 @@ Deleting it from the current file still ships it.
 | private | is personal data being tracked | `.gitignore` is ★a rule only — it cannot un-track what is already tracked★ |
 | secret | secret-shaped strings | GitHub push protection ★refuses the push★ |
 | identity | a human's own path · emails inside files · authors (listed, not blocked) | baked into every single commit |
+| own notes | ★the publisher's own★ note names, declared aliases and real prompts, verbatim in files that ship | one person's data built into the project (2026-10-12) |
 
 ## ⛔ This file ★holds no internal names of its own★
 
@@ -275,6 +276,64 @@ _C_IP = "10." + "99.99.99"
 _C_HOST = "canary" + ".internal"
 
 
+# ─── axis 6: the publisher's own notes and prompts ───────────────────────────
+# ⛔ 2026-10-12: test files carried the author's note names and aliases — in comments, in a fixture, and in
+#    a check that ★asserted three of the author's own aliases★, so anyone else with notes got a red row.
+#    Nothing here is a list: the names and prompts are read ★at run time from the person running it★ (their
+#    index and their hosts' history), so the axis guards whoever publishes, and holds no one's data itself.
+# ⚠️ It sees only what is still on this machine: a prompt from a transcript the host has since deleted is not
+#    in the list, and a paraphrase is not verbatim. It catches a copy, not every trace.
+OWN_NAME_MIN = 12           # an identifier this long is a name someone chose, not a common word
+OWN_PROMPT_MIN = 15         # a prompt this long, of three words or more, is a sentence someone wrote
+_IDENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_\-]{%d,}" % (OWN_NAME_MIN - 1))
+
+
+def own_corpus():
+    """(names, prompts) of the person running this — their note names and declared aliases, their real prompts."""
+    names, prompts = set(), []
+    try:
+        sys.path.insert(0, ROOT)
+        from brain import store, triggers
+        db = store.connect()
+        try:
+            for (n,) in db.execute("SELECT name FROM docs WHERE source='memory'"):
+                names.add(n)
+            for (a,) in db.execute("SELECT alias FROM alias_decl"):
+                names.add(a)
+        finally:
+            db.close()
+        for p in triggers._real_prompts():
+            p = p.strip()
+            if OWN_PROMPT_MIN <= len(p) <= 300 and len(p.split()) >= 3:
+                prompts.append(p.lower())
+    except Exception:                                    # noqa: BLE001
+        pass
+    names = {n.lower() for n in names if len(n) >= OWN_NAME_MIN and ("_" in n or "-" in n)}
+    return names, sorted(set(prompts))
+
+
+def scan_own(names, prompts, cwd=ROOT, files=None):
+    """[(path, line, kind, length)] — a note name as a whole identifier, a prompt as a verbatim substring."""
+    out = []
+    files = list(files if files is not None else _tracked(cwd))
+    # ⛔ a name the project defines itself — a tracked file's stem, like `verify_guard` — is the project's
+    #    word, not the person's, even when their notes use it as an alias
+    names = set(names) - {os.path.splitext(os.path.basename(f))[0].lower() for f in _tracked(cwd)}
+    for f in files:
+        text = _read(f, cwd)
+        if not text:
+            continue
+        for i, line in enumerate(text.split("\n"), 1):
+            low = line.lower()
+            for tok in _IDENT.findall(low):
+                if tok in names:
+                    out.append((f, i, "note name", len(tok)))
+            for p in prompts:
+                if p in low:
+                    out.append((f, i, "prompt", len(p)))
+    return out
+
+
 def selftest():
     """★Can this check fail on its own★ — do all five axes catch what was planted."""
     fails = []
@@ -325,6 +384,20 @@ def selftest():
             fails.append("axis5 identity missed ★the private IP★")
         if _C_HOST not in ident["hosts"]:
             fails.append("axis5 identity missed ★the internal host★")
+        # axis 6 — a planted note name and prompt are caught; a file without them is not
+        with open(os.path.join(d, "own.md"), "w", encoding="utf-8") as fh:
+            fh.write("see lesson_a_canary_note_name for why\nthe user typed: Please Check The Canary Rollout Again\n")
+        with open(os.path.join(d, "clean.md"), "w", encoding="utf-8") as fh:
+            fh.write("lesson_a_canary_note_name_longer is another name\ncheck the canary\n")
+        hits = scan_own({"lesson_a_canary_note_name"}, ["please check the canary rollout again"], d,
+                        files=["own.md", "clean.md"])
+        kinds = {(f, k) for f, _i, k, _n in hits}
+        if ("own.md", "note name") not in kinds:
+            fails.append("axis6 own notes missed a planted note name")
+        if ("own.md", "prompt") not in kinds:
+            fails.append("axis6 own notes missed a planted prompt")
+        if any(f == "clean.md" for f, _k in kinds):
+            fails.append("axis6 own notes ★flagged a longer name or a fragment★ (control)")
     return fails
 
 
@@ -343,7 +416,7 @@ def main():
         for f in fails:
             print("   ·", f)
         return 2
-    print("\n✅ control group passed — all five axes catch what was planted (the check can fail)")
+    print("\n✅ control group passed — all six axes catch what was planted (the check can fail)")
 
     pub, exc = split_public()
     print(f"\n{len(pub)} files ship · {len(exc)} left out by the manifest")
@@ -441,6 +514,22 @@ def main():
     if real:
         print("   (%d author address(es) are real mailboxes — listed, not blocked)" % len(real))
 
+    print("\n" + "-" * 74)
+    names, prompts = own_corpus()
+    if names or prompts:
+        own = scan_own(names, prompts, files=pub)
+        print("[axis6] ★your own★ note names, aliases and prompts in the files that ship — %d found "
+              "(%d names · %d prompts, read now from this machine)" % (len(own), len(names), len(prompts)))
+        for f, i, kind, n in own:
+            print(f"   ⛔ {f}:{i}  a {kind} of yours ({n} chars)")
+        if own:
+            blockers.append(f"{len(own)} of your own note names or prompts in files that ship")
+    else:
+        # ⛔ not measured is not clean — but it guards the person who publishes, and only their machine
+        #    holds what it looks for. Where there are no notes (CI, a fork) it says so and blocks nothing.
+        print("[axis6] ⏭ not measured here — no notes indexed and no host prompts on this machine.")
+        print("        It guards the person who publishes: run it where your notes live, before you push.")
+
     print("\n" + "=" * 74)
     if blockers == ["could not measure the internal-name axis (no term list)"]:
         # ⏭ 77 = skipped, not passed — this is the publisher's gate, and the list of names that must not
@@ -453,7 +542,8 @@ def main():
         for b in blockers:
             print("   ·", b)
         return 1
-    print("✅ all five axes are clean in what ships")
+    print("✅ all six axes are clean in what ships" if (names or prompts)
+          else "✅ the five measured axes are clean in what ships (axis 6 not measured here)")
     if not inplace:
         print("   ⛔ but this is only ★the snapshot★ — pushing this repository as-is ships the history")
     return 0

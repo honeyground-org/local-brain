@@ -17,7 +17,6 @@ So the verdict splits in two. ①~③ are ★no harm★ (set a threshold, fail o
 ## A state where quality can't be measured never counts as green
 
 If loading is incomplete or before calibration, ④ reports ★can't measure★ (never says it passed).
-· lesson_i_prioritized_a_defect_my_eval_set_cannot_measure
 """
 from __future__ import annotations
 

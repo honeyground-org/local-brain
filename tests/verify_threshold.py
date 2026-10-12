@@ -172,7 +172,6 @@ def main() -> int:
     # When a proxy metric disagrees with a direct one, the direct one is trusted. And the proxy is not
     # deleted — it stays ★as a metric★, only failing at a range ★actionable enough to act on★, like
     # "became a noise faucet" (over 85%) and "went dead" (under 25%).
-    # · lesson_a_diagnostic_that_counts_what_you_cannot_fix
     # ⚠️ For this verdict to mean anything the sample must be fixed — the same day, as the sample grew,
     #    it wobbled 68% → 73% → 71% (§tests/_sample.py fixed that).
     ok = (n2_ok == n2) and (n3_ok >= n3 * 0.8) and (25.0 <= rate <= 85.0)

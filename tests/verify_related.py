@@ -63,7 +63,6 @@ THR = calibrate.threshold(db)
 # The sample comes from ★real prompts★ and is ★fixed★ (§tests/_sample.py).
 # Measuring with invented queries measures the imagination, and redrawing it every run measures
 # something different every time — the latter really happened: 1 mismatch in ① could not be reproduced on the next run.
-# · lesson_an_evaluation_set_i_invented_measured_my_imagination
 from tests._sample import frozen_prompts                        # noqa: E402
 PROMPTS = [p for p in frozen_prompts(300) if len(p) >= 12]
 
@@ -118,8 +117,8 @@ check("0 cases fired on related alone", not only_related,
 #
 # The one case that actually tripped this was exactly that shape:
 #     query   a phrase like "weren't 1 and 2 already applied? and what is 3 about?"
-#     direct  lesson_i_built_a_store_...  ★score 11.32★  ← this is the false fire's cause
-#     related project_av_onboarding_demo_stack  score 0.00 ← merely rode along behind it
+#     direct  <a lesson note>   ★score 11.32★  ← this is the false fire's cause
+#     related <a project note>  score 0.00 ← merely rode along behind it
 #
 # ⚠️ And this cell was ★only ever green when the threshold was 12.45★ (1 case at every threshold
 #    from 7.0~10.0). ★A stale check★ exposed once the scale settled to 9.45 on its own.

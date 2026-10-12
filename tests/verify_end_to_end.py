@@ -39,20 +39,31 @@ def _memory_dir() -> str:
 MEM_DIR = _memory_dir()
 
 PROBE = "probe_brain_end_to_end_check"
+# ★the link target is the check's own, too★ — it linked to one of the author's notes until 2026-10-12, so
+#  the graph rows failed on any machine without that note
+PROBE_TARGET = "probe_brain_end_to_end_target"
 
 
 # --------------------------------------------------------------- A. store round-trip
 def verify_store(db) -> bool:
     path = os.path.join(MEM_DIR, PROBE + ".md")
-    if os.path.exists(path):
-        os.remove(path)
+    target = os.path.join(MEM_DIR, PROBE_TARGET + ".md")
+    for p in (path, target):
+        if os.path.exists(p):
+            os.remove(p)
     marker = "testmarker quadruplehelix indexroundtrip"
+    server.call_tool(db, "remember", {
+        "name": PROBE_TARGET,
+        "description": "the link target for the store round-trip check",
+        "type": "reference",
+        "body": "this document is created by the store round-trip test as a link target.\n",
+    })
     out = server.call_tool(db, "remember", {
         "name": PROBE,
         "description": "a temporary memory for the store round-trip check — " + marker,
         "type": "reference",
         "body": "this document is created by the store round-trip test. %s\n" % marker,
-        "links": ["project_local_brain"],
+        "links": [PROBE_TARGET],
     })
     checks = []
 
@@ -60,7 +71,7 @@ def verify_store(db) -> bool:
     raw = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
     checks.append(("the frontmatter matches the format",
                    raw.startswith("---\n") and "type: reference" in raw))
-    checks.append(("the link was written into the body", "[[project_local_brain]]" in raw))
+    checks.append(("the link was written into the body", "[[%s]]" % PROBE_TARGET in raw))
     # ⛔ ★never counts entries★ — the first version checked with `'"added": 1' in out`, but
     # if **one other file** happened to appear new in that same moment, it became `added: 2` and
     # a perfectly good save got flagged as a failure (actually happened on 2026-08-10). If a test
@@ -73,12 +84,13 @@ def verify_store(db) -> bool:
     checks.append(("found immediately (rank 1)", bool(res) and res[0]["name"] == PROBE))
 
     nb = search.neighbors(db, PROBE)
-    checks.append(("linked into the graph", "project_local_brain" in nb.get("outgoing", [])))
-    back = search.neighbors(db, "project_local_brain")
+    checks.append(("linked into the graph", PROBE_TARGET in nb.get("outgoing", [])))
+    back = search.neighbors(db, PROBE_TARGET)
     checks.append(("also visible from the reverse direction", PROBE in back.get("incoming", [])))
 
     # cleanup — leave a trace behind and the next diagnostic counts it as an orphan
     os.remove(path)
+    os.remove(target)
     store.reindex(db)
     gone = db.execute("SELECT 1 FROM docs WHERE name=?", (PROBE,)).fetchone() is None
     checks.append(("deleting it also removes it from the index", gone))
