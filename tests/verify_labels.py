@@ -6,8 +6,8 @@ Digging into 5 cases where meaning-search stayed silent showed the vectors placi
 candidates ★every single time★ — 1st·2nd·2nd·5th·17th place. The break was in the judge, and the
 judge was not wrong — it was behaving ★consistently★, because the same shape of phrase sat on both A (memory needed) and C (memory not needed).
 
-    0.80  A: 머지 완료했어. 검증해줘      C: 머지 완료했어. 확인해줘
-    0.56  A: 배포 완료되면 화면에서 확인해줘  C: 배포 완료되면 바로 진행해
+    0.80  A: <it is merged> — verify it      C: <it is merged> — check it
+    0.56  A: <once it ships> — show it on screen  C: <once it ships> — carry on
 
 Silence is the right answer on one side (0 false fires) and the wrong answer (a miss) on the other.
 There is no signal in the sentence to tell them apart, so ★no threshold, no prompt can get both right at once.★

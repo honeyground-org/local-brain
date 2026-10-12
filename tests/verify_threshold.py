@@ -56,23 +56,13 @@ NEUTRAL = [
     "my houseplant leaves are turning yellow what do i do",
 ]
 
-# ③ ★real talk needing no memory★ — hand-picked from conversation records (not invented).
-# ⛔ The picking rule: the answer comes from the current screen or the immediately prior turn alone.
-#   Excluded: "rebase the PR again after pulling the latest commit" (⛔ needs the rebase rule)
-#             "yes, refresh it and reindex" (needs the brain's own operating memory)
-#             "how is it going?" (current work = memory) — all three **have a real answer**
-NO_MEMORY_NEEDED = [
-    "다시 링크 전달해줘. 반응이 너무 느려서 힘드네",
-    "다시 링크 줘. 해당 코드를 전달했는데 반응이 느려서 끊겨.",
-    "네네.... 작업 진행해",
-    "응 이제 노션 접근이 될 거야.",
-    "다시 선택 리스트를 제공해줘. 잘못 선택했어.",
-    "멈춰죠 나중에 다시 시작할래",
-    "다시 하자. 너무 시간을 끌었어.",
-    "응 이제 제대로 일해.",
-    "다시 한번만 b방법 링크를 제공해줘.",
-    "다시 로그아웃하고 로그인하니까... 나옵니다.",
-]
+# ③ ★real talk needing no memory★ — ★the person's own★ labelled set (`C_no_memory_needed`), read at run
+#    time. ⛔ Until 2026-10-12 this was a list of ★the author's★ prompts written into this file — real, not
+#    invented, but one person's data built into a check everyone runs. The picking rule is the labeller's:
+#    the answer comes from the current screen or the immediately prior turn alone.
+def no_memory_needed() -> list:
+    from brain import evalinit
+    return evalinit.load_C()
 
 SAMPLE_N = 300
 
@@ -147,7 +137,7 @@ def main() -> int:
         return len(rows) - len(over), len(rows), over
 
     n2_ok, n2, leak2 = group("② domain-unrelated", NEUTRAL)
-    n3_ok, n3, leak3 = group("③ real talk needing no memory  ★new control group★", NO_MEMORY_NEEDED)
+    n3_ok, n3, leak3 = group("③ real talk needing no memory  ★your own labelled set★", no_memory_needed())
 
     for q, s, nm, d in leak2 + leak3:
         print("   ⛔ read the body of what crossed — if it is a real answer, the label is wrong")
