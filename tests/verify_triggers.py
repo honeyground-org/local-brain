@@ -5,6 +5,7 @@
 
 What this measures
 -----------
+⓪ the reader — sees every declaration the indexer sees (needs no notes, so it runs in CI too)
 ① structural check (`brain triggers`) — uniqueness · resolves to its own doc · shadowing · char/word count
 ② ★end to end★ — actually runs `bin/brain-hook` and checks that phrase attaches that doc.
    ⛔ This check caught a real defect: the declaration was correct, but the hook's `MIN_PROMPT_CHARS`(12 chars) gate
@@ -39,13 +40,7 @@ def _hook(prompt: str) -> str:
 
 def main() -> int:
     _needs.private_index()                 # ⛔ measure on a copy — the hook reads the live index meanwhile
-    db = store.connect()
-    _needs.memories(db)
-    # ⓞ ★if the file and the table drift apart, does the check catch it, and does the index self-heal★ (a real 2026-08-19 incident)
-    # If a long-lived MCP server is holding onto old code, that process's reindex knows nothing about the `triggers` table
-    # at all — the doc gets indexed with no error, but the table alone stays empty. Then typing the phrase doesn't bring it up.
-    # ⛔ At the time, this check ★passed vacuously★ (it read the table and got "0 phrases · all passed").
-    # ⓪ ★the reader must see the whole declaration★ — a precondition for everything below.
+    # ⓪ ★the reader must see every declaration the indexer sees★ — a precondition for everything below.
     #
     #    2026-09-29: `declared_in_files()` read a fixed 2,000 bytes. A memory worked on for weeks grows
     #    a long `description:`, which pushes its `triggers:` line past that — `project_local_brain` sat
@@ -53,35 +48,72 @@ def main() -> int:
     #    `store.heal_triggers()` never repaired them, because it asks this same function what the files
     #    declare. ⛔ The check below (ⓞ) passed the whole time: ★the instrument and the thing it measures
     #    shared one blindness★, so the comparison `after == before` was true with both sides short.
+    #
+    #    2026-10-12: it read `^triggers:` only, while the indexer also takes the key indented under
+    #    `metadata:` — the shape Claude Code writes a memory in. 8 rows were reported "only in the table"
+    #    while their phrases fired every day. So the last row compares the two readers file by file.
+    #
+    #    ⛔ This needs no notes of anyone's, so it runs ★before★ the step that skips without them — it
+    #       used to sit after it, and CI (an empty home) never once ran it.
     print("\n" + "=" * 78)
-    print("⓪ the reader sees a declaration however deep in the frontmatter it sits")
+    print("⓪ the reader sees every declaration the indexer sees")
     print("=" * 78)
     import tempfile as _tf                                 # noqa: E402
     _real_dir = store.memory_dir
     with _tf.TemporaryDirectory() as _tmp:
         store.memory_dir = lambda: _tmp
         try:
-            deep = os.path.join(_tmp, "deep_declaration.md")
-            with open(deep, "w", encoding="utf-8") as fh:
-                fh.write('---\nname: deep_declaration\ndescription: "%s"\n'
-                         'triggers: ["문구가 깊은 곳에 있다"]\nmetadata:\n  type: project\n---\n\nbody\n'
-                         % ("가" * 4000))                   # ★2,000자 한참 밖★
-            plain = os.path.join(_tmp, "no_declaration.md")
-            with open(plain, "w", encoding="utf-8") as fh:
-                fh.write("---\nname: no_declaration\nmetadata:\n  type: project\n---\n\nbody\n")
+            fixtures = {
+                "deep_declaration": '---\nname: deep_declaration\ndescription: "%s"\n'
+                                    'triggers: ["문구가 깊은 곳에 있다"]\nmetadata:\n  type: project\n---\n\nbody\n'
+                                    % ("가" * 4000),       # ★well past 2,000 bytes★
+                "nested_declaration": "---\nname: nested_declaration\ndescription: a note\nmetadata:\n"
+                                      "  type: project\n  triggers: [\"pick the nested thread up\"]\n"
+                                      "---\n\nbody\n",   # ★the shape Claude Code writes★
+                "no_declaration": "---\nname: no_declaration\nmetadata:\n  type: project\n---\n\nbody\n",
+                "unclosed_frontmatter": '---\nname: unclosed_frontmatter\n'
+                                        'triggers: ["a block that never closes"]\n\nbody\n',
+            }
+            for name, text in fixtures.items():
+                with open(os.path.join(_tmp, name + ".md"), "w", encoding="utf-8") as fh:
+                    fh.write(text)
             seen = triggers.declared_in_files()
             deep_ok = "deep_declaration" in seen.values()
-            ctrl_ok = "no_declaration" not in seen.values()
-            pos = open(deep, encoding="utf-8").read().find("\ntriggers:")
+            nested_ok = "nested_declaration" in seen.values()
+            ctrl_ok = not ({"no_declaration", "unclosed_frontmatter"} & set(seen.values()))
+            pos = fixtures["deep_declaration"].find("\ntriggers:")
             print("  %s a phrase declared %d bytes in is seen"
                   % ("✅" if deep_ok else "❌ ★the reader is capped★", pos))
-            # ⛔ control — a file that declares nothing must not be picked up, or the row above
-            #    would pass simply by reporting everything.
-            print("  %s ★control★: a file with no declaration is not reported"
+            print("  %s a phrase declared under `metadata:` is seen"
+                  % ("✅" if nested_ok else "❌ ★the reader takes one shape only★"))
+            # ⛔ control — a file that declares nothing, and one whose frontmatter never closes (the
+            #    indexer reads no declaration there), must not be picked up, or the rows above would
+            #    pass simply by reporting everything.
+            print("  %s ★control★: a file with no declaration, or no closed frontmatter, is not reported"
                   % ("✅" if ctrl_ok else "❌"))
+            differ = []
+            for name in fixtures:
+                doc = store.read_doc(os.path.join(_tmp, name + ".md"), "memory", _tmp) or {}
+                by_indexer = {triggers.norm(t) for t in doc.get("triggers", [])}
+                by_reader = {ph for ph, nm in seen.items() if nm == name}
+                if by_indexer != by_reader:
+                    differ.append(name)
+            same_ok = not differ
+            print("  %s the indexer and the reader agree on every file%s"
+                  % ("✅" if same_ok else "❌", "" if same_ok else " — differ: " + ", ".join(differ)))
         finally:
             store.memory_dir = _real_dir
+    reader_ok = deep_ok and nested_ok and ctrl_ok and same_ok
+    if not reader_ok:
+        print("\nverdict: short ❌ (reader FAIL)")
+        return 1
 
+    db = store.connect()
+    _needs.memories(db)
+    # ⓞ ★if the file and the table drift apart, does the check catch it, and does the index self-heal★ (a real 2026-08-19 incident)
+    # If a long-lived MCP server is holding onto old code, that process's reindex knows nothing about the `triggers` table
+    # at all — the doc gets indexed with no error, but the table alone stays empty. Then typing the phrase doesn't bring it up.
+    # ⛔ At the time, this check ★passed vacuously★ (it read the table and got "0 phrases · all passed").
     print("\n" + "=" * 78)
     print("ⓞ if the table goes empty, is it caught, and does the index self-heal")
     print("=" * 78)
@@ -121,12 +153,12 @@ def main() -> int:
             noisy.append(q)
         print("  %s %s" % ("✅" if not out.strip() else "❌ attached", q))
 
-    ok = (deep_ok and ctrl_ok and structural and caught and ok_heal
+    ok = (reader_ok and structural and caught and ok_heal
           and not bad and not noisy)
     print("\n" + "=" * 78)
     print("verdict: %s (reader %s · file↔table %s · end-to-end %d/%d · noise %d)"
           % ("pass ✅" if ok else "short ❌",
-             ("OK" if (deep_ok and ctrl_ok) else "FAIL") + " · structural "
+             ("OK" if reader_ok else "FAIL") + " · structural "
              + ("OK" if structural else "FAIL"),
              "OK" if (caught and ok_heal) else "FAIL",
              len(res["declared"]) - len(bad), len(res["declared"]), len(noisy)))
