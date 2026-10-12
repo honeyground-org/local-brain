@@ -75,7 +75,7 @@
     "docs": {
       "impact": "low",
       "summary": "documentation",
-      "paths": ["docs/", "README.md"],
+      "paths": ["docs/", "README.md", "landing/"],
       "owners": []
     },
     "governance": {
