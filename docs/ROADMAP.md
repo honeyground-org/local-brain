@@ -94,8 +94,7 @@ A memory for coding agents that is **more efficient and performs better than the
 ### 2. Quality
 - Close the gap to OR'd `grep` on hit rate while keeping the reading load far lower (top-3 against hundreds
   of files): 32% against 82% with the same words (2026-10-12, above). The misses are mostly short
-  prompts that share only common words with their answer ("the merge is done — check it"). Measured that
-  day on the question alone:
+  prompts that share only common words with their answer. Measured that day on the question alone:
   - The judge re-ranking lexical search's top 20 raises the top 3 from 32% to 42% (9 gained, 2 lost; the
     same direction as +7 points on 2026-08-31). But it takes a median of 3.9 s against the hook's 5 s,
     and one call per recall. Where a caller passes its own synonyms (MCP `recall`) it does not help:
@@ -110,8 +109,7 @@ A memory for coding agents that is **more efficient and performs better than the
     preceding turn.
 - The judge's threshold cannot re-measure itself: 4 of the 34 hand-labelled "no memory needed" prompts
   (labelled 2026-08-12, when only lexical search existed) are answered by real memories, and the judge
-  gives them 10 — "pause the work, the fan is loud" against the note that stopping the shell did not
-  stop the work. The noise floor then sits at the top of the scale, so calibration refuses to ship
+  gives them 10. The noise floor then sits at the top of the scale, so calibration refuses to ship
   (measured again 2026-10-12 on the model now answering). Labels are fixed by a person reading them.
 - Measure short-query recall on real corpora in other languages; the method settings were first set on
   one corpus.
