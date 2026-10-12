@@ -38,7 +38,9 @@ A memory for coding agents that is **more efficient and performs better than the
 - Against `grep` with the same words — the question's own — on the author's 66 labelled questions
   (2026-10-12): the top 3 holds the answer for 32%, OR'd `grep` for 82% somewhere in a median of 222
   files. Held to the same 3 files, `grep` finds it 1% of the time. (`verify_vs_grep` used to give the
-  brain the labels' expansion words and `grep` none, and read 65%.)
+  brain the labels' expansion words and `grep` none, and read 65%.) With synonyms an agent wrote from
+  the question alone, as a caller does, the top 3 holds it for 53% and OR'd `grep` for 95% in a median
+  of 644 files.
 
 **Behaviour layer**
 - No rules ship; they are learned from your own tool history, and firing rates are measured with the same
@@ -96,8 +98,11 @@ A memory for coding agents that is **more efficient and performs better than the
   day on the question alone:
   - The judge re-ranking lexical search's top 20 raises the top 3 from 32% to 42% (9 gained, 2 lost; the
     same direction as +7 points on 2026-08-31). But it takes a median of 3.9 s against the hook's 5 s,
-    and one call per recall. Whether it helps when the caller passes its own synonyms cannot be read
-    from this set, because the labels' synonyms are the lane the answers were picked in.
+    and one call per recall. Where a caller passes its own synonyms (MCP `recall`) it does not help:
+    with synonyms an agent wrote blind from the question alone, the top 3 went 53% → 50% (8 gained,
+    10 lost). It lifts answers buried at ranks 13–14 and drops ones lexical search already had at 1–3.
+    Not shipped. (The labels' own synonyms cannot answer this: they are the lane the answers were
+    picked in.)
   - Fusing the semantic ranking by reciprocal rank does not help: 37% → 37% on the 57 short prompts
     (5 gained, 5 lost).
   - What a short prompt lacks is the turn before it, and the labelled set cannot test that: none of its
