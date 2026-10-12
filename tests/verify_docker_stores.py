@@ -15,8 +15,9 @@ containers on other ports, under its own project name, and removes them at the e
 paired with each graph backend (round-robin); for every pair:
   ④ after `restart`, the same answers — without sending anything again; starting one role again leaves
      the other one running and in sync
-  ⑤ after the containers are ★removed★ and created again (what a Docker reinstall does), the same answers
-     — still without sending anything: the data was in the folders all along
+  ⑤ after the containers ★and the volumes Docker made for them★ are removed and created again (what a
+     Docker reinstall does), the same answers — still without sending anything: the data was in the
+     folders all along
   ⑥ with the data folders emptied, the next sync notices and refills both from the local copy
   ⑦ the whole contract against the containers (§tests/_store_contract): an edit and a removal through
      indexing, a full rebuild, a lost copy refilled, an outage answered by the local copy
@@ -24,7 +25,13 @@ paired with each graph backend (round-robin); for every pair:
      the whole round, and opens no connection to an address off this machine (a control container that
      does connect out must be seen first, or the watch proves nothing). Measured 2026-10-10: Qdrant and
      Memgraph with their reporting on connect to telemetry.qdrant.io / telemetry.memgraph.com within a
-     minute; with brain's settings, nothing
+     minute; with brain's settings, nothing. A watch that ended before its round did fails the row
+  ⑨ ★nothing this check started is left behind★ — no container, and no volume its containers held (a
+     count that must first see a container left running and a volume left behind, or it proves nothing).
+     Killing a `docker run` client does not stop its container, and `--rm` removes only a container that
+     ends: the old watch loop never ended, and 74 watchers ran on for 37 hours after a few local runs
+     (2026-10-10 → 10-12). An image's own VOLUME that brain does not bind (Memgraph's /etc/memgraph) was
+     left as a volume at every `down`. CI never shows either — its machine is thrown away
 
 How to run:  PYTHONPATH=. python3 tests/verify_docker_stores.py
              BRAIN_TEST_DOCKER=1 PYTHONPATH=. python3 tests/verify_docker_stores.py
@@ -148,8 +155,16 @@ WATCH_IMAGE = "alpine:3.20"          # a shell and /proc — joined to the watch
 # ⛔ how long each backend is watched, at least — Qdrant and Memgraph with reporting on connected out within
 #    40–75 s (2026-10-10); a round that ends sooner is topped up with the containers idle
 MIN_WATCH = float(os.environ.get("BRAIN_TEST_EGRESS_SEC", "90") or 90)
+# a watch ends by itself after this long, so a check that dies half-way leaves no watcher running
+WATCH_LIMIT = int(os.environ.get("BRAIN_TEST_WATCH_LIMIT", "3600") or 3600)
 SEEN: dict = {}
 WATCHED: dict = {}
+CUT: set = set()                     # backends whose watch ended before it was stopped — not watched throughout
+# Every container this check starts carries LABEL (the compose ones carry the project's own label), and every
+# volume those containers held is remembered before they are removed — so ⑨ can count what was left behind
+LABEL = "local-brain.verify=" + dk.project()
+VOLUMES: set = set()
+STARTED = False                      # containers were started — clean up at exit, whatever happened
 
 
 class Egress:
@@ -158,13 +173,20 @@ class Egress:
     A second container joins its network namespace (`--net container:<name>`) and reads /proc/net/tcp and
     tcp6 five times a second. A connection is seen even if it never completes (SYN_SENT), so a blocked
     attempt to report home counts too.
+
+    ⛔ The watcher is named, and stop() removes ★the container★: killing the `docker run` client leaves it
+       running, and `--rm` only removes a container that ends (§⑨). Its loop also ends by itself after
+       WATCH_LIMIT seconds.
     """
 
     def __init__(self, container: str):
         import threading
         self.container, self.seen, self.t0 = container, set(), time.time()
-        self.p = subprocess.Popen(["docker", "run", "--rm", "--net", "container:" + container, WATCH_IMAGE, "sh", "-c",
-                                   "while :; do cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; sleep 0.2; done"],
+        self.name = "%s-watch-%s" % (dk.project(), uuid.uuid4().hex[:6])
+        self.p = subprocess.Popen(["docker", "run", "--rm", "--name", self.name, "--label", LABEL,
+                                   "--net", "container:" + container, WATCH_IMAGE, "sh", "-c",
+                                   "end=$(( $(date +%%s) + %d )); while [ $(date +%%s) -lt $end ]; do "
+                                   "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; sleep 0.2; done" % WATCH_LIMIT],
                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
                                   errors="replace")
         self.thread = threading.Thread(target=self._read, daemon=True)
@@ -189,7 +211,12 @@ class Egress:
                 self.seen.add("%s:%d" % (addr, int(port, 16)))
 
     def stop(self) -> set:
-        self.p.kill()
+        self.lasted = self.p.poll() is None      # still watching when stopped: it covered the whole span
+        subprocess.run(["docker", "rm", "-f", self.name], capture_output=True, timeout=120)
+        try:
+            self.p.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            self.p.kill()
         self.thread.join(timeout=10)
         self.watched = time.time() - self.t0
         return self.seen
@@ -199,7 +226,7 @@ def egress_control() -> bool:
     """The watch must see a container that does connect out — else a green ⑧ would be a watch that sees nothing."""
     name = "%s-egress-probe" % dk.project()
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-    subprocess.run(["docker", "run", "-d", "--name", name, WATCH_IMAGE, "sh", "-c",
+    subprocess.run(["docker", "run", "-d", "--name", name, "--label", LABEL, WATCH_IMAGE, "sh", "-c",
                     "while :; do wget -q -T 1 -O /dev/null http://1.1.1.1/ 2>/dev/null; sleep 0.3; done"],
                    capture_output=True, timeout=300)
     w = Egress(name)
@@ -211,11 +238,85 @@ def egress_control() -> bool:
     return any(s.startswith("1.1.1.1:") for s in seen)
 
 
+def _docker(*args: str) -> str:
+    """What a docker command printed."""
+    return subprocess.run(["docker"] + list(args), capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=60).stdout
+
+
+def _ours() -> list:
+    """The ids of every container this check started that still exists — its label, or its compose project."""
+    ids: set = set()
+    for f in ("label=" + LABEL, "label=com.docker.compose.project=" + dk.project()):
+        ids |= set(_docker("ps", "-aq", "--filter", f).split())
+    return sorted(ids)
+
+
+def remember_volumes() -> None:
+    """Remember every volume this check's containers hold — before they are removed, so ⑨ can look for it after."""
+    ids = _ours()
+    if ids:
+        VOLUMES.update(_docker("inspect", "--format",
+                               '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{end}}{{end}}', *ids).split())
+
+
+def left_behind() -> dict:
+    """What this check started that is still there: its containers, and the volumes they held."""
+    return {"containers": _ours(),
+            "volumes": sorted(v for v in VOLUMES if subprocess.run(["docker", "volume", "inspect", v],
+                                                                   capture_output=True, timeout=60).returncode == 0)}
+
+
+def sweep() -> None:
+    """Remove whatever left_behind() finds — after ⑨ counted it, and also when a run stopped half-way."""
+    remember_volumes()
+    left = left_behind()
+    if left["containers"]:
+        subprocess.run(["docker", "rm", "-f", "-v"] + left["containers"], capture_output=True, timeout=300)
+    if left["volumes"]:
+        subprocess.run(["docker", "volume", "rm", "-f"] + left["volumes"], capture_output=True, timeout=300)
+
+
+def leak_control() -> bool:
+    """⑨'s count must see what the old check left — else a green ⑨ would be a count that sees nothing.
+
+    Leaves a container the way the old watch did (its `docker run` client killed) and a volume the way `down`
+    without --volumes did (its container removed, the volume not), then removes both.
+    """
+    name = "%s-leak-probe" % dk.project()
+    p = subprocess.Popen(["docker", "run", "--name", name, "--label", LABEL, "-v", "/held", WATCH_IMAGE,
+                          "sh", "-c", "while :; do sleep 1; done"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    running = False
+    for _ in range(120):
+        running = _docker("inspect", "--format", "{{.State.Running}}", name).strip() == "true"
+        if running:
+            break
+        time.sleep(0.5)
+    remember_volumes()
+    p.kill()
+    p.wait(timeout=30)
+    time.sleep(1)
+    still = _docker("inspect", "--format", "{{.State.Running}}", name).strip() == "true"
+    seen_container = bool(left_behind()["containers"])
+    held = _docker("inspect", "--format", "{{range .Mounts}}{{.Name}}{{end}}", name).strip()
+    subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=120)       # without -v: the volume stays
+    seen_volume = bool(held) and held in left_behind()["volumes"]
+    if held:
+        subprocess.run(["docker", "volume", "rm", "-f", held], capture_output=True, timeout=120)
+    check("(control) a container whose `docker run` client was killed keeps running", running and still)
+    check("(control) the count sees it", seen_container)
+    check("(control) the count sees a volume left after its container was removed", seen_volume, held[:12])
+    return running and still and seen_container and seen_volume
+
+
 def same(db, roles, label: str) -> None:
     contract.same(db, roles, check, label)
 
 
 def compose(services, *args: str) -> bool:
+    if args and args[0] == "down":
+        remember_volumes()
     env = dict(os.environ, **dk.environment(services, create=False))
     return subprocess.run(["docker", "compose", "-f", dk.compose_path(), "-p", dk.project()] + list(args),
                           capture_output=True, text=True, env=env, timeout=600, encoding="utf-8", errors="replace").returncode == 0
@@ -231,7 +332,7 @@ def empty_folder(d: str, image: str) -> None:
     """
     if not os.path.isdir(d):
         return
-    subprocess.run(["docker", "run", "--rm", "--user", "0:0", "--entrypoint", "sh", "-v", "%s:/wipe" % d, image,
+    subprocess.run(["docker", "run", "--rm", "--label", LABEL, "--user", "0:0", "--entrypoint", "sh", "-v", "%s:/wipe" % d, image,
                     "-c", "rm -rf /wipe/* /wipe/.[!.]* 2>/dev/null; true"], capture_output=True, timeout=300)
     shutil.rmtree(d, ignore_errors=True)
 
@@ -268,6 +369,8 @@ def live_round(services: dict, watching: bool) -> None:
         for n, w in list(watches.items()):
             SEEN[n] = SEEN.get(n, set()) | w.stop()
             WATCHED[n] = WATCHED.get(n, 0.0) + w.watched
+            if not w.lasted:
+                CUT.add(n)
             del watches[n]
         if on:
             for n in services.values():
@@ -310,9 +413,10 @@ def live_round(services: dict, watching: bool) -> None:
             check("…and nothing needs sending to either", all(x.get("unchanged") for x in s.values()),
                   json.dumps({k: x.get("unchanged") for k, x in s.items()}))
 
-        print("\n⑤ [%s] the containers removed and created again (what a Docker reinstall does)" % what)
+        print("\n⑤ [%s] the containers and their volumes removed and created again (what a Docker reinstall does)"
+              % what)
         watch(False)
-        check("containers removed", compose(services, "down") and not dk.status())
+        check("containers and their volumes removed", compose(services, "down", "--volumes") and not dk.status())
         r = dk.up(services)
         check("created again from the same folders", r["ok"], json.dumps(r.get("why", "")))
         watch(True)
@@ -324,7 +428,7 @@ def live_round(services: dict, watching: bool) -> None:
 
         print("\n⑥ [%s] the data folders emptied" % what)
         watch(False)
-        compose(services, "down")
+        compose(services, "down", "--volumes")
         folders = []
         for name in services.values():
             b = stores.spec(name)
@@ -350,7 +454,7 @@ def live_round(services: dict, watching: bool) -> None:
         watch(False)
     finally:
         watch(False)
-        compose(services, "down", "--remove-orphans")
+        compose(services, "down", "--volumes", "--remove-orphans")
         db.close()
 
 
@@ -367,15 +471,26 @@ def live() -> str:
         return "not measured (%s)" % state["why"]
     rounds = chosen_rounds()
     check("there is something to run", bool(rounds), os.environ.get("BRAIN_TEST_DOCKER", ""))
+    global STARTED
+    STARTED = True
     subprocess.run(["docker", "pull", "-q", WATCH_IMAGE], capture_output=True, timeout=300)
+    counting = leak_control()
     watching = egress_control()
     for services in rounds:
         live_round(services, watching)
     if watching:
         print("\n⑧ nothing leaves the machine")
         for n in sorted(WATCHED):
-            check("%s: no connection off this machine while it ran (%.0f s watched)" % (n, WATCHED[n]),
-                  WATCHED[n] >= MIN_WATCH - 1 and not SEEN.get(n), ", ".join(sorted(SEEN.get(n, ()))) or "none")
+            check("%s: no connection off this machine while it ran (%.0f s watched%s)"
+                  % (n, WATCHED[n], ", ★the watch ended early★" if n in CUT else ""),
+                  WATCHED[n] >= MIN_WATCH - 1 and n not in CUT and not SEEN.get(n),
+                  ", ".join(sorted(SEEN.get(n, ()))) or "none")
+    if counting:
+        print("\n⑨ nothing this check started is left behind")
+        left = left_behind()
+        check("no container left", not left["containers"], " ".join(c[:12] for c in left["containers"]))
+        check("no volume left (%d held by its containers, all removed)" % len(VOLUMES), not left["volumes"],
+              " ".join(v[:12] for v in left["volumes"]))
     return "measured live: " + ", ".join(" + ".join(s.values()) for s in rounds)
 
 
@@ -396,6 +511,11 @@ if __name__ == "__main__":
     try:
         code = main()
     finally:
+        if STARTED:
+            try:
+                sweep()                                 # ⑨ has already counted; this also covers a run that stopped
+            except (OSError, subprocess.SubprocessError) as e:
+                print("⚠ cleaning up the check's containers failed: %s" % e)
         shutil.rmtree(_TMP, ignore_errors=True)
         for k, v in _SAVED.items():
             if v is None:
