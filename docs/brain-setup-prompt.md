@@ -17,18 +17,22 @@ brings those memories back four different ways.
 | **Related context** | Follows the `[[links]]` a human wrote and attaches what they point to | No |
 | **Semantic search** | Finds documents that share no words with your question (embeddings → judge) | **Yes (remote)** |
 
-**Scorecard measured on the author's corpus** (53 questions · 605 memory files):
+**Scorecard measured on the author's corpus** (2026-10-12 · 66 labelled questions · 904 memory
+files). Every method gets the same words — the question's own:
 
 | Method | Correct | Documents you must read |
 |---|---|---|
-| grep, one keyword | 16/53 (30%) | 1 |
-| grep, all content words OR'd | 42/53 (79%) | **126** |
-| brain `recall` + synonyms | 42/53 (79%) | **3** |
-| brain hook — fires without being asked | 22/53 (42%) | 1 |
+| grep, one keyword | 17/66 (26%) | 2 |
+| grep, all content words OR'd | 54/66 (82%) | **222** |
+| brain `recall`, top 3 | 21/66 (32%) | **3** |
+| brain hook — fires without being asked | 15/66 (23%) | 2 at most |
 
-The point is not "it gets more right" — it is that **it reads 40× less**
-(126 documents × 4.2KB average ≈ 100k tokens, which nobody can actually read). And
-the last row is a capability grep **does not have at all**.
+OR'd grep holds the answer more often — somewhere in **222** documents (about 880KB of text, which
+nobody actually reads). Held to the same 3 documents, grep finds it 1% of the time and the brain 37%
+(`brain score --compare`, 57 of the same questions): the brain is a ranker, not a wider net. Give both
+the same synonyms and both find 42 of 44 (95%), grep by reading 456 documents and the brain by reading
+3 — an upper bound, because those synonyms were used to pick the answers. And the last row is a
+capability grep **does not have at all**.
 
 It also removes the size problem structurally: **605** memories, an index file of
 **14.2KB**, only **4%** of memories named in it — and a **100% reach rate**

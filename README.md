@@ -416,7 +416,7 @@ matters is skipped there.
 python3 tests/clean_room.py             # every check below, in a clean room
 python3 tests/verify_recall.py          # recall quality regression
 python3 tests/verify_reachability.py    # "still reachable after removal from the index?"
-python3 tests/verify_vs_grep.py         # ★does it beat grep★ — reads less, hits more
+python3 tests/verify_vs_grep.py         # side by side with grep, on the same words
 python3 tests/verify_related.py         # the graph must not steal the answer's slot
 python3 tests/verify_vectors.py         # semantic search: 3 harm checks + 1 usefulness
 python3 tests/verify_guard.py           # every behaviour rule actually fires

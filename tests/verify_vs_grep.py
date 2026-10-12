@@ -7,12 +7,26 @@ reading and remembering memory.md and running grep to find things."*
 
 So this check never measures the brain by ★its own yardstick★. It actually runs the old way, side by side.
 
-## What is compared (same question · same files)
+## What is compared (same question · same files · ★same words★)
 
   A. grep, one word    scans with the single most discriminating-looking word in the question (what a human does)
   B. grep, several words  scans with every content word in the question, OR'd together (the old way, pushed for maximum recall)
-  C. brain recall      called with synonyms (terms) given — the way the MCP tool is used
+  C. brain recall      the top 3 for ★the question alone★ — the same words grep is given
   D. brain hook        ★when nothing was asked at all★ — what gets attached automatically
+
+## ⛔ Every method gets the same words (2026-10-12)
+
+Until then C was the brain ★with the label's expansion words★ while A and B had the question alone,
+and the headline read "brain 65% in 3 documents ↔ grep OR 82% in 222". Two things were wrong with it:
+
+  · ★unequal information★ — the brain was handed words grep never saw. On the same 66 questions the
+    brain's top 3 held the answer for 32% with the question alone and 65% with the expansion words.
+  · ★the expansion words are the labelling lane★ — `short.json` says so itself: an answer is pointed
+    at ★through recall with those words★ ("judged in the expansion lane, tested in the hook's lane").
+    So recall-with-those-words reads its own labelling. 9 of the questions go from 0/9 to 9/9 with them.
+
+So the verdict is drawn from the question alone, for every method. The expansion words are a second
+lane given ★to both★ grep and the brain, and reported as an upper bound — never the verdict.
 
 ## What gets counted — was it found / how much has to be read / does it show up unasked
 
@@ -126,7 +140,7 @@ def main() -> int:
     print("the old way (grep) vs the brain — %d of the same questions · %d memory files" % (len(cs), len(docs)))
     print("=" * 78)
 
-    stat = {k: {"hit": 0, "read": []} for k in ("A", "B", "C", "D")}
+    stat = {k: {"hit": 0, "read": []} for k in ("A", "B", "C", "D", "BT", "CT")}
     rows = []
     for q, gold, terms in cs:
         toks = tokens(q)
@@ -135,8 +149,8 @@ def main() -> int:
         ga = grep(docs, one)
         # B. every content word, OR'd
         gb = grep(docs, toks)
-        # C. brain recall + terms (is it in the top 3)
-        rc = search.recall(db, q, k=8, extra_terms=terms, log=False)
+        # C. brain recall on ★the same words grep got★ — the question alone (is it in the top 3)
+        rc = search.recall(db, q, k=8, log=False)
         direct = [r for r in rc if not r.get("related")]
         top3 = [r["name"] for r in direct[:3]]
         # D. the hook — what attaches automatically when nothing at all was asked
@@ -156,6 +170,17 @@ def main() -> int:
             if hit:
                 stat[key]["hit"] += 1
             stat[key]["read"].append(read)
+        if terms:
+            # ★the label's expansion words, given to both★ — an upper bound, not the verdict (see the docstring)
+            tt = toks + [t for w in terms for t in tokens(str(w)) if t not in toks]
+            gt = grep(docs, tt)
+            ct = [r["name"] for r in search.recall(db, q, k=8, extra_terms=terms, log=False)
+                  if not r.get("related")][:3]
+            for key, hit, read in (("BT", any(_ei.gold_hit(gold, n) for n in gt), len(gt)),
+                                   ("CT", any(_ei.gold_hit(gold, n) for n in ct), len(ct))):
+                if hit:
+                    stat[key]["hit"] += 1
+                stat[key]["read"].append(read)
         rows.append((q[:30], gold[:34], len(ga), len(gb),
                      any(_ei.gold_hit(gold, n) for n in ga), any(_ei.gold_hit(gold, n) for n in gb),
                      any(_ei.gold_hit(gold, n) for n in top3), any(_ei.gold_hit(gold, n) for n in fired)))
@@ -168,12 +193,23 @@ def main() -> int:
     label = {"A": "grep, one word    ", "B": "grep, OR'd words  ",
              "C": "brain recall(top-3)", "D": "brain hook(auto, 2)"}
     print()
+    print("  ★the question alone★ — every method gets the same words (the verdict below)")
     print("  method                hit rate   docs to read (median)")
     print("  " + "-" * 62)
     for k in ("A", "B", "C", "D"):
         s = stat[k]
         print("  %s  %2d/%d (%3.0f%%)   %d"
               % (label[k], s["hit"], n, 100.0 * s["hit"] / n, med(s["read"])))
+    nt = len(stat["CT"]["read"])
+    if nt:
+        print()
+        print("  ★with the label's expansion words, given to both★ — %d question(s) that have them" % nt)
+        for k, lab in (("BT", "grep, OR'd + words "), ("CT", "brain recall(top-3)")):
+            s = stat[k]
+            print("  %s  %2d/%d (%3.0f%%)   %d"
+                  % (lab, s["hit"], nt, 100.0 * s["hit"] / nt, med(s["read"])))
+        print("  ⚠️ an upper bound for both, never the verdict — the answers were pointed at through recall")
+        print("     with these same words (the labelling lane), so this lane partly reads its own labelling")
 
     print()
     print("  ★the same hit rate is not the same answer if the amount to read differs★")
@@ -183,7 +219,9 @@ def main() -> int:
     print("  grep only works when it is called — column D is a capability the old way never had at all")
     print("  (it attaches even when unasked · so grep's automatic hit rate is 0 by definition in this table)")
 
-    worst = [r for r in rows if r[3] and not r[6]]
+    # ⛔ r[5] is "grep OR found the answer", r[3] only how many files it returned (any at all) — until
+    #    2026-10-12 this read r[3], so the list counted every question grep returned anything for.
+    worst = [r for r in rows if r[5] and not r[6]]
     if worst:
         print()
         print("  ⚠️ %d question(s) grep OR found but the brain's top 3 didn't:" % len(worst))
@@ -215,8 +253,7 @@ def main() -> int:
     if ok:
         print("verdict: pass ✅ — beats %s on both axes" % dom[0]["label"])
     else:
-        print("verdict: ⛔ ★no opponent is beaten on both axes★ — "
-              "matches far better than one word, and reads far less than OR.")
+        print("verdict: ⛔ ★no opponent is beaten on both axes★ — each one wins on one of them (above).")
         print("      the public bar (\"reads less than grep and matches as well or better\") is ★not there yet★.")
     print("⛔ this check only compares 'when it is called'. The old way's real limit was somewhere else —")
     print("   MEMORY.md hit its 25KB cap and 205 of 434 (47%) fell outside the index,")
