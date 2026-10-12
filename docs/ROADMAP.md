@@ -27,7 +27,7 @@ A memory for coding agents that is **more efficient and performs better than the
 | Silence is not success | A layer that stops working must say so in `brain status`, not fall quiet. |
 | CI costs nothing | Every check runs on free runners and no step calls a paid service; `verify_pr_report` enforces it. |
 
-## Where it stands (2026-10-07)
+## Where it stands (2026-10-12)
 
 **Retrieval**
 - Recall attaches memories as you type, above a threshold measured on your own corpus.
@@ -35,6 +35,10 @@ A memory for coding agents that is **more efficient and performs better than the
   *novelty* (the share of questions that answered differently), so near-repeats cannot fake confidence.
 - Trigger phrases bring a declared thread back exactly; a Korean ↔ English loanword bridge connects
   mixed-language notes.
+- Against `grep` with the same words — the question's own — on the author's 66 labelled questions
+  (2026-10-12): the top 3 holds the answer for 32%, OR'd `grep` for 82% somewhere in a median of 222
+  files. Held to the same 3 files, `grep` finds it 1% of the time. (`verify_vs_grep` used to give the
+  brain the labels' expansion words and `grep` none, and read 65%.)
 
 **Behaviour layer**
 - No rules ship; they are learned from your own tool history, and firing rates are measured with the same
@@ -87,7 +91,18 @@ A memory for coding agents that is **more efficient and performs better than the
 
 ### 2. Quality
 - Close the gap to OR'd `grep` on hit rate while keeping the reading load far lower (top-3 against hundreds
-  of files).
+  of files): 32% against 82% with the same words (2026-10-12, above). The misses are mostly short
+  prompts that share only common words with their answer ("the merge is done — check it"). Measured that
+  day on the question alone:
+  - The judge re-ranking lexical search's top 20 raises the top 3 from 32% to 42% (9 gained, 2 lost; the
+    same direction as +7 points on 2026-08-31). But it takes a median of 3.9 s against the hook's 5 s,
+    and one call per recall. Whether it helps when the caller passes its own synonyms cannot be read
+    from this set, because the labels' synonyms are the lane the answers were picked in.
+  - Fusing the semantic ranking by reciprocal rank does not help: 37% → 37% on the 57 short prompts
+    (5 gained, 5 lost).
+  - What a short prompt lacks is the turn before it, and the labelled set cannot test that: none of its
+    91 prompts could be traced back to a transcript. Measuring it needs labels that keep their
+    preceding turn.
 - Measure short-query recall on real corpora in other languages; the method settings were first set on
   one corpus.
 - Verify Windows on real hardware with a real host. CI's Windows clean room is required since 2026-10-10
@@ -104,13 +119,20 @@ A memory for coding agents that is **more efficient and performs better than the
   nothing). Removing the dropped service with its volumes before the switch would close it.
 
 ### 4. Checks to tighten
-- None open: the five listed on 2026-10-07 were closed on 2026-10-10 (provider keys masked in #16; checks
+- The judge's daily counter lives in the index, so a measurement on a private copy (`_needs.private_index`)
+  spends the provider's real quota where the live counter never sees it: on 2026-10-12 it read 175 of 500
+  after about 307 real calls. `brain budget` then promises calls the provider will refuse. The counter
+  belongs to the key, not to an index copy.
+- The five listed on 2026-10-07 were closed on 2026-10-10 (provider keys masked in #16; checks
   measure a private copy of the index, skip without a set, and count requests instead of timing them).
 - Closed 2026-10-12: the Docker check left containers and volumes behind on the machine that ran it — its
   egress watchers ran forever once their `docker run` client was killed (74 ran for 37 hours on the
   author's machine), and every `down` left Memgraph's `/etc/memgraph` volume. CI never showed it: its
   machine is thrown away. Watchers are named and removed, end by themselves, `down` removes volumes, and
   ⑨ counts what is left against a control that leaves one container and one volume on purpose.
+- Closed 2026-10-12: `brain triggers` and the self-healing pass read a declaration with their own pattern
+  and missed the one Claude Code writes, indented under `metadata:` — 8 working phrases were reported
+  missing (#20). They now use the indexer's parser, and CI runs that reader on every platform.
 
 ## Working on brain
 
