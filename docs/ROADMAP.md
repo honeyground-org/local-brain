@@ -129,10 +129,6 @@ A memory for coding agents that is **more efficient and performs better than the
   nothing). Removing the dropped service with its volumes before the switch would close it.
 
 ### 4. Checks to tighten
-- The judge's daily counter lives in the index, so a measurement on a private copy (`_needs.private_index`)
-  spends the provider's real quota where the live counter never sees it: on 2026-10-12 it read 175 of 500
-  after about 307 real calls. `brain budget` then promises calls the provider will refuse. The counter
-  belongs to the key, not to an index copy.
 - The five listed on 2026-10-07 were closed on 2026-10-10 (provider keys masked in #16; checks
   measure a private copy of the index, skip without a set, and count requests instead of timing them).
 - Closed 2026-10-12: the Docker check left containers and volumes behind on the machine that ran it — its
@@ -140,6 +136,11 @@ A memory for coding agents that is **more efficient and performs better than the
   author's machine), and every `down` left Memgraph's `/etc/memgraph` volume. CI never showed it: its
   machine is thrown away. Watchers are named and removed, end by themselves, `down` removes volumes, and
   ⑨ counts what is left against a control that leaves one container and one volume on purpose.
+- Closed 2026-10-12: the judge's daily count lived in the index, so a measurement on a private copy
+  spent the provider's quota where the live counter never saw it — the live count read 190 of 500 when
+  the provider's wall came, and the hook's second stage went quiet until Pacific midnight. The count
+  now lives in one ledger file that every copy of an index shares (`BRAIN_LEDGER`, or
+  `judge-ledger.db` in the brain's home), and `verify_measure_isolation` ④ holds it down.
 - Closed 2026-10-12: the judge is the model that answered, not the name asked for. The default judge name
   `gemini-flash-lite-latest` is moved by the provider (asked on 2026-10-12, `gemini-3.5-flash-lite`
   answered), so a threshold "measured for this judge" and the cached scores could not say which model
