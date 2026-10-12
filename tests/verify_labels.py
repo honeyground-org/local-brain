@@ -11,7 +11,7 @@ judge was not wrong — it was behaving ★consistently★, because the same sha
 
 Silence is the right answer on one side (0 false fires) and the wrong answer (a miss) on the other.
 There is no signal in the sentence to tell them apart, so ★no threshold, no prompt can get both right at once.★
-· Same shape as [[lesson_one_parameter_two_meanings_is_why_the_cap_kept_coming_back]].
+· Same shape as a cap that kept coming back because one parameter carried two meanings.
 
 The cause was a relabeling pass ★that lost its pair★ (moving 10 items from C→A left an almost-identical
 sentence behind in C). Labels keep growing, so this is stopped by a check, not human attention.

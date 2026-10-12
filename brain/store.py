@@ -1131,8 +1131,8 @@ def _build_kind_aliases(db: sqlite3.Connection) -> int:
     ① `feedback_never_merge_your_own_pr` is also `never_merge_your_own_pr` — people drop the prefix when they
        link (18 measured links broke this way).
     ② a declared short name is also reachable ★with the target's own prefix★: the declaration is
-       `[no_stale_quotes](feedback_never_quote_an_old_number.md)` and a memory writes
-       `[[feedback_no_stale_quotes]]`. ⛔ Only the target's own prefix — multiplying by every prefix
+       `[short_rule](feedback_a_long_descriptive_rule.md)` and a memory writes
+       `[[feedback_short_rule]]`. ⛔ Only the target's own prefix — multiplying by every prefix
        makes junk aliases that collide across targets.
 
     ⛔ Two documents stripping to the same name get ★neither★ — a link to the wrong place is worse

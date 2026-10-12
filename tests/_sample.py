@@ -19,7 +19,7 @@ Drawn once and written to `tests/eval/prompts.json`, and read from there ever af
 an explicit human action — deleting that file (an automatic refresh would just drift again).
 
 ⛔ It's personal data — `tests/eval/` is gitignored (a person's own words end up in it verbatim).
-⛔ Never put a made-up query in it · lesson_an_evaluation_set_i_invented_measured_my_imagination
+⛔ Never put a made-up query in it — an invented evaluation set measures its author's imagination
 """
 from __future__ import annotations
 

@@ -43,7 +43,7 @@ def main() -> int:
     # ⓪ ★the reader must see every declaration the indexer sees★ — a precondition for everything below.
     #
     #    2026-09-29: `declared_in_files()` read a fixed 2,000 bytes. A memory worked on for weeks grows
-    #    a long `description:`, which pushes its `triggers:` line past that — `project_local_brain` sat
+    #    a long `description:`, which pushes its `triggers:` line past that — one long project note sat
     #    at 3,583. The audit then reported ✅ while four declared phrases resolved to nothing, and
     #    `store.heal_triggers()` never repaired them, because it asks this same function what the files
     #    declare. ⛔ The check below (ⓞ) passed the whole time: ★the instrument and the thing it measures

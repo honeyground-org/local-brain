@@ -2,13 +2,13 @@
 
 ## Why this check exists (measured 2026-08-31)
 
-The brain had ★2,632★ aliases stored and still couldn't find `[[diagnostic_wolf]]`.
+The brain had ★2,632★ aliases stored and still couldn't find a short name like `[[some_wolf]]`.
 There were only three generation rules: ①strip the kind prefix ②frontmatter `name`
 ③hyphen↔underscore. ★A short name a human decided by hand★ was nowhere among them.
 
 But that name was already written down — `MEMORY.md` declares
-`[diagnostic_wolf](lesson_a_diagnostic_that_counts_what_you_cannot_fix.md)`, and
-memories call it `[[diagnostic_wolf]]`. ⛔ The index file is loaded wholesale every session,
+`[some_wolf](lesson_a_long_descriptive_name.md)`, and
+memories call it `[[some_wolf]]`. ⛔ The index file is loaded wholesale every session,
 so ★it is never indexed as a document★ — so nobody ever read that declaration,
 and that path was silently dead (it only ever showed up as a broken link).
 
@@ -53,7 +53,7 @@ def main():
 
     # ⛔ ★a document has to be able to declare its own alias★ — the owner of a name deciding
     #    the name beats someone else's document (MEMORY.md) declaring it instead. The first version
-    #    blocked this with `t != name`, and that's why `two_persona_axes` stayed broken.
+    #    blocked this with `t != name`, and that's why one note's own short name stayed broken.
     #    ★declaring an alias isn't a link★ — "a link pointing at itself is meaningless" doesn't apply here.
     self_decl = store._declared_pairs("[short](reference_a_long_name.md)")
     check("★a document can declare its own alias★",
@@ -76,10 +76,23 @@ def main():
                       " JOIN docs d ON d.name = a.target").fetchone()["c"]
     check("some of them point at a target that actually exists", live > 0, "%d found" % live)
 
-    for alias in ("diagnostic_wolf", "no_stale_quotes", "feedback_no_stale_quotes"):
-        r = search.resolve(db, alias)
-        check("reaches the document through the alias `%s`" % alias, r is not None,
-              r["name"][:52] if r else "★not found★")
+    # ★this person's own declarations, read now★ — never names from the author's notes. Until
+    #  2026-10-12 this row asked for three of the author's own aliases, so anyone else with notes of
+    #  their own got a red row here for a name they never wrote.
+    sample = db.execute(
+        "SELECT a.alias, a.target, d.kind FROM alias_decl a JOIN docs d ON d.name = a.target"
+        " WHERE NOT EXISTS (SELECT 1 FROM docs x WHERE x.name = a.alias)"
+        " ORDER BY a.alias LIMIT 3").fetchall()
+    for row in sample:
+        names = [row["alias"]]
+        # the mirror form (`<kind>_<alias>`) is built from the corpus's kind prefixes after indexing
+        if row["kind"] and row["target"].startswith(row["kind"] + "_") \
+                and not row["alias"].startswith(row["kind"] + "_"):
+            names.append(row["kind"] + "_" + row["alias"])
+        for alias in names:
+            r = search.resolve(db, alias)
+            check("reaches the document through a declared alias (%d chars)" % len(alias),
+                  r is not None and r["name"] == row["target"], "found" if r else "★not found★")
 
     # ⛔ ★never shadows a name that actually exists★ — a declaration covering a real document makes it vanish.
     real = db.execute("SELECT name FROM docs LIMIT 1").fetchone()["name"]

@@ -127,6 +127,15 @@ A memory for coding agents that is **more efficient and performs better than the
   nothing). Removing the dropped service with its volumes before the switch would close it.
 
 ### 4. Checks to tighten
+- Tests still carry the author's own prompts as fixed control queries (kept on 2026-10-06 so as not to
+  invent any): `verify_threshold`, `verify_labels`, `verify_vectors`, `verify_symmetry` and the judge-prompt
+  variants in `measure_judge_precision`. They should draw the person's own prompts at run time, as
+  `tests/_sample.py` does.
+- Closed 2026-10-12: the author's note names and aliases sat in tests and one comment in `brain/` — and
+  `verify_aliases` and `verify_end_to_end` ★asserted★ three of the author's aliases and a link to one of
+  the author's notes, so anyone else with notes got red rows. They now read the person's own declarations
+  and bring their own link target, and `verify_public_scrub` gains a sixth axis: the publisher's own note
+  names, aliases and prompts, read at run time, must not appear in the files that ship.
 - The five listed on 2026-10-07 were closed on 2026-10-10 (provider keys masked in #16; checks
   measure a private copy of the index, skip without a set, and count requests instead of timing them).
 - Closed 2026-10-12: the Docker check left containers and volumes behind on the machine that ran it — its

@@ -85,8 +85,8 @@ JSON 배열만 출력: [{"i": 0, "s": 7}, {"i": 1, "s": 2}, ...]
 #
 #   v0 and v1 failed on ★the same query★. Given a list with the right answer removed from the candidates
 #   (= a list with no answer), the judge cannot say "there is none" and instead picks the nearest topic and gives it full marks:
-#       a phrase like "continue creator-discovery exploration"  → a document tidying up retired profiles    10 points
-#       a phrase like "let me sign in on LinkedIn…"             → the lesson about a passport symlink        10 points
+#       a phrase like "continue <a project> exploration"  → an unrelated clean-up note     10 points
+#       a phrase like "let me sign in on <a site>…"       → an unrelated lesson            10 points
 #   ⛔ The real failure mode is not "overestimating relevance" but ★being unable to say there is no answer when there is none★.
 #   So exactly one axis changes: ★force it to quote a sentence from inside the candidate.★
 #   If it cannot produce a quote, that candidate is not the answer — the room to invent one is structurally removed.
@@ -128,7 +128,6 @@ JSON 배열만 출력: [{"i": 0, "s": 7, "q": "인용"}, {"i": 1, "s": 0, "q": "
 # A pattern this repository has already validated —
 #   "when building a judge, ★attach a control group, and never skip it★. A request with no credential
 #    must be refused for the door to be alive — if it is not refused, `unknown`, never judge."
-#   ([[lesson_a_probe_that_cannot_fail_its_own_calibration]])
 #
 # Method: mix ★decoys certainly unrelated★ into the candidate list and send it as the same request (0 extra calls).
 #   · decoy crosses the threshold → the judge is lenient on this query → ★attach nothing★

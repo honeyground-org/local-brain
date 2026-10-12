@@ -222,7 +222,7 @@ def main(argv=()) -> int:
         check(VERDICTS[tag], ok, detail)
 
     # ⛔ ★A probe that cannot fail its own calibration★ — this repository has been burnt by exactly
-    #    that (lesson_a_probe_that_cannot_fail_its_own_calibration). The live row above is green on a
+    #    that. The live row above is green on a
     #    clean tree ★by design★, so it proves nothing on its own. These rows drive `verdict()` through
     #    ★every branch★, including the two that must be red.
     print("\n★3b. control group — the discipline check ★can★ fail")

@@ -17,8 +17,7 @@ required opening the raw 429 body by hand.
    not 0 behind the wall, the hook is paying a round trip and a 4-second wait for nothing on every prompt.
 
 ⛔ ★This check never touches real data★ — `BRAIN_HOME` is pointed at a temp folder.
-   A check in this same repository once deleted the real `rules.json`
-   (lesson_a_test_that_deleted_the_data_it_was_testing).
+   A check in this same repository once deleted the real `rules.json`.
 """
 import io
 import json
