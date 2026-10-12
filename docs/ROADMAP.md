@@ -98,10 +98,19 @@ A memory for coding agents that is **more efficient and performs better than the
 - More backends, one file each (docs/STORAGE.md): every vector database the roadmap named is in. Another
   Bolt or Postgres database (Apache AGE for the graph role, for example) is one file now that both clients
   exist.
+- Switching a role away from Memgraph in Docker leaves that container's `/etc/memgraph` volume (~52 KB, once
+  per switch): Compose's `up --remove-orphans` removes the container but not its anonymous volume (measured
+  2026-10-12, Compose 5.0.2; recreating a container on a settings change reuses the volume and leaves
+  nothing). Removing the dropped service with its volumes before the switch would close it.
 
 ### 4. Checks to tighten
 - None open: the five listed on 2026-10-07 were closed on 2026-10-10 (provider keys masked in #16; checks
   measure a private copy of the index, skip without a set, and count requests instead of timing them).
+- Closed 2026-10-12: the Docker check left containers and volumes behind on the machine that ran it — its
+  egress watchers ran forever once their `docker run` client was killed (74 ran for 37 hours on the
+  author's machine), and every `down` left Memgraph's `/etc/memgraph` volume. CI never showed it: its
+  machine is thrown away. Watchers are named and removed, end by themselves, `down` removes volumes, and
+  ⑨ counts what is left against a control that leaves one container and one volume on purpose.
 
 ## Working on brain
 
