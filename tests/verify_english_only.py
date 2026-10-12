@@ -26,10 +26,12 @@ lives, because the fix differs per kind:
 
 ## ⛔ What is deliberately NOT counted — and ★it is printed, not hidden★
 
-Two files are allowed to hold Korean, because in both of them Korean is ★the
+Three files are allowed to hold Korean, because in all of them Korean is ★the
 data★, not the prose:
 
     brain/locales/ko.json   the Korean catalog — Korean belongs there
+    landing/index.html      the bilingual landing page — every English line has its
+                            Korean twin, switched in the page (EN / KO toggle)
     brain/langdata.py       patterns matched against the user's own documents
                             (inflectional endings, condition words, language markers).
                             ⛔ Translating those does not fail loudly — the
@@ -58,7 +60,7 @@ KOREAN = re.compile(r"[가-힣ㄱ-ㆎ]")
 
 # Korean is the data here, not the prose (see the module docstring). ⛔ Keep this
 # set ★tiny and argued★ — every entry is a line the target no longer reaches.
-ALLOWED = {"brain/locales/ko.json", "brain/langdata.py"}
+ALLOWED = {"brain/locales/ko.json", "brain/langdata.py", "landing/index.html"}
 
 
 def classify(path, text):
