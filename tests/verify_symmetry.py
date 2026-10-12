@@ -31,11 +31,11 @@ from brain import textindex  # noqa: E402
 
 # shapes that actually occur in our corpus — Korean 2-char words · particles · identifiers · mixed
 PROBES = [
-    "테라폼 apply 금지",
-    "협찬",                                   # ★2 characters★ — the exact spot FTS5 used to miss
-    "세션이 만료됐다",                          # a form with a particle attached
-    "paidContentOverlay 를 확인해",
-    "ads#888 세션 만료",
+    "서버 deploy 금지",
+    "회의",                                   # ★2 characters★ — the exact spot FTS5 used to miss
+    "회의가 끝났다",                            # a form with a particle attached
+    "renderCacheKey 를 확인해",
+    "repo#123 회의 종료",
     "terraform",
     "v1.2 릴리즈 노트",
     "recall 이 죽었다 grep 으로 훑었다",
@@ -89,7 +89,7 @@ print("★2. does an expansion word split exactly like the query")
 print("=" * 74)
 # ⛔ Measured (2026-08-10): hand in `"deep link"` whole and it becomes a term with a space in it,
 #   which can never exist in the index, and it ★silently returns 0★. One entry point stops this from happening.
-for phrase in ["deep link", "AI presence", "협찬 라벨"]:
+for phrase in ["deep link", "cache key", "회의 기록"]:
     via_extra = set(g for _, gs in textindex.query_terms("", [phrase]) for g in gs)
     via_query = set(g for _, gs in textindex.query_terms(phrase) for g in gs)
     ok = via_extra == via_query and not any(" " in t for t in via_extra)
@@ -102,7 +102,7 @@ for phrase in ["deep link", "AI presence", "협찬 라벨"]:
 print("\n" + "=" * 74)
 print("★3. is 2-character Korean still alive (the reason this project built its own index)")
 print("=" * 74)
-for w in ["협찬", "세션", "상한", "중단", "배포"]:
+for w in ["회의", "세션", "상한", "중단", "배포"]:
     grams = textindex.grams_of_word(w)
     ok = w in grams
     if not ok:

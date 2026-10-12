@@ -68,10 +68,16 @@ print("loaded %d/%d docs (%.0f%%) · chunks %d · gate(ratio) %s · reference co
          ("%.4f" % thr_cos) if thr_cos <= 1.0 else "-"))
 print("=" * 74)
 
+# ★mechanism probes★ — these rows check a contract, a gate and a cache, not quality, so a neutral sentence
+#  does the job (the rule against invented queries is about measuring quality, §verify_tokenizer_langs).
+#  ⛔ Until 2026-10-12 they were three of the author's own questions.
+PROBES = ("how do I roll back the last release", "where are the notes from last week's meeting",
+          "why is the build slower today")
+
 print()
 print("① contract — lexical recall never ★mixes in★ the semantic path")
 mixed = []
-for q in ("테라폼 apply 해도 되나", "출금 검증", "세션이 죽었는데 정상이라고 나와"):
+for q in PROBES:
     for r in search.recall(db, q, k=8, log=False):
         if r.get("via_vector"):
             mixed.append((q, r["name"]))
@@ -85,7 +91,7 @@ check("no threshold is hardcoded in the code",
       "fallback ratio %.1f · judge %.1f = both silent"
       % (vectors.MIN_RATIO_FALLBACK, rerank.MIN_SCORE_FALLBACK))
 check("nothing is added before calibration",
-      calibrated or not search.semantic(db, "테라폼 apply 해도 되나", k=1),
+      calibrated or not search.semantic(db, PROBES[0], k=1),
       "stored value %s" % (saved or "none"))
 if calibrated:
     stamp = store.get_meta(db, "vec_model") or ""
@@ -203,10 +209,10 @@ def _counting_open(req, *a, **k):
 _ur.urlopen = _counting_open
 try:
     t0 = time.time()
-    search.semantic(db, "한도를 걸었는데 왜 안 막혔지", k=3)
+    search.semantic(db, PROBES[1], k=3)
     d1, n1 = (time.time() - t0) * 1000, len(_calls)
     t0 = time.time()
-    search.semantic(db, "한도를 걸었는데 왜 안 막혔지", k=3)
+    search.semantic(db, PROBES[1], k=3)
     d2, n2 = (time.time() - t0) * 1000, len(_calls) - n1
 finally:
     _ur.urlopen = _real_open
