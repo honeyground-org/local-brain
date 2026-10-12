@@ -56,9 +56,6 @@ def norm(text: str) -> str:
     return _WS.sub(" ", (text or "").strip()).casefold()
 
 
-_DECL = re.compile(r"^triggers:\s*(\[.*\])\s*$", re.M)
-
-
 def _frontmatter(fh) -> str:
     """The frontmatter block, ★however long it is★ — not a fixed number of bytes.
 
@@ -80,14 +77,10 @@ def _frontmatter(fh) -> str:
     the indexer were reading different amounts of the same file. ★An instrument that sees less than
     the thing it measures reports health it cannot know.★
 
-    Bounded by the closing `---`, and by a generous ceiling so a file with no frontmatter at all is
-    not read whole.
+    Bounded by a generous ceiling so a file with no frontmatter at all is not read whole. Where the
+    block ends is left to the indexer's parser (§declared_in_files), so the two agree on that too.
     """
-    head = fh.read(200_000)
-    if not head.startswith("---"):
-        return head[:2000]
-    end = head.find("\n---", 3)
-    return head if end < 0 else head[:end]
+    return fh.read(200_000)
 
 
 def declared_in_files() -> Dict[str, str]:
@@ -99,6 +92,13 @@ def declared_in_files() -> Dict[str, str]:
     via MCP `reindex` (both incremental and full), but no row appeared in the `triggers` table (a
     long-running MCP server was holding stale code) — it only appeared via `./bin/brain index --full`.
     Skip the check and the next session would have typed the phrase and gotten nothing at all.
+
+    ⛔ ★It reads a declaration with the indexer's own parser★ (2026-10-12). It used its own pattern,
+    `^triggers:` at the start of a line, while the indexer also takes the key indented under
+    `metadata:` — the shape Claude Code writes a memory in. Three such files fired their phrases
+    every day, yet the audit reported 8 rows "only in the table", and `store.heal_triggers()`, which
+    asks this function, could never have repaired them. A second reader is a second definition, and
+    the two drifted twice (the byte cap in §_frontmatter was the first).
     """
     out: Dict[str, str] = {}
     from brain import store
@@ -111,12 +111,9 @@ def declared_in_files() -> Dict[str, str]:
                 head = _frontmatter(fh)
         except OSError:
             continue
-        m = _DECL.search(head)
-        if not m:
-            continue
-        for t in re.findall(r'"([^"]+)"', m.group(1)):
-            if len(t) >= 4:
-                out[norm(t)] = os.path.basename(path)[:-3]
+        meta, _body = store.parse_frontmatter(head)
+        for t in store._triggers_of(meta):
+            out[norm(t)] = os.path.basename(path)[:-3]
     return out
 
 
