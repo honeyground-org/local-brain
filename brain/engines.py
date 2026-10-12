@@ -240,12 +240,28 @@ def _http(url: str, headers: Dict[str, str], body: dict, timeout: float) -> dict
                          str(err.get("message") or "")[:200], daily, limit, retry) from None
 
 
+# ★Which model actually answered★ (2026-10-12) — not the name we asked for.
+#
+# The default judge is `gemini-flash-lite-latest`, a name the provider points at whichever model it
+# likes: asked for it on 2026-10-12, the answer came from `gemini-3.5-flash-lite`. Each provider says
+# who answered (Gemini `modelVersion`, OpenAI and Anthropic `model`), and nothing here read it — so a
+# threshold "measured for this judge" and 6,369 cached scores could not say which model they were
+# measured on, and a precision drift could not be told from a model swap. `rerank` keeps the answer.
+_ANSWERED = [""]
+
+
+def answered() -> str:
+    """The model the provider named as having produced the last judge answer — '' if it named none."""
+    return _ANSWERED[0]
+
+
 def judge_text(prompt_text: str, timeout: float = 25.0, model: str = "") -> str:
     """Send one judging prompt to the chosen judge and return its text answer.
 
     `model` overrides the chosen model on the same provider (a caller measuring one model against another).
     ⛔ Raises JudgeError / OSError / NoKey on failure — the caller turns that into ★None★, never zeros.
     """
+    _ANSWERED[0] = ""
     c = choice("judge")
     if model:
         c = dict(c, model=model)
@@ -261,6 +277,7 @@ def judge_text(prompt_text: str, timeout: float = 25.0, model: str = "") -> str:
                       "generationConfig": {"temperature": 0,
                                            "responseMimeType": "application/json"}},
                      timeout)
+        _ANSWERED[0] = str(data.get("modelVersion") or "")
         try:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError, TypeError):
@@ -272,6 +289,7 @@ def judge_text(prompt_text: str, timeout: float = 25.0, model: str = "") -> str:
                      {"model": c["model"], "temperature": 0,
                       "messages": [{"role": "user", "content": prompt_text}]},
                      timeout)
+        _ANSWERED[0] = str(data.get("model") or "")
         try:
             return data["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError):
@@ -284,6 +302,7 @@ def judge_text(prompt_text: str, timeout: float = 25.0, model: str = "") -> str:
         data = _http("%s/messages" % c["base_url"],
                      {"x-api-key": api_key(c), "anthropic-version": "2023-06-01"},
                      body, timeout)
+        _ANSWERED[0] = str(data.get("model") or "")
         if data.get("stop_reason") == "refusal":
             raise JudgeError(200, "refusal", str((data.get("stop_details") or {}).get("category")))
         text = "".join(b.get("text", "") for b in (data.get("content") or [])

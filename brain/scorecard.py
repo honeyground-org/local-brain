@@ -164,6 +164,15 @@ def _store_home() -> str:
     return _s.brain_home()
 
 
+def _judge_stamp() -> str:
+    """The judge as it answered: provider/name[=the model that answered] — '' when none is chosen."""
+    try:
+        from brain import rerank
+        return rerank.answering_id() if rerank.available() else ""
+    except Exception:                                    # noqa: BLE001
+        return ""
+
+
 def save(sc: dict, note: str = "", path: str = "") -> str:
     """★Kept so that points in time can be compared★ — that is the whole reason this table exists."""
     import time
@@ -176,6 +185,9 @@ def save(sc: dict, note: str = "", path: str = "") -> str:
            #    pipeline (stage 2 when lexical is silent) under `--full`, and on ★the lexical path only★ by default.
            #    Without the stamp both values share one column and ★cherry-picking becomes possible again★.
            "pipeline": "deployed" if ex.get("_auto_full_hit") is not None else "word",
+           # ⛔ ★and which model judged★ (2026-10-12) — precision and stability are the judge's answers;
+           #    when the provider moves a `-latest` name to another model they move with it (§rerank.answering).
+           "judge": _judge_stamp(),
            "total": sc["total"],
            "axes": {r["key"]: r["score"] for r in sc["axes"]},
            "raw": {r["key"]: r["raw"] for r in sc["axes"]}}

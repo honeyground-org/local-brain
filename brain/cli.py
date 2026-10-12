@@ -110,6 +110,10 @@ def engines_text(db) -> str:
                 eng += " " + i18n.t("cli.engines.default_model")
             if r["base_url"] and r["base_url"] != _en.PROVIDERS.get(r["provider"], {}).get("base"):
                 eng += " @ " + r["base_url"]
+            if role == "judge":
+                seen = _rr.answering(db)
+                if seen and seen != r["model"]:
+                    eng += " " + i18n.t("cli.engines.answered_by", model=seen)
         src = (i18n.t("cli.engines.src.env") if r["source"] == "env"
                else i18n.t("cli.engines.src.config") if r["source"] == "config"
                else i18n.t("cli.engines.src.unset"))
@@ -127,8 +131,15 @@ def engines_text(db) -> str:
             status = i18n.t("cli.engines.status.no_key", provider=r["provider"])
         elif role == "judge":
             ms = _rr.min_score(db)
-            status = (i18n.t("cli.engines.status.judge_ready", thr="%.1f" % ms) if ms <= 10.0
-                      else i18n.t("cli.engines.status.judge_uncalibrated"))
+            cs = _rr.calibration_state(db)
+            if cs["state"] == "moved":
+                status = i18n.t("cli.engines.status.judge_moved", was=cs["on"], now=cs["now"])
+            elif ms > 10.0:
+                status = i18n.t("cli.engines.status.judge_uncalibrated")
+            elif cs["state"] == "unversioned":
+                status = i18n.t("cli.engines.status.judge_ready_unversioned", thr="%.1f" % ms)
+            else:
+                status = i18n.t("cli.engines.status.judge_ready", thr="%.1f" % ms)
         else:
             status = i18n.t("cli.engines.status.ready")
         out.append("         " + i18n.t("cli.engines.status_line", status=status))
