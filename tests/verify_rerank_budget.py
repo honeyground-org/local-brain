@@ -32,6 +32,7 @@ import urllib.request
 # ⛔ ★Before★ the import — brain.store reads BRAIN_HOME
 _TMP = tempfile.mkdtemp(prefix="brain-budget-")
 os.environ["BRAIN_HOME"] = _TMP
+os.environ["BRAIN_LEDGER"] = os.path.join(_TMP, "judge-ledger.db")   # ⛔ never the live ledger (§rerank.ledger_path)
 os.environ.setdefault("GEMINI_API_KEY", "test-key-not-used")
 # The walls below are ★Gemini's★ (§engines.JUDGE_RPD) — say which judge this is, instead of inheriting
 # whatever this machine's config happens to choose.
@@ -121,6 +122,8 @@ def fresh_db():
     with db:
         for k in ("rerank_day", "rerank_used", "rerank_daily_hit", "rerank_rpd"):
             db.execute("DELETE FROM meta WHERE k=?", (k,))
+    rerank.ledger_clear()
+    rerank.ledger_set("carried", "1")                    # nothing left in meta to carry over
     return db
 
 
@@ -182,9 +185,8 @@ def main():
 
     # ⑤ the reserve — batch starves before interactive
     db = fresh_db()
-    with db:
-        store.set_meta(db, "rerank_day", rerank._pt_day())
-        store.set_meta(db, "rerank_used", str(500 - 100))     # 100 left
+    rerank.ledger_set("rerank_day", rerank._pt_day())
+    rerank.ledger_set("rerank_used", 500 - 100)          # 100 left
     out, n = call(db, "ok", reserve=150)
     check(out is None and n == 0,
           "★batch does not call★ when the 100 left is < the 150 reserve", "%d requests went out" % n)
@@ -197,9 +199,8 @@ def main():
     # ⑥ the day resets itself when it turns over (Pacific midnight)
     db = fresh_db()
     call(db, "daily")
-    with db:
-        store.set_meta(db, "rerank_day", "1999-01-01")
-        store.set_meta(db, "rerank_daily_hit", "1999-01-01")
+    rerank.ledger_set("rerank_day", "1999-01-01")
+    rerank.ledger_set("rerank_daily_hit", "1999-01-01")
     b = rerank.budget(db)
     check(not b["wall"] and b["left"] == b["limit"],
           "the wall lifts on its own when the day turns over", "left=%d" % b["left"])
