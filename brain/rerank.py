@@ -113,15 +113,89 @@ def available() -> bool:
     return _engines.available("judge")
 
 
-def scale_id() -> str:
+_ANSWERED_META = "judge_answered:"        # + judge_id → the model that last answered for that name
+
+
+def answering(db=None, model: str = "") -> str:
+    """The model that last answered when this judge name was asked — '' until one has said.
+
+    ⛔ Not the name in the config: `gemini-flash-lite-latest` is a pointer the provider moves (§engines.answered).
+    """
+    from brain import store
+    own = db is None
+    try:
+        db = db or _open_db()
+        return store.get_meta(db, _ANSWERED_META + _engines.judge_id(model), "")
+    except Exception:                                    # noqa: BLE001
+        return ""
+    finally:
+        if own and db is not None:
+            db.close()
+
+
+def answering_id(db=None, model: str = "") -> str:
+    """`judge_id`, plus `=<the model that answered>` when that is not the name that was asked for."""
+    asked = model or _engines.choice("judge")["model"]
+    seen = answering(db, model)
+    return _engines.judge_id(model) + ("=" + seen if seen and seen != asked else "")
+
+
+def _remember_answering(db, model: str = "") -> str:
+    """Keep the model the provider says answered. Returns it ('' when the provider named none)."""
+    from brain import store
+    seen = _engines.answered()
+    if seen and store.get_meta(db, _ANSWERED_META + _engines.judge_id(model), "") != seen:
+        with db:
+            store.set_meta(db, _ANSWERED_META + _engines.judge_id(model), seen)
+    return seen
+
+
+def scale_id(db=None) -> str:
     """★The scale a judge score is on★ — which judge, asked which question.
 
     ⛔ A threshold measured on one judge is not a threshold on another (2026-10-06): the same 91 labelled
        questions scored by the same model under the Korean and the English wording of one prompt put
        the controls on different marks (the English one gave 10s the Korean one never gave). A different
        model or provider moves it further. So the calibration is stamped with this, and read only back.
+
+    ⛔ ★The judge is the model that answered, not the name asked for★ (2026-10-12, §answering). When the
+       provider moves a `-latest` name to another model, this changes, and the threshold stops applying.
     """
+    return _engines.fingerprint(answering_id(db), _PROMPT)
+
+
+def _unversioned_scale_id() -> str:
+    """The stamp written before brain recorded which model answered — the name alone."""
     return _engines.fingerprint(_engines.judge_id(), _PROMPT)
+
+
+def calibration_state(db=None) -> dict:
+    """Whose threshold is this — {state, on, now}.
+
+      measured     stamped for the model answering now
+      unversioned  stamped before brain recorded which model answers (it cannot say which one it measured)
+      moved        measured on `on`, and `now` another model answers for the same name
+      none         never calibrated for this judge
+    """
+    from brain import store
+    own = db is None
+    try:
+        db = db or _open_db()
+        stamped = store.get_meta(db, "rerank_calibrated_for", "")
+        on = store.get_meta(db, "rerank_calibrated_on", "")
+        now = answering(db)
+        if stamped and stamped == scale_id(db):
+            return {"state": "measured", "on": on or now, "now": now}
+        if stamped and stamped == _unversioned_scale_id():
+            return {"state": "unversioned", "on": "", "now": now}
+        if on and stamped == _engines.fingerprint(_engines.judge_id() + "=" + on, _PROMPT):
+            return {"state": "moved", "on": on, "now": now}
+        return {"state": "none", "on": "", "now": now}
+    except Exception:                                    # noqa: BLE001
+        return {"state": "none", "on": "", "now": ""}
+    finally:
+        if own and db is not None:
+            db.close()
 
 
 def min_score(db=None) -> float:
@@ -142,7 +216,12 @@ def min_score(db=None) -> float:
             dbx.close()
     except Exception:                                    # noqa: BLE001
         return MIN_SCORE_FALLBACK
-    if stamped != scale_id():
+    # ⛔ ★A stamp written before brain recorded which model answers is still honoured★ (2026-10-12).
+    #    It cannot say which model it measured, but silencing it would switch off a layer that works
+    #    today on the strength of a record that did not exist yet. It holds until the next calibration
+    #    writes a full stamp, and the screens say so (§calibration_state). A full stamp whose model has
+    #    since been replaced is not honoured: silence, not another model's number.
+    if stamped not in (scale_id(db), _unversioned_scale_id()):
         return MIN_SCORE_FALLBACK
     return vectors._meta_float(db, "rerank_min_score", "BRAIN_RERANK_MIN",
                                MIN_SCORE_FALLBACK)
@@ -475,12 +554,18 @@ def score(query: str, candidates: Sequence[dict],
 
         key = ""
         the_model = model or _engines.choice("judge")["model"]
+        # ⛔ ★which judge★ is part of the key — another engine's score is not this one's.
+        #    Gemini keeps its bare model name so the cache it already built stays readable.
+        name_tag = (the_model if _engines.choice("judge")["provider"] == "gemini"
+                    else _engines.judge_id(the_model))
+
+        def tag_for(seen: str) -> str:
+            # ⛔ ★and which model answered for that name★ (§answering) — when the provider moves the
+            #    name to another model, the old model's scores stop being served for it.
+            return name_tag + ("=" + seen if seen and seen != the_model else "")
+
         if cache:
-            # ⛔ ★which judge★ is part of the key — another engine's score is not this one's.
-            #    Gemini keeps its bare model name so the cache it already built stays readable.
-            tag = (the_model if _engines.choice("judge")["provider"] == "gemini"
-                   else _engines.judge_id(the_model))
-            key = _cache_key(tag, sent_text)
+            key = _cache_key(tag_for(answering(db, model)), sent_text)
             hit = cache_get(db, key)
             if hit is not None and len(hit) == len(cands):
                 _LAST_FAIL[0] = ""
@@ -520,12 +605,15 @@ def score(query: str, candidates: Sequence[dict],
                                    kind=type(exc).__name__, detail=str(exc)[:120])
             return None
         _LAST_FAIL[0] = ""                               # ★success erases the previous failure★
+        seen = _remember_answering(db, model)
         out = _parse(text, len(cands))
         if out is None:
             return None
         # ⛔ The cache holds ★only successes★ — holding a failure kills that slot forever.
+        #    Filed under ★the model that gave it★: the key looked up before the call carried the last
+        #    model seen, and the first answer is the first time anyone knows.
         if key:
-            cache_put(db, key, the_model, out)
+            cache_put(db, _cache_key(tag_for(seen), sent_text) if seen else key, the_model, out)
         return out
     finally:
         if own_db:
@@ -614,7 +702,8 @@ def calibrate(db, control, positives, min_gap: float = 0.0) -> dict:
     trusted = not why.startswith("⛔")
     if trusted:
         store.set_meta(db, "rerank_min_score", str(thr))
-        store.set_meta(db, "rerank_calibrated_for", scale_id())   # ★the scale it holds on★
+        store.set_meta(db, "rerank_calibrated_for", scale_id(db))   # ★the scale it holds on★
+        store.set_meta(db, "rerank_calibrated_on", answering(db))   # ★and the model that answered★
         store.set_meta(db, "rerank_calibration_blocked", "")
     else:
         store.set_meta(db, "rerank_calibration_blocked", why)

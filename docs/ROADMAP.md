@@ -108,6 +108,11 @@ A memory for coding agents that is **more efficient and performs better than the
   - What a short prompt lacks is the turn before it, and the labelled set cannot test that: none of its
     91 prompts could be traced back to a transcript. Measuring it needs labels that keep their
     preceding turn.
+- The judge's threshold cannot re-measure itself: 4 of the 34 hand-labelled "no memory needed" prompts
+  (labelled 2026-08-12, when only lexical search existed) are answered by real memories, and the judge
+  gives them 10 — "pause the work, the fan is loud" against the note that stopping the shell did not
+  stop the work. The noise floor then sits at the top of the scale, so calibration refuses to ship
+  (measured again 2026-10-12 on the model now answering). Labels are fixed by a person reading them.
 - Measure short-query recall on real corpora in other languages; the method settings were first set on
   one corpus.
 - Verify Windows on real hardware with a real host. CI's Windows clean room is required since 2026-10-10
@@ -135,6 +140,12 @@ A memory for coding agents that is **more efficient and performs better than the
   author's machine), and every `down` left Memgraph's `/etc/memgraph` volume. CI never showed it: its
   machine is thrown away. Watchers are named and removed, end by themselves, `down` removes volumes, and
   ⑨ counts what is left against a control that leaves one container and one volume on purpose.
+- Closed 2026-10-12: the judge is the model that answered, not the name asked for. The default judge name
+  `gemini-flash-lite-latest` is moved by the provider (asked on 2026-10-12, `gemini-3.5-flash-lite`
+  answered), so a threshold "measured for this judge" and the cached scores could not say which model
+  they came from. Each provider names the answering model; brain now keeps it, files cached scores
+  under it, stamps the threshold with it, records it on every scorecard row, and shows it in
+  `brain engines`.
 - Closed 2026-10-12: `brain triggers` and the self-healing pass read a declaration with their own pattern
   and missed the one Claude Code writes, indented under `metadata:` — 8 working phrases were reported
   missing (#20). They now use the indexer's parser, and CI runs that reader on every platform.

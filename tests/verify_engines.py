@@ -12,6 +12,7 @@ code. Now each role names its engine (§engines). The ways that can quietly go w
   ③ a threshold measured on one judge keeps being applied to another judge's scores
   ④ one judge's cached score is served as another's
   ⑤ a screen prints a key
+  ⑥ ③ and ④ again under one name — a `-latest` name the provider moves to another model (⑧ below)
 
 Every adapter is driven against ★a local fake server★ that records what it was sent and answers in
 that provider's own response shape — no network, no key, no cost. Each child process gets its own
@@ -44,6 +45,7 @@ def check(label, cond, detail=""):
 # ── the fake provider ───────────────────────────────────────────────────────
 SEEN = []
 SCORES = '[{"i": 0, "s": 9}, {"i": 1, "s": 1}]'
+ANSWERS = ["model-a"]                                    # who the fake says answered (§⑧)
 
 
 class Fake(http.server.BaseHTTPRequestHandler):
@@ -64,11 +66,12 @@ class Fake(http.server.BaseHTTPRequestHandler):
             self.wfile.write(out.encode())
             return
         if p.endswith(":generateContent"):
-            res = {"candidates": [{"content": {"parts": [{"text": SCORES}]}}]}
+            res = {"candidates": [{"content": {"parts": [{"text": SCORES}]}}],
+                   "modelVersion": ANSWERS[0]}
         elif p.endswith(":batchEmbedContents"):
             res = {"embeddings": [{"values": [0.1] * 8} for _ in body.get("requests", [])]}
         elif p.endswith("/chat/completions"):
-            res = {"choices": [{"message": {"content": SCORES}}]}
+            res = {"choices": [{"message": {"content": SCORES}}], "model": ANSWERS[0]}
         elif p.endswith("/embeddings"):
             res = {"data": [{"index": i, "embedding": [0.2] * 8}
                             for i, _ in enumerate(body.get("input", []))]}
@@ -76,7 +79,8 @@ class Fake(http.server.BaseHTTPRequestHandler):
             res = {"content": [], "stop_reason": "refusal", "stop_details": {"category": "cyber"}}
         elif p.endswith("/messages"):
             res = {"content": [{"type": "thinking", "thinking": ""},
-                               {"type": "text", "text": SCORES}], "stop_reason": "end_turn"}
+                               {"type": "text", "text": SCORES}], "stop_reason": "end_turn",
+                   "model": ANSWERS[0]}
         else:
             self.send_response(404)
             self.end_headers()
@@ -307,6 +311,106 @@ r = child(SET, {})
 check("anthropic cannot be chosen as the embedder (it has no embedding API)", "refused" in r, r)
 check("setting writes only the engines block", r.get("cfg") == {
     "sources": [], "engines": {"judge": {"provider": "openai", "model": "gpt-4.1-mini"}}}, r)
+
+print("\n" + "=" * 72 + "\n⑧ the name asked for is not the model that answers\n" + "=" * 72)
+# 2026-10-12: asked for `gemini-flash-lite-latest`, the answer came from `gemini-3.5-flash-lite`. The
+# provider moves that name to whichever model it likes, so ③ and ④ must hold across a move too.
+ASKED = """
+import json
+from brain import engines, rerank
+c = [{"name": "a", "description": "the answer", "body": "x"},
+     {"name": "b", "description": "unrelated", "body": "y"}]
+rerank.score("what was it?", c, cache=False)
+print(json.dumps({"answered": engines.answered(), "kept": rerank.answering()}))
+"""
+for name, env in (("gemini", {"BRAIN_JUDGE_PROVIDER": "gemini", "BRAIN_JUDGE_BASE_URL": BASE + "/gemini",
+                              "GEMINI_API_KEY": FAKE_KEY}),
+                  ("openai", {"BRAIN_JUDGE_PROVIDER": "openai", "BRAIN_JUDGE_BASE_URL": BASE + "/openai"}),
+                  ("anthropic", {"BRAIN_JUDGE_PROVIDER": "anthropic", "BRAIN_JUDGE_BASE_URL": BASE + "/anthropic",
+                                 "ANTHROPIC_API_KEY": FAKE_KEY})):
+    r = child(ASKED, env)
+    check("%-9s → the model its response names is read and kept" % name,
+          r.get("answered") == "model-a" and r.get("kept") == "model-a", r)
+
+GEM = {"BRAIN_JUDGE_PROVIDER": "gemini", "BRAIN_JUDGE_BASE_URL": BASE + "/gemini", "GEMINI_API_KEY": FAKE_KEY}
+
+
+def in_home(h, code, env):
+    cfg = os.path.join(h, "config.json")
+    if not os.path.exists(cfg):
+        json.dump({"sources": []}, open(cfg, "w", encoding="utf-8"))
+    e = {k: v for k, v in os.environ.items()
+         if not k.startswith(("BRAIN_", "GEMINI_", "OPENAI_", "ANTHROPIC_"))}
+    e.update({"HOME": h, "BRAIN_HOME": h, "BRAIN_CONFIG": cfg, "PYTHONPATH": ROOT, "BRAIN_LANG": "en"}, **env)
+    p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=e,
+                       cwd=ROOT, timeout=60, encoding="utf-8", errors="replace")
+    try:
+        return json.loads(p.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {"_err": (p.stderr or p.stdout)[-300:]}
+
+
+ASK = """
+import json
+from brain import rerank
+c = [{"name": "a", "description": "the answer", "body": "x"},
+     {"name": "b", "description": "unrelated", "body": "y"}]
+print(json.dumps({"s": rerank.score(%r, c, cache=True)}))
+"""
+h1 = tempfile.mkdtemp(dir=TMP)
+SEEN.clear()
+ANSWERS[0] = "model-a"
+in_home(h1, ASK % "first question", GEM)
+in_home(h1, ASK % "first question", GEM)
+n_before = len(SEEN)
+ANSWERS[0] = "model-b"                                   # the provider moves the name
+in_home(h1, ASK % "another question", GEM)               # the first answer that says so
+in_home(h1, ASK % "first question", GEM)
+check("(control) one model asked the same thing twice → one call, the second is cached", n_before == 1,
+      n_before)
+check("★the name moves to another model → the old model's cached score is not served★",
+      len(SEEN) == 3, ["first" if "first question" in json.dumps(q["body"]) else "another"
+                       for q in SEEN[n_before:]])
+
+CAL = """
+import json
+from brain import rerank, store
+db = store.connect()
+c = [{"name": "a", "description": "the answer", "body": "x"},
+     {"name": "b", "description": "unrelated", "body": "y"}]
+rerank.score("which model is it?", c, cache=False)
+if %s:
+    store.set_meta(db, "rerank_min_score", "7.0")
+    store.set_meta(db, "rerank_calibrated_for", %s)
+    store.set_meta(db, "rerank_calibrated_on", rerank.answering(db))
+print(json.dumps({"min": rerank.min_score(db), "state": rerank.calibration_state(db)}))
+"""
+h2 = tempfile.mkdtemp(dir=TMP)
+ANSWERS[0] = "model-a"
+a = in_home(h2, CAL % ("True", "rerank.scale_id(db)"), GEM)
+ANSWERS[0] = "model-b"
+b = in_home(h2, CAL % ("False", "''"), GEM)
+check("(control) measured on the model answering now → the threshold is used",
+      a.get("min") == 7.0 and (a.get("state") or {}).get("state") == "measured", a)
+check("★measured on model-a, model-b answers now → it adds nothing until measured again★",
+      b.get("min") == 99.0 and b.get("state") == {"state": "moved", "on": "model-a", "now": "model-b"}, b)
+h3 = tempfile.mkdtemp(dir=TMP)
+c = in_home(h3, CAL.replace("from brain import rerank, store", "from brain import engines, rerank, store")
+           % ("True", "engines.fingerprint(engines.judge_id(), rerank._PROMPT)"), GEM)
+check("a stamp from before the answering model was recorded is still used — and says so",
+      c.get("min") == 7.0 and (c.get("state") or {}).get("state") == "unversioned", c)
+SCREEN2 = """
+import json
+from brain import cli, scorecard, store
+print(json.dumps({"t": cli.engines_text(store.connect()), "card": scorecard._judge_stamp()}))
+"""
+r = in_home(h2, SCREEN2, GEM)
+t = r.get("t") or ""
+check("the screen names the model that answered, and why its threshold stopped",
+      "answered by model-b" in t and "model-a → model-b" in t, t[t.find("judge"):][:260])
+card = r.get("card") or ""
+check("a scorecard row records the judge as it answered",
+      card.startswith("gemini/gemini-flash-lite-latest") and card.endswith("=model-b"), card)
 
 srv.shutdown()
 shutil.rmtree(TMP, ignore_errors=True)
