@@ -163,10 +163,8 @@ def _excerpt(body: str, needles: Sequence[str]) -> str:
     return _WS.sub(" ", snippet).strip()
 
 
-def _score_terms(db: sqlite3.Connection, pairs, n_docs: int, avg_len: float,
-                 kinds: Optional[Sequence[str]], sources: Optional[Sequence[str]]
-                 ) -> Tuple[Dict[int, float], Dict[int, List[str]], Dict[str, float]]:
-    """Accumulate scores per word — summing per gram automatically favours longer words."""
+def _df_table(db: sqlite3.Connection, pairs) -> Dict[str, int]:
+    """Document frequency of every gram the query's words cut into (absent = never indexed)."""
     df_cache: Dict[str, int] = {}
     all_terms = sorted({g for _, gs in pairs for g in gs})
     if all_terms:
@@ -174,6 +172,49 @@ def _score_terms(db: sqlite3.Connection, pairs, n_docs: int, avg_len: float,
         for row in db.execute(
                 "SELECT term, df FROM terms WHERE term IN (%s)" % qmarks, all_terms):
             df_cache[row["term"]] = row["df"]
+    return df_cache
+
+
+def _discriminative(grams: Sequence[str], df_cache: Dict[str, int], stop_df: int) -> List[str]:
+    """The grams that carry a word — [] when none of them was ever indexed."""
+    usable = [g for g in grams if df_cache.get(g, 0) > 0]
+    if not usable:
+        return []
+    discriminative = [g for g in usable if df_cache[g] < stop_df]
+    # ★Filter out inflection accidents★ — if a word has both common grams and a very rare one,
+    # that rare one is rare only because a particle or ending attached (see the RARE_DF comment above).
+    if RARE_DF > 0 and len(discriminative) > 1:
+        hi = max(df_cache[g] for g in usable)
+        if hi >= INFLECTION_COMMON_DF:
+            trimmed = [g for g in discriminative if df_cache[g] > RARE_DF]
+            if trimmed:                      # if everything got cut, put it back (better than empty-handed)
+                discriminative = trimmed
+    # If every gram is common, still use the rarest one (better than empty-handed)
+    if not discriminative:
+        discriminative = [min(usable, key=lambda g: df_cache[g])]
+    return discriminative
+
+
+def query_weights(db: sqlite3.Connection, query: str) -> List[Tuple[str, float, List[str]]]:
+    """The question's own words, each with its worth and the grams that carry it — ★weighed exactly as
+    `recall` weighs them★ (same grams, same IDF), without bridges or expansions. [(word, idf, grams)]"""
+    n_docs = max(1, store.corpus_stats(db)["docs"])
+    pairs = textindex.query_terms(query)
+    df_cache = _df_table(db, pairs)
+    stop_df = max(2, int(n_docs * STOP_DF_RATIO))
+    out: List[Tuple[str, float, List[str]]] = []
+    for word, grams in pairs:
+        disc = _discriminative(grams, df_cache, stop_df)
+        if disc:
+            out.append((word, max(_idf(df_cache[g], n_docs) for g in disc), disc))
+    return out
+
+
+def _score_terms(db: sqlite3.Connection, pairs, n_docs: int, avg_len: float,
+                 kinds: Optional[Sequence[str]], sources: Optional[Sequence[str]]
+                 ) -> Tuple[Dict[int, float], Dict[int, List[str]], Dict[str, float]]:
+    """Accumulate scores per word — summing per gram automatically favours longer words."""
+    df_cache = _df_table(db, pairs)
 
     doc_score: Dict[int, float] = {}
     doc_words: Dict[int, List[str]] = {}
@@ -181,21 +222,9 @@ def _score_terms(db: sqlite3.Connection, pairs, n_docs: int, avg_len: float,
     stop_df = max(2, int(n_docs * STOP_DF_RATIO))
 
     for word, grams in pairs:
-        usable = [g for g in grams if df_cache.get(g, 0) > 0]
-        if not usable:
-            continue
-        discriminative = [g for g in usable if df_cache[g] < stop_df]
-        # ★Filter out inflection accidents★ — if a word has both common grams and a very rare one,
-        # that rare one is rare only because a particle or ending attached (see the RARE_DF comment above).
-        if RARE_DF > 0 and len(discriminative) > 1:
-            hi = max(df_cache[g] for g in usable)
-            if hi >= INFLECTION_COMMON_DF:
-                trimmed = [g for g in discriminative if df_cache[g] > RARE_DF]
-                if trimmed:                      # if everything got cut, put it back (better than empty-handed)
-                    discriminative = trimmed
-        # If every gram is common, still use the rarest one (better than empty-handed)
+        discriminative = _discriminative(grams, df_cache, stop_df)
         if not discriminative:
-            discriminative = [min(usable, key=lambda g: df_cache[g])]
+            continue
         per_doc: Dict[int, float] = {}
         # ★A word's worth is how rare it is★. The coverage judgement uses this:
         # counting a document matched on a common word and one matched on a rare word as the same
@@ -697,12 +726,80 @@ class JudgeUnavailable(RuntimeError):
     """
 
 
-def judge_policy(k: int = 20) -> str:
+EXCERPTS = ("head", "evidence")     # what the judge reads of each candidate (§judged)
+
+
+def judge_policy(k: int = 20, excerpt: str = "head") -> str:
     """★What the judge is shown★, named from the settings in force — which candidates and which part of
     each. A judge score is on the scale of (model, prompt, ★this★): change the candidates or the excerpt
     and the same model scores differently, so a record says which one it was measured under."""
     from brain import rerank
-    return "vector%d+head%d" % (min(k, rerank.MAX_CAND), rerank.EXCERPT)
+    return "vector%d+%s%d" % (min(k, rerank.MAX_CAND), excerpt, rerank.EXCERPT)
+
+
+def _passage(text: str, weights, lo: int, hi: int, width: int, empty: str) -> Tuple[int, int, str]:
+    """The window of at most `width` characters in `text[lo:hi]` that holds the most query worth.
+
+    A word counts once, with its IDF, if any gram that carries it (§query_weights) lies wholly inside the
+    window — repeats and overlapping grams add nothing. Of equally good windows the earliest wins. With no
+    word in the region the window is the region's centre (`empty="centre"`) or its start (`"start"`).
+    Returns (start, end, rule) in `text` coordinates.
+    """
+    low = text.lower()
+    if len(low) != len(text):                            # a case fold that changes length moves offsets
+        low = text
+    occ: List[Tuple[int, int, int]] = []
+    for wi, (_word, _idf, grams) in enumerate(weights):
+        for g in grams:
+            g = g.lower()
+            p = low.find(g, lo, hi)
+            while p >= 0:
+                occ.append((p, p + len(g), wi))
+                p = low.find(g, p + 1, hi)
+    if hi - lo <= width:
+        if not occ:
+            return lo, hi, "short-" + empty
+        return lo, hi, "words"
+    if not occ:
+        s = lo + (hi - lo - width) // 2 if empty == "centre" else lo
+        return s, s + width, empty
+    starts = {lo}
+    for a, b, _ in occ:
+        starts.add(max(lo, min(a, hi - width)))          # the window that opens on this match
+        starts.add(max(lo, min(b - width, hi - width)))  # and the one that closes on it
+    best = None
+    for s in sorted(starts):
+        e = s + width
+        worth = sum(weights[wi][1] for wi in {w for a, b, w in occ if a >= s and b <= e})
+        if best is None or worth > best[0]:
+            best = (worth, s, e)
+    return best[1], best[2], "words"
+
+
+def evidence(db: sqlite3.Connection, query: str, row, chunk_no: Optional[int] = None,
+             weights=None, width: int = 0) -> Optional[dict]:
+    """★The part of a document that answers★ — a passage of the body for the judge to read instead of its head.
+
+    Measured 2026-10-13: the judge read a candidate's description and the first 420 characters of its
+    body, while for half the answers in the vector top 20 the chunk that matched was further in. Given the
+    chunk the vector search matched (§vectors.best_chunks), the passage is taken from ★that chunk's body★;
+    without one (a document only words found) from the whole body. Inside it, the window that holds the
+    most of the question's worth (§_passage). Rules fixed before the experiment that tests them
+    (docs/notes/retrieval-fusion-plan.md). {chunk, start, end, rule, text} in `body.strip()` coordinates.
+    """
+    from brain import rerank, vectors
+    width = width or rerank.EXCERPT
+    body = (row["body"] or "").strip()
+    if chunk_no is not None:
+        spans = vectors.chunk_spans(body)
+        if not 0 <= chunk_no < len(spans):
+            return None
+        lo, hi, empty = spans[chunk_no][0], spans[chunk_no][1], "centre"
+    else:
+        lo, hi, empty = 0, len(body), "start"
+    w = weights if weights is not None else query_weights(db, query)
+    s, e, rule = _passage(body, w, lo, hi, width, empty)
+    return {"chunk": chunk_no, "start": s, "end": e, "rule": rule, "text": body[s:e]}
 
 
 def judge_observation() -> dict:
@@ -720,9 +817,51 @@ def judge_observation() -> dict:
             "secs": None, "fail": None}
 
 
+def judge_inputs(db: sqlite3.Connection, query: str, hits, excerpt: str = "head",
+                 vector_ids=None) -> Tuple[list, List[dict], List[Optional[dict]]]:
+    """★What the judge is given for these hits★ — one definition for `judged()` and for every measurement
+    that asks the judge about other candidates (the union of words and meaning, for one).
+
+    `hits` are (doc_id, cosine, ratio) in the order the judge reads them. Documents always in context
+    (§_always_in_context) are left out. With `excerpt="evidence"` each candidate reads a passage
+    (§evidence): from the chunk that matched if the document is among `vector_ids` (all hits when None)
+    and its stored chunks are this version of it; from the whole body if only words found it; otherwise
+    its head. Returns (rows, candidates, passages) — passages[i] is None where the head is read.
+    """
+    from brain import vectors
+    rows, cands = [], []
+    in_hand = _always_in_context()
+    for doc_id, cos, ratio in hits:
+        row = _hydrate(db, doc_id)
+        if row is None or row["name"] in in_hand:
+            continue
+        rows.append((row, cos, ratio))
+        cands.append({"name": row["name"], "description": row["description"],
+                      "body": (row["body"] or "")[:500]})
+    found: List[Optional[dict]] = [None] * len(rows)
+    if excerpt == "evidence" and rows:
+        by_vector = ({row["id"] for row, _, _ in rows} if vector_ids is None
+                     else {int(d) for d in vector_ids})
+        # ⛔ A document whose stored chunks are another version gives no passage — it keeps its head.
+        chunk_of = vectors.best_chunks(db, query, [row["id"] for row, _, _ in rows
+                                                   if row["id"] in by_vector])
+        weights = query_weights(db, query)
+        for i, (row, _, _) in enumerate(rows):
+            if row["id"] in chunk_of:
+                ev = evidence(db, query, row, chunk_of[row["id"]][0], weights)
+            elif row["id"] not in by_vector:
+                ev = evidence(db, query, row, None, weights)
+            else:
+                ev = None
+            if ev is not None:
+                found[i] = ev
+                cands[i]["excerpt"] = ev["text"]
+    return rows, cands, found
+
+
 def judged(db: sqlite3.Connection, query: str, k: int = 20,
            strict: bool = False, cache: bool = True,
-           observe: Optional[dict] = None) -> List[dict]:
+           observe: Optional[dict] = None, excerpt: str = "head") -> List[dict]:
     """★Two-stage search★ — cosine picks k candidates, the reranker judges whether they are the answer.
 
     Why this shape (measured 2026-08-25): neither absolute cosine nor a ratio is a ruler for "is this the
@@ -736,10 +875,17 @@ def judged(db: sqlite3.Connection, query: str, k: int = 20,
     it ended. ⛔ It never changes what is returned and never asks the judge again: it is the record a
     threshold measured from a person's own prompts needs, and until 2026-10-13 everything below the
     threshold was thrown away unseen. No query or document text goes into it.
+
+    `excerpt` is what the judge reads of each candidate: "head" (the description and the start of the
+    body — what the hook uses) or "evidence" (the passage of the chunk that matched, §evidence) — an
+    experiment path until it is measured (docs/notes/retrieval-fusion-plan.md). A threshold measured
+    under one is not a threshold under the other (§judge_policy).
     """
     from brain import rerank, vectors
+    if excerpt not in EXCERPTS:
+        raise ValueError("excerpt must be one of %s" % (EXCERPTS,))
     obs = observe if observe is not None else {}
-    obs["policy"] = judge_policy(k)
+    obs["policy"] = judge_policy(k, excerpt)
     try:
         hits = vectors.search(db, query, k=k)
     except Exception as exc:                             # noqa: BLE001
@@ -748,15 +894,7 @@ def judged(db: sqlite3.Connection, query: str, k: int = 20,
         if strict:
             raise JudgeUnavailable("vector search failed: %s" % exc) from exc
         return []
-    cands, rows = [], []
-    in_hand = _always_in_context()
-    for doc_id, cos, ratio in hits:
-        row = _hydrate(db, doc_id)
-        if row is None or row["name"] in in_hand:
-            continue
-        rows.append((row, cos, ratio))
-        cands.append({"name": row["name"], "description": row["description"],
-                      "body": (row["body"] or "")[:500]})
+    rows, cands, found = judge_inputs(db, query, hits, excerpt)
     if not cands:
         obs["outcome"] = "no_candidates"
         return []
@@ -797,6 +935,10 @@ def judged(db: sqlite3.Connection, query: str, k: int = 20,
     r["ratio"] = round(ratio, 4)
     r["rerank"] = scores[best]
     r["why"] = "found by meaning, chosen by the judge (relevance %.0f/10)" % scores[best]
+    if found[best] is not None:                          # show the passage the judge read
+        ev = found[best]
+        r["evidence"] = {k: ev[k] for k in ("chunk", "start", "end", "rule")}
+        r["excerpt"] = _WS.sub(" ", ev["text"]).strip()
     # ★The expensive layer teaches the cheap one★ (2026-08-26) — that lexical went silent while meaning
     # found it means some word in this document ★means the same as a query word but is spelled differently★.
     # Written down, it is found for free next time (508ms paid remote round trip → 0ms local).

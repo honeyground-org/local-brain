@@ -75,6 +75,7 @@ _LAST = [0.0]
 _LAST_FAIL = [""]           # ★why it failed★ — a bare None cannot say limit from network
 _LAST_CACHED = [False]      # ★whether the last answer came from the cache★ — a cached call costs no time
                             # and no budget, so a record of the hook's judge must say which one it was
+_LAST_SHAPE = [None]        # ★what the last fresh answer covered★ (§last_answer_shape)
 EXCERPT = 420
 
 MIN_SCORE_FALLBACK = 99.0     # before calibration, ★add nothing★ (an unreachable value on the 0~10 scale)
@@ -233,6 +234,16 @@ def last_failure() -> str:
     """The ★reason★ for the last failure. `score()` still contracts to None, but the checks and the cron
     must tell 'the limit' from 'the network' from 'the reserve' — all three have different prescriptions."""
     return _LAST_FAIL[0]
+
+
+def last_answer_shape() -> Optional[dict]:
+    """How much of the last ★fresh★ answer was usable — {n, answered, duplicates, out_of_range} — or None
+    (a cache hit, a failure, or nothing asked yet).
+
+    ⛔ `_parse` leaves a candidate the judge did not score at 0.0, so a short answer and a 0 look the same in
+       the scores. A measurement that ranks candidates by score must tell them apart; this is how.
+    """
+    return _LAST_SHAPE[0]
 
 
 def last_was_cached() -> bool:
@@ -590,6 +601,44 @@ def score_chunked(query: str, candidates: Sequence[dict], size: int = 0,
     return [(0.0 if v is None else v) for v in out]
 
 
+def _sent(query: str, cands: Sequence[dict], prompt: str = "") -> str:
+    """★The text that leaves the machine★ for these candidates — and the body of the cache key."""
+    from . import privacy
+    lines = []
+    for i, c in enumerate(cands):
+        _body = (c.get("excerpt") or c.get("body") or "")[:EXCERPT]
+        _body, _ = privacy.scrub(_body)
+        _desc, _ = privacy.scrub((c.get("description") or "")[:160])
+        lines.append("[%d] %s — %s\n%s" % (i, c.get("name", "?"), _desc, _body))
+    safe_query, _ = privacy.scrub(query[:600])      # a query can carry secrets too
+    return (prompt or _PROMPT) % (safe_query, "\n\n".join(lines))
+
+
+def _tag(the_model: str, seen: str) -> str:
+    """The judge part of the cache key.
+
+    ⛔ ★which judge★ — another engine's score is not this one's. Gemini keeps its bare model name so the
+       cache it already built stays readable.
+    ⛔ ★and which model answered for that name★ (§answering) — when the provider moves the name to another
+       model, the old model's scores stop being served for it.
+    """
+    name_tag = (the_model if _engines.choice("judge")["provider"] == "gemini"
+                else _engines.judge_id(the_model))
+    return name_tag + ("=" + seen if seen and seen != the_model else "")
+
+
+def cached(query: str, candidates: Sequence[dict], db, model: str = "",
+           prompt: str = "") -> Optional[List[float]]:
+    """The cached answer to exactly this question, or None when it would take a call. ★Never calls.★
+    For a measurement that must know what a run will cost before it spends anything."""
+    cands = list(candidates)[:MAX_CAND]
+    if not cands:
+        return []
+    the_model = model or _engines.choice("judge")["model"]
+    hit = cache_get(db, _cache_key(_tag(the_model, answering(db, model)), _sent(query, cands, prompt)))
+    return hit if hit is not None and len(hit) == len(cands) else None
+
+
 def score(query: str, candidates: Sequence[dict],
           model: str = "", prompt: str = "", reserve: int = 0,
           db=None, cache: bool = True) -> Optional[List[float]]:
@@ -606,6 +655,7 @@ def score(query: str, candidates: Sequence[dict],
     from brain import vectors
     cands = list(candidates)[:MAX_CAND]
     _LAST_CACHED[0] = False
+    _LAST_SHAPE[0] = None
     if not cands:
         return []
     # ★Know before hitting the wall★ — one 429 wastes a round trip and a 4-second wait. And going on
@@ -624,27 +674,13 @@ def score(query: str, candidates: Sequence[dict],
         #    So the `cache=False` door is kept open, and measurement scripts must use it.
         # ★Build the body to be sent first★ — because the cache key is that body (§_cache_key).
         #   It is pure string work, so it spends neither network nor budget.
-        from . import privacy
-        lines = []
-        for i, c in enumerate(cands):
-            _body = (c.get("excerpt") or c.get("body") or "")[:EXCERPT]
-            _body, _ = privacy.scrub(_body)
-            _desc, _ = privacy.scrub((c.get("description") or "")[:160])
-            lines.append("[%d] %s — %s\n%s" % (i, c.get("name", "?"), _desc, _body))
-        safe_query, _ = privacy.scrub(query[:600])      # a query can carry secrets too
-        sent_text = (prompt or _PROMPT) % (safe_query, "\n\n".join(lines))
+        sent_text = _sent(query, cands, prompt)
 
         key = ""
         the_model = model or _engines.choice("judge")["model"]
-        # ⛔ ★which judge★ is part of the key — another engine's score is not this one's.
-        #    Gemini keeps its bare model name so the cache it already built stays readable.
-        name_tag = (the_model if _engines.choice("judge")["provider"] == "gemini"
-                    else _engines.judge_id(the_model))
 
         def tag_for(seen: str) -> str:
-            # ⛔ ★and which model answered for that name★ (§answering) — when the provider moves the
-            #    name to another model, the old model's scores stop being served for it.
-            return name_tag + ("=" + seen if seen and seen != the_model else "")
+            return _tag(the_model, seen)
 
         if cache:
             key = _cache_key(tag_for(answering(db, model)), sent_text)
@@ -721,6 +757,7 @@ def _parse(text: str, n: int) -> Optional[List[float]]:
         except ValueError:
             _LAST_FAIL[0] = i18n.t("rerank.fail.json_parse_failed")
             return None
+    seen, dup, wide = set(), 0, 0
     for row in rows if isinstance(rows, list) else []:
         try:
             i, sc = int(row["i"]), float(row["s"])
@@ -728,6 +765,10 @@ def _parse(text: str, n: int) -> Optional[List[float]]:
             continue
         if 0 <= i < len(out):
             out[i] = sc
+            dup += i in seen
+            seen.add(i)
+            wide += not 0.0 <= sc <= 10.0
+    _LAST_SHAPE[0] = {"n": n, "answered": len(seen), "duplicates": dup, "out_of_range": wide}
     return out
 
 
