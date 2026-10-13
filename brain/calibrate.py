@@ -478,7 +478,11 @@ def measure(db: sqlite3.Connection) -> dict:
 #   24 (2026-10-13)  the hook records what its judge said before the threshold (§search.judge_observation) and
 #       its first stage is one function (`hook.lexical`) that measurements call instead of rebuilding it.
 #       Nothing attached or returned changed and no extra call is made; bumped because `hook` and `search` changed.
-CODE_GENERATION = 24
+#   25 (2026-10-13)  the judge can be shown the passage of the chunk that matched (`judged(excerpt="evidence")`,
+#       an experiment path) and the rule that picks a word's grams is one function shared with it
+#       (`search._discriminative`). The default reads the head as before and recall weighs words as before
+#       (`query_weights` is held equal to recall's weights); bumped because `search` changed.
+CODE_GENERATION = 25
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

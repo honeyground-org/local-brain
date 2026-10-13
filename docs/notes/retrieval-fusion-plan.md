@@ -50,7 +50,11 @@ calls. "Top 3" means the answer is among the first three.
    (`search.judge_observation`). No extra call, nothing returned changes. Measurements reuse the hook's
    own first stage (`hook.lexical`).
 2. **Evidence passage.** Recover each candidate's best chunk from the local vectors and give the judge a
-   passage from it instead of the head. An experiment path first; the default changes only on the result.
+   passage from it instead of the head (`search.judged(excerpt="evidence")`, `vectors.best_chunks`,
+   `search.evidence`). An experiment path first; the default changes only on the result. On the author's
+   index, judge-free: for 49 of the 54 answers in the vector top 20 the chunk was recovered (the other 5
+   were two documents edited since they were embedded — left out, as the rule says), and the question's
+   worth in what the judge reads rose from 259.7 to 338.9 (summed IDF; more in 16, less in 4).
 3. **Vector results in MCP `recall`, opt-in** (`semantic_k`, default 0). Six documents read is a larger
    reading budget, not a better top three, and is reported as such.
 4. **Judge the union** of words 20 and meaning 20 (at most 40, one call).
@@ -95,6 +99,13 @@ cache off.
 **Budget.** About 12 + 66 × 3 ≈ 210 new judge calls (arm A is mostly cached). Spread over Pacific days,
 leaving the hook's reserve; read the shared ledger, not the clock. Results from different answering
 models are not pooled.
+
+**How it runs.** `tests/measure_retrieval_fusion.py` (arms A · B · C · D and the position-randomised
+control R). It freezes a snapshot of the index on its first run and forces the local vector scan, asks in
+a seeded shuffle of (question, arm), stops before the hook's reserve or at `--max`, and resumes from the
+cache. Without `--run` it spends nothing: it prints the judge-free controls and how many calls remain.
+Judge-free, on the same 66 questions (2026-10-13): words 22, meaning 24, reciprocal rank 30, the union in
+its input order (min of the two ranks) 31 — so the bar for a judged arm is 31 + 7 = 38.
 
 **Accepted when** (fixed now; acceptance criteria for this experiment, not settings of the product):
 - top-3 hits at least 10 points above the best judge-free control, with the paired 95% interval of the

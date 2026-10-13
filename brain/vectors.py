@@ -432,6 +432,62 @@ def chunks(text: str, head: str = "") -> List[str]:
     return out
 
 
+def chunk_spans(text: str) -> List[Tuple[int, int]]:
+    """Where each chunk's ★body★ sits in `text.strip()` — the same cut as `chunks`, without the head the
+    first chunk carries. `text.strip()[a:b]` is chunk i's body."""
+    text = (text or "").strip()
+    out: List[Tuple[int, int]] = []
+    i = 0
+    step = max(200, CHUNK_CHARS - CHUNK_OVERLAP)
+    while i < len(text) and len(out) < MAX_CHUNKS_PER_DOC:
+        out.append((i, min(len(text), i + CHUNK_CHARS)))
+        i += step
+    return out
+
+
+def best_chunks(db: sqlite3.Connection, query: str, doc_ids: Sequence[int]) -> Dict[int, Tuple[int, float]]:
+    """★Which chunk of each document the query matched★ — {doc_id: (chunk_no, cosine)}.
+
+    Similarity search keeps a document's best score but not which chunk earned it, so the part that
+    matched never reached the judge (2026-10-13: for half the answers in the vector top 20, the best chunk
+    was not the first). This asks the local copy (§vecstore — always present) for those documents only.
+
+    ⛔ A chunk is answered for only while it is ★the document as it is now, cut as it is cut now★: every
+       stored chunk carries the document's sha when it was embedded, and the number of chunks must be what
+       today's cut makes of today's body. Otherwise the document is left out — evidence from another
+       version is not evidence. Ties go to the lower chunk number. Needs the query's vector in the cache
+       (`search` puts it there); without it, nothing is answered.
+    """
+    q = _qcache_get(db, query)
+    if q is None or not doc_ids:
+        return {}
+    want = {int(d) for d in doc_ids}
+    marks = ",".join("?" * len(want))
+    docs = {r["id"]: r for r in db.execute(
+        "SELECT id, sha, body FROM docs WHERE id IN (%s)" % marks, sorted(want))}
+    seen: Dict[int, List[Tuple[int, str, bytes]]] = {}
+    for r in db.execute("SELECT doc_id, chunk_no, sha, vec FROM vectors WHERE model=? AND dim=? "
+                        "AND doc_id IN (%s)" % marks, [model_tag(), DIM] + sorted(want)):
+        seen.setdefault(r["doc_id"], []).append((r["chunk_no"], r["sha"], r["vec"]))
+    out: Dict[int, Tuple[int, float]] = {}
+    for did, rows in seen.items():
+        doc = docs.get(did)
+        if doc is None or any(sha != doc["sha"] for _, sha, _ in rows):
+            continue
+        if sorted(n for n, _, _ in rows) != list(range(len(chunk_spans(doc["body"] or "")))):
+            continue                                     # cut with other settings than today's
+        best = None
+        for n, _, blob in sorted(rows, key=lambda x: x[0]):
+            v = array.array("f")
+            v.frombytes(blob)
+            cos = sum(a * b for a, b in zip(q, v))
+            if best is None or cos > best[1]:
+                best = (n, cos)
+        if best is not None:
+            out[did] = best
+    return out
+
+
 def ensure_table(db: sqlite3.Connection) -> None:
     db.execute("CREATE TABLE IF NOT EXISTS vectors("
                " doc_id INTEGER NOT NULL, chunk_no INTEGER NOT NULL,"
