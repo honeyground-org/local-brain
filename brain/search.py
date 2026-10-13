@@ -682,7 +682,8 @@ def semantic(db: sqlite3.Connection, query: str, k: int = 3,
     recall let a slot reservation push the answer out and break the contract (B top-8 9→8). The lexical
     path is already bound by contracts and works well (98% when synonyms are given). So the semantic path
     stays ★a separate function★, and each caller combines it to suit its own place:
-      · MCP `recall`  — appended after the lexical results as "close in meaning"
+      · MCP `recall`  — on request (`semantic_k`), apart from the word results, through `meaning()`
+                        (until 2026-10-13 this line said it was appended; it never was)
       · the hook      — called ★only when lexical goes silent★ (508ms round trip, measured, and it costs money)
 
     Returned rows have the same shape as recall rows, with `via_vector=True` and `cosine` attached.
@@ -711,6 +712,67 @@ def semantic(db: sqlite3.Connection, query: str, k: int = 3,
         r["why"] = "close in meaning (ratio %.3f · cosine %.3f)" % (ratio, cos)
         out.append(r)
     return out
+
+
+def meaning(db: sqlite3.Connection, query: str, k: int, exclude: Sequence[str] = (),
+            kinds: Optional[Sequence[str]] = None, sources: Optional[Sequence[str]] = None,
+            width: int = 0) -> Tuple[List[dict], str]:
+    """★The k memories closest in meaning that the caller does not already have★ — for a caller that
+    asked for them by number (MCP `recall`'s `semantic_k`). Returns (rows, why-none).
+
+    Unlike `semantic()` (the hook's unattended fallback) there is no ratio gate: the caller chose how many to
+    read, and every row says how close it is. Measured 2026-10-13 on the author's 66 labelled questions,
+    question alone: meaning's top 3 held the answer for 24 (words' for 22), and words and meaning found
+    different answers (13 only by words, 15 only by meaning). Each row reads the passage of the chunk that
+    matched (§evidence), not the head — cut to `width`, the length the caller shows, so the words that
+    matched are inside what is shown. `exclude` (names already shown), `kinds` and `sources` apply as in
+    `recall`; memories always in context are left out. ⛔ A failure is said, not swallowed — why-none
+    carries the reason (no embedding engine chosen, a quota, the network) when rows is empty for that reason.
+    """
+    from brain import vectors
+    if k <= 0:
+        return [], ""
+    skip = set(exclude) | set(_always_in_context())
+    out: List[dict] = []
+    want = k + len(skip)
+    n_docs = max(1, store.corpus_stats(db)["docs"])
+    while True:
+        try:
+            hits = vectors.search(db, query, k=want)
+        except Exception as exc:                         # noqa: BLE001
+            return [], "%s: %s" % (type(exc).__name__, str(exc)[:160])
+        out = []
+        rows = []
+        for doc_id, cos, ratio in hits:
+            row = _hydrate(db, doc_id)
+            if row is None or row["name"] in skip:
+                continue
+            if kinds and row["kind"] not in kinds:
+                continue
+            if sources and row["source"] not in sources:
+                continue
+            rows.append((row, cos, ratio))
+            if len(rows) == k:
+                break
+        # ★Filters can eat the pool★ — ask again for twice as many until k are found or none are left.
+        if len(rows) == k or len(hits) < want or want >= n_docs:
+            break
+        want *= 2
+    chunk_of = vectors.best_chunks(db, query, [row["id"] for row, _, _ in rows])
+    weights = query_weights(db, query)
+    for row, cos, ratio in rows:
+        r = _present(row, 0.0, [], None, [], db, 0.0)
+        r["via_vector"] = True
+        r["cosine"] = round(cos, 4)
+        r["ratio"] = round(ratio, 4)
+        r["why"] = "close in meaning, not a word match (cosine %.3f · ratio %.3f)" % (cos, ratio)
+        if row["id"] in chunk_of:
+            ev = evidence(db, query, row, chunk_of[row["id"]][0], weights, width=width)
+            if ev is not None:
+                r["evidence"] = {key: ev[key] for key in ("chunk", "start", "end", "rule")}
+                r["excerpt"] = _WS.sub(" ", ev["text"]).strip()
+        out.append(r)
+    return out, ""
 
 
 class JudgeUnavailable(RuntimeError):

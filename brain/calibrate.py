@@ -482,7 +482,10 @@ def measure(db: sqlite3.Connection) -> dict:
 #       an experiment path) and the rule that picks a word's grams is one function shared with it
 #       (`search._discriminative`). The default reads the head as before and recall weighs words as before
 #       (`query_weights` is held equal to recall's weights); bumped because `search` changed.
-CODE_GENERATION = 25
+#   26 (2026-10-13)  `search.meaning` — up to k memories close in meaning that a caller asked for by number (MCP
+#       `recall`'s `semantic_k`, default 0), apart from the word results. Nothing that measures the ruler calls
+#       it; bumped because `search` changed.
+CODE_GENERATION = 26
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·
