@@ -73,6 +73,8 @@ RPD = int(os.environ.get("BRAIN_RERANK_RPD", "")
 RESERVE = int(os.environ.get("BRAIN_RERANK_RESERVE", "150") or 150)
 _LAST = [0.0]
 _LAST_FAIL = [""]           # ★why it failed★ — a bare None cannot say limit from network
+_LAST_CACHED = [False]      # ★whether the last answer came from the cache★ — a cached call costs no time
+                            # and no budget, so a record of the hook's judge must say which one it was
 EXCERPT = 420
 
 MIN_SCORE_FALLBACK = 99.0     # before calibration, ★add nothing★ (an unreachable value on the 0~10 scale)
@@ -231,6 +233,12 @@ def last_failure() -> str:
     """The ★reason★ for the last failure. `score()` still contracts to None, but the checks and the cron
     must tell 'the limit' from 'the network' from 'the reserve' — all three have different prescriptions."""
     return _LAST_FAIL[0]
+
+
+def last_was_cached() -> bool:
+    """Whether the last `score()` was answered from the cache (no call, no budget). With chunking on,
+    this is the last chunk's answer."""
+    return _LAST_CACHED[0]
 
 
 def _pt_day(now: float = 0.0) -> str:
@@ -597,6 +605,7 @@ def score(query: str, candidates: Sequence[dict],
     """
     from brain import vectors
     cands = list(candidates)[:MAX_CAND]
+    _LAST_CACHED[0] = False
     if not cands:
         return []
     # ★Know before hitting the wall★ — one 429 wastes a round trip and a 4-second wait. And going on
@@ -642,6 +651,7 @@ def score(query: str, candidates: Sequence[dict],
             hit = cache_get(db, key)
             if hit is not None and len(hit) == len(cands):
                 _LAST_FAIL[0] = ""
+                _LAST_CACHED[0] = True
                 return hit
         b = budget(db)
         if b["wall"]:

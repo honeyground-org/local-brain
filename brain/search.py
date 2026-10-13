@@ -697,8 +697,32 @@ class JudgeUnavailable(RuntimeError):
     """
 
 
+def judge_policy(k: int = 20) -> str:
+    """★What the judge is shown★, named from the settings in force — which candidates and which part of
+    each. A judge score is on the scale of (model, prompt, ★this★): change the candidates or the excerpt
+    and the same model scores differently, so a record says which one it was measured under."""
+    from brain import rerank
+    return "vector%d+head%d" % (min(k, rerank.MAX_CAND), rerank.EXCERPT)
+
+
+def judge_observation() -> dict:
+    """An empty record of one judge stage, every field present from the start.
+
+    ⛔ ★Every key exists before anyone writes to it★ — the hook's watchdog may serialise this record from
+       another thread while the main thread is still filling it in, and a dict that grows while it is
+       being read raises. Values change; the set of keys never does.
+
+    outcome  pending · no_vectors · uncalibrated · vector_failed · no_candidates · failed · below · fired
+             · error · cut (still pending when the watchdog ended the run)
+    """
+    return {"outcome": "pending", "n": None, "top": None, "second": None, "ties": None,
+            "floor": None, "model": None, "scale": None, "policy": None, "cached": None,
+            "secs": None, "fail": None}
+
+
 def judged(db: sqlite3.Connection, query: str, k: int = 20,
-           strict: bool = False, cache: bool = True) -> List[dict]:
+           strict: bool = False, cache: bool = True,
+           observe: Optional[dict] = None) -> List[dict]:
     """★Two-stage search★ — cosine picks k candidates, the reranker judges whether they are the answer.
 
     Why this shape (measured 2026-08-25): neither absolute cosine nor a ratio is a ruler for "is this the
@@ -706,11 +730,21 @@ def judged(db: sqlite3.Connection, query: str, k: int = 20,
     answers, so no threshold separated them (above threshold: 3/34 correct · 0/8 silences rescued).
     Putting up a judge that ★reads query and candidate together★ separated them (top-1 correct 15/34 · 3/8 rescued).
     · Anthropic contextual retrieval: contextual embeddings −35% → +BM25 −49% → ★+reranking −67%★
+
+    `observe` (§judge_observation) is filled in with ★what the judge said before the threshold★ — the
+    candidates sent, the top two scores, ties at the top, the threshold, the model that answered and why
+    it ended. ⛔ It never changes what is returned and never asks the judge again: it is the record a
+    threshold measured from a person's own prompts needs, and until 2026-10-13 everything below the
+    threshold was thrown away unseen. No query or document text goes into it.
     """
     from brain import rerank, vectors
+    obs = observe if observe is not None else {}
+    obs["policy"] = judge_policy(k)
     try:
         hits = vectors.search(db, query, k=k)
     except Exception as exc:                             # noqa: BLE001
+        obs["outcome"] = "vector_failed"
+        obs["fail"] = type(exc).__name__
         if strict:
             raise JudgeUnavailable("vector search failed: %s" % exc) from exc
         return []
@@ -724,6 +758,7 @@ def judged(db: sqlite3.Connection, query: str, k: int = 20,
         cands.append({"name": row["name"], "description": row["description"],
                       "body": (row["body"] or "")[:500]})
     if not cands:
+        obs["outcome"] = "no_candidates"
         return []
     # ★Pass the connection that is already open★ — the budget counter writes, so opening a new one here
     # would make the hook create a second connection every prompt and possibly wait on a WAL lock (time budget matters here).
@@ -731,17 +766,30 @@ def judged(db: sqlite3.Connection, query: str, k: int = 20,
     #   It reduces answers splitting on identical input: 20 at once 62% → 5 at a time 100% (2026-08-31).
     # ⛔ `cache=False` exists for ★measurement★ — a measurement reading its own earlier answer
     #    "reproduces" anything (that is what happened to the precision axis on 2026-08-31). Production keeps the cache on.
+    t = time.time()
     scores = rerank.score_chunked(query, cands, db=db, cache=cache)
+    obs["secs"] = round(time.time() - t, 3)
+    obs["cached"] = rerank.last_was_cached()
+    obs["model"] = rerank.answering(db) or None
+    obs["scale"] = rerank.scale_id(db)
     if scores is None:                                   # ★call failure★ — not the absence of an answer
+        obs["outcome"] = "failed"
+        obs["fail"] = rerank.last_failure()[:160] or None
         if strict:
             raise JudgeUnavailable("judge call failed (quota or network) — this is not silence")
         return []                                        # ⛔ production stays quiet
     if not scores:                                       # [] = no candidates
+        obs["outcome"] = "no_candidates"
         return []
     floor = rerank.min_score(db)
+    ranked = sorted(scores, reverse=True)
+    obs.update(n=len(scores), top=ranked[0], second=ranked[1] if len(ranked) > 1 else None,
+               ties=ranked.count(ranked[0]), floor=floor)
     best = max(range(len(scores)), key=lambda i: scores[i])
     if scores[best] < floor:
+        obs["outcome"] = "below"
         return []
+    obs["outcome"] = "fired"
     row, cos, ratio = rows[best]
     r = _present(row, 0.0, [], None, [], db, 0.0)
     r["via_vector"] = True

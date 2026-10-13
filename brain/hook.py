@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 import time
 
@@ -196,7 +197,22 @@ def select(rows, min_score: float):
             if r["score"] >= floor and r.get("ratio", 0.0) >= REL_RATIO][:1]
 
 
-def fallback(db, prompt: str, strict: bool = False, cache: bool = True):
+def lexical(db, prompt: str) -> list:
+    """★The first stage, exactly as the hook runs it★ — what words alone attach to this prompt.
+
+    An empty answer is the hook's own definition of "words fell silent", the only case in which the second
+    stage runs. ⛔ A measurement that needs that definition calls this instead of rebuilding it: one
+    built on 2026-10-13 compared the top score with the threshold and left out the relative rule for
+    short prompts (§select), so some of the prompts it counted as silent are ones the hook answers.
+    """
+    from brain import calibrate, search
+    min_score = calibrate.threshold(db)
+    rows = search.recall(db, prompt[:MAX_PROMPT_CHARS], k=MAX_ITEMS + 2, log=False)
+    return select(rows, min_score)
+
+
+def fallback(db, prompt: str, strict: bool = False, cache: bool = True,
+             observe: dict = None):
     """★Look again by meaning, but only when words fall silent★ (2026-08-21).
 
     ⛔ ★The check calls this function too★ (2026-08-25). Before, this logic lived only inside `main()` and
@@ -214,28 +230,44 @@ def fallback(db, prompt: str, strict: bool = False, cache: bool = True):
        host runs it: embedding 0.55~0.68s (skipped when the query is cached) · the cosine scan over
        every chunk ~0.13s · ★the judge 0.4~2.0s — the bulk★ · whole hook 2.7~2.8s end to end.
        Its tail is not bounded here — the watchdog in `main()` is what bounds it.
+
+    `observe` (§search.judge_observation) is told why the judge did or did not run — no vectors in the
+    space in use, a threshold not measured for this judge, or what the judge said. ⛔ It changes nothing
+    that is returned and asks nothing more.
     """
+    obs = observe if observe is not None else {}
     try:
         from brain import search, vectors
         # ★The gate is a ratio★, and a vector must exist in ★the space in use right now★
         # (a different model, dimension or prefix is a different space — mixing them makes cosine meaningless).
-        has_vec = db.execute(
-            "SELECT 1 FROM vectors WHERE model=? AND dim=? LIMIT 1",
-            (vectors.model_tag(), vectors.DIM)).fetchone()
+        try:
+            has_vec = db.execute(
+                "SELECT 1 FROM vectors WHERE model=? AND dim=? LIMIT 1",
+                (vectors.model_tag(), vectors.DIM)).fetchone()
+        except sqlite3.OperationalError:                 # never embedded: the table does not exist yet
+            has_vec = None
         # ★Two stages★ — cosine draws candidates, and ★the judge does the deciding★ (2026-08-25).
         # Measurement forced this order: a cosine-ratio gate alone rescued 0 of 8 silent cases,
         # and adding the reranker put the right answer 1st in 3 of them, top-1 correct overall going 3→15.
         # The reason is scale — cosine measures "is this the same neighbourhood", the reranker measures "is this the answer".
         from brain import rerank
-        if has_vec and rerank.min_score(db) <= 10.0:
+        if not has_vec:
+            obs["outcome"] = "no_vectors"
+        elif rerank.min_score(db) <= 10.0:
             return search.judged(db, prompt[:MAX_PROMPT_CHARS], strict=strict,
-                                 cache=cache)[:1]
+                                 cache=cache, observe=obs)[:1]
+        else:
+            # ⛔ ★Where a person without a labelled sample stands today★ — no threshold was measured for
+            #    this judge, so it is never asked. Recorded so that silence shows up as a count.
+            obs["outcome"] = "uncalibrated"
         if has_vec and vectors.min_ratio(db) < vectors.MIN_RATIO_FALLBACK:
             return search.semantic(db, prompt[:MAX_PROMPT_CHARS], k=1)[:1]
     except Exception as exc:                             # noqa: BLE001
         # ⛔ ★A swallowing catch kills the signal★ (measured 2026-08-25) — this `except` had just
         #    swallowed a NameError raised while writing this function itself, making it look like "the judge fell silent",
         #    and the check called that ★0 false fires★. `strict` opens that spot up.
+        if obs.get("outcome") == "pending":
+            obs["outcome"], obs["fail"] = "error", type(exc).__name__
         from brain import search as _s
         if isinstance(exc, _s.JudgeUnavailable):
             raise                                        # ★the check must be told★
@@ -273,7 +305,7 @@ def main() -> int:
     #   ★writes down which stage it was in★ — so the next such burst says what it was.
     from brain import deadline
     state = {"t0": t0, "stage": "index", "path": "lexical", "ready": [],
-             "fb": None, "fb_hit": False, "hit": False, "cut": False}
+             "fb": None, "fb_hit": False, "hit": False, "cut": False, "judge": None}
 
     def expire() -> None:
         state["cut"] = True
@@ -326,10 +358,7 @@ def _answer(prompt: str, state: dict):
     # Counting something that runs automatically on every prompt as "used" would make weight and
     # self-improvement suggestions reflect the hook's own firing rate rather than **what a human actually looked for**.
     state["stage"] = "lexical"
-    from brain import calibrate
-    min_score = calibrate.threshold(db)
-    rows = search.recall(db, prompt[:MAX_PROMPT_CHARS], k=MAX_ITEMS + 2, log=False)
-    keep = select(rows, min_score)
+    keep = lexical(db, prompt)
 
     # ★A declared trigger phrase is attached regardless of score★ (user instruction 2026-08-19:
     # "do not gate it by a score threshold — there needs to be a clearer query and a way to confirm it.")
@@ -351,7 +380,8 @@ def _answer(prompt: str, state: dict):
             state["ready"] = _with_triggers(named, [], db)
         state["stage"], state["path"] = "fallback", "fallback"
         t = time.time()
-        keep = fallback(db, prompt)
+        state["judge"] = search.judge_observation()
+        keep = fallback(db, prompt, observe=state["judge"])
         state["fb"] = round(time.time() - t, 3)
         state["fb_hit"] = bool(keep)
 
@@ -381,6 +411,9 @@ def _with_triggers(named, keep, db):
 # ★Where the time went, one line per run★ (2026-09-29) — the record that was missing when 123
 # cancellations had to be explained after the fact. ⛔ Never the prompt: only timings, the stage and
 # whether anything was attached. Bounded — past the cap the older half is dropped.
+# Since 2026-10-13 a run that reached the second stage also carries ★what the judge said before the
+# threshold★ (§search.judge_observation) — the sample a threshold measured from a person's own prompts
+# is drawn from, at no extra call. Still no prompt and no document text: counts, scores and names of models.
 TIMING_FILE = "hook-timing.jsonl"
 TIMING_MAX_BYTES = 256 * 1024
 
@@ -390,6 +423,21 @@ def _timing_path() -> str:
     return os.path.join(store.brain_home(), TIMING_FILE)
 
 
+def _judge_record(state: dict):
+    """The second stage's record for this run, or None when words answered and it never ran.
+
+    A run the watchdog ended while the judge was still out is written as ★cut★ — not pending, and never
+    as a score of 0: "it did not answer in time" and "it answered no" are different facts.
+    """
+    obs = state.get("judge")
+    if obs is None:
+        return None
+    out = dict(obs)
+    if state.get("cut") and out.get("outcome") == "pending":
+        out["outcome"] = "cut"
+    return out
+
+
 def _record(state: dict) -> None:
     try:
         line = json.dumps({
@@ -397,6 +445,7 @@ def _record(state: dict) -> None:
             "total": round(time.time() - state["t0"], 3),
             "stage": state["stage"], "path": state["path"], "fb": state["fb"],
             "fb_hit": state["fb_hit"], "hit": state["hit"], "cut": state["cut"],
+            "judge": _judge_record(state),
         }) + "\n"
         path = _timing_path()
         with open(path, "a", encoding="utf-8") as fh:
