@@ -107,10 +107,19 @@ A memory for coding agents that is **more efficient and performs better than the
   - What a short prompt lacks is the turn before it, and the labelled set cannot test that: none of its
     91 prompts could be traced back to a transcript. Measuring it needs labels that keep their
     preceding turn.
+- The two signals never meet (2026-10-13). On the same 66 questions the answer is somewhere in words 20 ∪
+  meaning 20 for 89%, but in the top three for 33% (words) and 36% (meaning); words alone find 13 answers
+  meaning misses and meaning 15 that words miss. MCP `recall` uses words only, the hook uses meaning only
+  when words fall silent, and the judge reads a document's head while the passage that matched is often
+  further in. Plan and the experiment fixed before it runs: [`notes/retrieval-fusion-plan.md`](notes/retrieval-fusion-plan.md).
 - The judge's threshold cannot re-measure itself: 4 of the 34 hand-labelled "no memory needed" prompts
   (labelled 2026-08-12, when only lexical search existed) are answered by real memories, and the judge
   gives them 10. The noise floor then sits at the top of the scale, so calibration refuses to ship
   (measured again 2026-10-12 on the model now answering). Labels are fixed by a person reading them.
+  Without labels it is no better (2026-10-13): real prompts paired with unrelated memories also reach 10
+  (2 of 28), so the highest score of a no-answer control is the wrong statistic with or without labels.
+  The hook now records what the judge said below the threshold too, so a person's own prompts can become
+  the sample.
 - Measure short-query recall on real corpora in other languages; the method settings were first set on
   one corpus.
 - Verify Windows on real hardware with a real host. CI's Windows clean room is required since 2026-10-10
