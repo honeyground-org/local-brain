@@ -55,8 +55,11 @@ calls. "Top 3" means the answer is among the first three.
    index, judge-free: for 49 of the 54 answers in the vector top 20 the chunk was recovered (the other 5
    were two documents edited since they were embedded — left out, as the rule says), and the question's
    worth in what the judge reads rose from 259.7 to 338.9 (summed IDF; more in 16, less in 4).
-3. **Vector results in MCP `recall`, opt-in** (`semantic_k`, default 0). Six documents read is a larger
-   reading budget, not a better top three, and is reported as such.
+3. **Vector results in MCP `recall`, opt-in** (`semantic_k`, default 0; `search.meaning`). A separate list
+   after the word results — never a re-rank — with no answer already shown, the same `kinds`/`sources`
+   filters, the passage that matched, and "unavailable — reason" when there is no embedding engine. It is a
+   larger reading budget, so it is compared at the same budget (author's 66 questions, question alone, no
+   judge): words 6 → 25, words 3 + meaning 3 → 37; words 11 → 31, words 8 + meaning 3 → 42.
 4. **Judge the union** of words 20 and meaning 20 (at most 40, one call).
 5. **The hook**, only after the criteria below hold.
 

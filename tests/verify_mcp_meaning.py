@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""★MCP `recall` can also return what meaning found — when asked, apart, and nothing else changes★ (local · budget 0)
+
+Why this exists (2026-10-13)
+----------------------------
+`search.semantic`'s docstring said MCP `recall` appends memories close in meaning; `server.py` never did,
+so an agent's own search used words only. Measured on the author's 66 labelled questions, question alone:
+words found 13 answers meaning missed and meaning 15 that words missed. `semantic_k` lets the caller ask
+for up to k more, found by meaning — opt-in (default 0), in a separate list, never a re-rank of the words.
+
+This builds a corpus whose vectors it writes itself (no network, no budget) and holds down:
+
+  ① ★nothing changes unless asked★ — without `semantic_k`, or with 0, the answer is the same text as before;
+     with it, the word results come first, unchanged
+  ② the list: at most k, none already shown above, the `kinds` / `sources` filters apply (asking again for
+     more when a filter eats the pool), memories always in context are left out
+  ③ each row reads the passage of the chunk that matched, not the head
+  ④ ★a failure is said★ — no embedding engine → "unavailable" with the reason; the word results still come
+  ⑤ the cost is shown (cached embedding or one call) and ★no judge call★ is made
+
+⛔ Control: the meaning list's top item is one the words do not find at all — so ② would be red on code that
+   re-ranked words instead of searching by meaning.
+"""
+from __future__ import annotations
+
+import array
+import json
+import math
+import os
+import sys
+import tempfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+_TMP = tempfile.mkdtemp(prefix="brain-mcpmeaning-")
+_MEM = os.path.join(_TMP, "memory")
+os.environ["BRAIN_HOME"] = os.path.join(_TMP, "home")
+os.environ["BRAIN_CONFIG"] = os.path.join(_TMP, "config.json")
+
+from brain import engines, search, server, store, vectors  # noqa: E402
+
+FAILS = []
+DEEP = "quillwort"
+Q = "which rule keeps the books honest"
+
+
+def check(label: str, ok: bool, detail: str = "") -> None:
+    print("%s %s%s" % ("✅" if ok else "❌", label, ("  " + detail) if detail else ""))
+    if not ok:
+        FAILS.append(label)
+
+
+def filler(n: int, seed: str) -> str:
+    words = "meadow river lantern harbour copper orchard signal window garden ferry candle marble".split()
+    out, i = [], 0
+    while sum(len(w) + 1 for w in out) < n:
+        out.append(words[(i * 5 + len(seed)) % len(words)])
+        i += 1
+    return " ".join(out)[:n]
+
+
+NOTES = {   # name: (kind, body)
+    "books_rule": ("project", "The rule that keeps the books honest: reconcile every Friday."),
+    "quarry_note": ("project", "Stone from the north pit is cut before the frost arrives."),
+    "deep_note": ("project", filler(2500, "a") + " A %s count keeps stock true. " % DEEP + filler(500, "b")),
+    "copper_note": ("reference", "Copper wire is stored in the dry shed."),
+    "harbour_note": ("project", "Ferries leave the harbour at dawn."),
+}
+
+
+def _build():
+    os.makedirs(_MEM)
+    with open(os.environ["BRAIN_CONFIG"], "w", encoding="utf-8") as fh:
+        json.dump({"sources": [{"name": "memory", "path": _MEM, "include": ["*.md"],
+                                "exclude": ["MEMORY.md"], "max_depth": 1}]}, fh)
+    for name, (kind, body) in NOTES.items():
+        with open(os.path.join(_MEM, name + ".md"), "w", encoding="utf-8") as fh:
+            fh.write("---\nname: %s\ndescription: fixture %s\nmetadata:\n  type: %s\n---\n\n%s\n"
+                     % (name, name, kind, body))
+    db = store.connect()
+    store.reindex(db, full=True, recalibrate=False, refresh_history=False)
+    ids = {r["name"]: r["id"] for r in db.execute("SELECT id, name FROM docs")}
+    vectors.ensure_table(db)
+    axis = {}
+    with db:
+        for name, did in ids.items():
+            row = db.execute("SELECT sha, body FROM docs WHERE id=?", (did,)).fetchone()
+            for n in range(len(vectors.chunk_spans(row["body"] or ""))):
+                k = 10 * sorted(ids).index(name) + n
+                axis[(name, n)] = k
+                v = [0.0] * vectors.DIM
+                v[k] = 1.0
+                db.execute("INSERT OR REPLACE INTO vectors(doc_id,chunk_no,sha,model,dim,vec) "
+                           "VALUES (?,?,?,?,?,?)", (did, n, row["sha"], vectors.model_tag(),
+                                                     vectors.DIM, array.array("f", v).tobytes()))
+    # the question points at quarry_note, then books_rule (which the words already show — it must not come
+    # again), then deep_note's third chunk, then copper_note
+    q = [0.0] * vectors.DIM
+    for (name, n), w in ((("quarry_note", 0), 0.8), (("books_rule", 0), 0.6),
+                         (("deep_note", 2), 0.5), (("copper_note", 0), 0.2)):
+        q[axis[(name, n)]] = w
+    norm = math.sqrt(sum(x * x for x in q))
+    vectors._qcache_get(db, Q)                              # the cache table is made on first read
+    vectors._qcache_put(db, Q, array.array("f", [x / norm for x in q]))
+    return db
+
+
+def main() -> int:
+    print("=" * 78)
+    print("MCP recall can also return what meaning found — when asked, apart")
+    print("=" * 78)
+    db = _build()
+    calls = []
+    real_judge = engines.judge_text
+    engines.judge_text = lambda *a, **k: calls.append(1) or "[]"
+    try:
+        plain = server.call_tool(db, "recall", {"query": Q, "k": 1, "terms": ["ledger"]})
+        zero = server.call_tool(db, "recall", {"query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 0})
+        two = server.call_tool(db, "recall", {"query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 2})
+        refs = server.call_tool(db, "recall", {"query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 1,
+                                               "kinds": ["reference"]})
+        missing_plain = server.call_tool(db, "recall", {"query": "a question never embedded", "k": 1,
+                                                        "terms": ["ledger"]})
+        missing = server.call_tool(db, "recall", {"query": "a question never embedded", "k": 1,
+                                                  "terms": ["ledger"], "semantic_k": 2})
+    finally:
+        engines.judge_text = real_judge
+
+    # ── ① nothing changes unless asked ───────────────────────────────────────
+    check("① without semantic_k and with 0, the same text", plain == zero, "%d vs %d chars" % (len(plain), len(zero)))
+    check("① with it, the word results come first, unchanged", two.startswith(plain) and len(two) > len(plain))
+    head = plain.split("\n")[0]
+    check("①   the word answer is the one the words find", "books_rule" in head, head)
+
+    # ── ② the list ───────────────────────────────────────────────────────────
+    section = two[len(plain):]
+    listed = [n for n in NOTES if "%s  [" % n in section]
+    check("② ★control★: its first item is one the words do not find at all (quarry_note)",
+          section.find("quarry_note") >= 0 and "quarry_note" not in plain
+          and section.find("quarry_note") < section.find("deep_note"), "%s" % listed)
+    check("② at most k, and none already shown above", len(listed) == 2 and "books_rule" not in listed,
+          "%s" % listed)
+    rsec = refs.split("— close in meaning")[-1]
+    check("② the kinds filter applies — and asks again when the filter eats the pool",
+          "copper_note" in rsec and not any(n in rsec for n in NOTES if n != "copper_note"),
+          rsec.strip()[:160])
+
+    # ── ③ the passage that matched ───────────────────────────────────────────
+    deep_item = section[section.find("deep_note"):]
+    check("③ a row shows the passage of the chunk that matched, not the head — inside what is shown",
+          DEEP in deep_item.split("\n")[3] and "keeps" in deep_item.split("\n")[3],
+          deep_item[:200].replace("\n", " | "))
+
+    # ── ④ ⑤ failure, cost, no judge ──────────────────────────────────────────
+    check("④ no embedding engine → 'unavailable' with the reason, the word results still come",
+          "unavailable — NoKey" in missing and missing.startswith(missing_plain),
+          missing.split("— close in meaning")[-1].strip()[:120])
+    check("⑤ the cost is shown", "query embedding cached" in two and "one embedding call" in missing)
+    check("⑤ ★no judge call★", not calls, "%d" % len(calls))
+    schema = [t for t in server.TOOLS if t["name"] == "recall"][0]["inputSchema"]["properties"]
+    check("⑤ the tool says it is opt-in (default 0)", "semantic_k" in schema
+          and "default 0" in schema["semantic_k"]["description"])
+    db.close()
+
+    print("=" * 78)
+    if FAILS:
+        print("❌ %d failed" % len(FAILS))
+        return 1
+    print("✅ all passed — meaning comes when asked, apart from the words, and nothing else changes")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

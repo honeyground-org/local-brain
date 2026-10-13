@@ -61,6 +61,11 @@ TOOLS: List[Dict[str, Any]] = [
                             "description": "narrow to memory | docs | wiki | guide"},
                 "kinds": {"type": "array", "items": {"type": "string"},
                           "description": "narrow to kinds of memory (the frontmatter `type`){kinds}"},
+                "semantic_k": {"type": "integer",
+                               "description": "also return up to this many memories close in ★meaning★ that "
+                                              "the words did not find, in a separate list (default 0 = none). "
+                                              "Words and meaning find different answers; this is more to read, "
+                                              "and one embedding call unless the question was asked before."},
             },
             "required": ["query"],
         },
@@ -181,6 +186,9 @@ def tools_for(db) -> List[Dict[str, Any]]:
 
 
 # ------------------------------------------------------------------ presentation
+SHOWN = 280      # characters of a result's excerpt shown to the caller
+
+
 def _fmt_recall(rows: List[dict]) -> str:
     if not rows:
         return ("No results. ⛔ Call again with synonyms in `terms` — "
@@ -202,7 +210,7 @@ def _fmt_recall(rows: List[dict]) -> str:
             "   path: %s"
             % (i, r["name"], r["source"], r["kind"] or "-",
                r["description"] or r["title"],
-               r["why"], age, flag, r["excerpt"][:280], r["path"]))
+               r["why"], age, flag, r["excerpt"][:SHOWN], r["path"]))
     # ★Related context is shown ★separately★ from the answer★ (user instruction 2026-08-20)
     #   *"Connected data conveys the relatedness of information. This itself is not the whole
     #     conversation or memory."*
@@ -213,6 +221,24 @@ def _fmt_recall(rows: List[dict]) -> str:
                        "  · %s ← %s\n    %s" % (r["name"], r["via_graph"],
                                                 r["description"] or r["title"])
                        for r in rel))
+    return "\n\n".join(out)
+
+
+def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int) -> str:
+    """The `semantic_k` list — kept apart from the word results, because it was found another way."""
+    head = "— close in meaning (found by meaning, not by the words · %s) —" % cost
+    if not rows:
+        return head + "\n  " + ("unavailable — %s" % why_none if why_none else "nothing more found")
+    out = [head]
+    for i, r in enumerate(rows, start):
+        if r.get("evidence_age_days", -1) >= 0:
+            age = "evidence %s (%dd ago)" % (r["evidence_date"], r["evidence_age_days"])
+        else:
+            age = "file updated %dd ago" % r["age_days"]
+        flag = " ⚠︎ the evidence is old — check it is still true before quoting" if r["stale"] else ""
+        out.append("%d. %s  [%s/%s]\n   %s\n   why: %s · %s%s\n   %s\n   path: %s"
+                   % (i, r["name"], r["source"], r["kind"] or "-", r["description"] or r["title"],
+                      r["why"], age, flag, r["excerpt"][:SHOWN], r["path"]))
     return "\n\n".join(out)
 
 
@@ -267,7 +293,20 @@ def call_tool(db, name: str, args: dict) -> str:
         if not args.get("terms"):
             hint = ("\n\n⛔ hint: called with no `terms`. A memory is usually worded differently "
                     "from the question — call again with 5~10 synonyms.")
-        return _fmt_recall(rows) + hint
+        more = ""
+        sk = int(args.get("semantic_k") or 0)
+        if sk > 0:
+            # ★Opt-in, apart from the answer list★ (2026-10-13 · docs/notes/retrieval-fusion-plan.md step 3).
+            #   The word results above are exactly what they were; this adds a second list, never a re-rank.
+            from brain import vectors
+            cost = ("query embedding cached" if vectors._qcache_get(db, args["query"]) is not None
+                    else "one embedding call")
+            mrows, why = search.meaning(db, args["query"], sk, exclude=[r["name"] for r in rows],
+                                        kinds=args.get("kinds"), sources=args.get("sources"),
+                                        width=SHOWN)
+            start = len([r for r in rows if not r.get("related")]) + 1
+            more = "\n\n" + _fmt_meaning(mrows, why, cost, start)
+        return _fmt_recall(rows) + more + hint
     if name == "remember":
         return _do_remember(db, args)
     if name == "neighbors":
