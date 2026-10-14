@@ -656,7 +656,7 @@
  "monitor.second": "第2段階(意味 + 判定): 到達 {reached} · 完了 {finished} · {outcomes}",
  "monitor.vector": "意味検索の応答: 選択したストア {remote} · ローカルコピー {local}({why})· 新しい質問埋め込み {embedded}",
  "monitor.judge": "判定: 送信 {sent} · 応答 {returned}(有効 {valid})· 応答前に打ち切り {cut_out} · p50 {p50}秒 · p95 {p95}秒 · 失敗 {kinds}",
- "monitor.recall": "MCP recall: 呼び出し {calls} · 意味を要求(semantic_k){asked} · 語が不確かで自動追加 {auto} · 意味の結果あり {returned} · 失敗 {fails}",
+ "monitor.recall": "MCP recall: 呼び出し {calls} · 語が不確か {unsure} (学習した同義語を追加 {bridged} · 語・意味・箇所で並べ替え {reordered}) · 意味を要求(semantic_k){asked} · 語が不確かで自動追加 {auto} · 意味の結果あり {returned} · 失敗 {fails}",
  "monitor.deferred": "ワーカー: 実行 {runs} · 完了 {cleared} · ストア {stores}",
  "monitor.use": "その後に開いた記憶: {opened} 件 · うち brain が直前に示したもの {shown} 件 (フック {hook} · recall {recall}) · 1位 {first} · 上位3 {top3}",
  "monitor.facts": "目立つこと",

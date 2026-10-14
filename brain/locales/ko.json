@@ -656,7 +656,7 @@
  "monitor.second": "2단계(뜻 + 판정): 도달 {reached} · 완료 {finished} · {outcomes}",
  "monitor.vector": "뜻 검색 응답: 선택한 저장소 {remote} · 로컬 사본 {local} ({why}) · 새 질문 임베딩 {embedded}",
  "monitor.judge": "판정: 보냄 {sent} · 응답 {returned} (유효 {valid}) · 응답 전 절단 {cut_out} · p50 {p50}초 · p95 {p95}초 · 실패 {kinds}",
- "monitor.recall": "MCP recall: 호출 {calls} · 뜻 검색 요청(semantic_k) {asked} · 낱말이 확신 없어 저절로 붙인 것 {auto} · 뜻 결과 있음 {returned} · 실패 {fails}",
+ "monitor.recall": "MCP recall: 호출 {calls} · 낱말이 확신 없음 {unsure} (학습된 동의어 추가 {bridged} · 낱말·뜻·구간으로 다시 줄 세움 {reordered}) · 뜻 검색 요청(semantic_k) {asked} · 낱말이 확신 없어 저절로 붙인 것 {auto} · 뜻 결과 있음 {returned} · 실패 {fails}",
  "monitor.deferred": "작업자: 실행 {runs} · 완료 {cleared} · 저장소 {stores}",
  "monitor.use": "이후 열어 본 기억: {opened}건 · 그중 brain 이 직전에 보여 준 것 {shown}건 (훅 {hook} · recall {recall}) · 1위 {first} · 3위 안 {top3}",
  "monitor.facts": "눈에 띄는 것",

@@ -656,7 +656,7 @@
  "monitor.second": "Zweite Stufe (Bedeutung + Richter): erreicht {reached} · beendet {finished} · {outcomes}",
  "monitor.vector": "Bedeutungssuche beantwortet von: dem gewählten Speicher {remote} · der lokalen Kopie {local} ({why}) · neue Anfrage-Embeddings {embedded}",
  "monitor.judge": "Richter: gesendet {sent} · beantwortet {returned} (gültig {valid}) · abgebrochen vor der Antwort {cut_out} · p50 {p50} s · p95 {p95} s · Fehler {kinds}",
- "monitor.recall": "MCP recall: {calls} Aufrufe · Bedeutung angefragt (semantic_k) {asked} · ungefragt ergänzt, weil die Wörter unsicher waren {auto} · Bedeutung lieferte etwas {returned} · Fehler {fails}",
+ "monitor.recall": "MCP recall: {calls} Aufrufe · Wörter unsicher {unsure} (gelernte Synonyme ergänzt {bridged} · nach Wörtern, Bedeutung und Passage geordnet {reordered}) · Bedeutung angefragt (semantic_k) {asked} · ungefragt ergänzt, weil die Wörter unsicher waren {auto} · Bedeutung lieferte etwas {returned} · Fehler {fails}",
  "monitor.deferred": "Worker: {runs} Läufe · erledigt {cleared} · Speicher {stores}",
  "monitor.use": "Danach geöffnet: {opened} indizierte Erinnerungen · brain hatte {shown} davon kurz vorher gezeigt (Hook {hook} · recall {recall}) · erster Platz {first} · unter den ersten 3 {top3}",
  "monitor.facts": "Was auffällt",

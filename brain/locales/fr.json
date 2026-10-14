@@ -656,7 +656,7 @@
  "monitor.second": "Seconde étape (sens + juge) : atteinte {reached} · terminée {finished} · {outcomes}",
  "monitor.vector": "Recherche par le sens servie par : le stockage choisi {remote} · la copie locale {local} ({why}) · nouveaux embeddings de requête {embedded}",
  "monitor.judge": "Juge : envoyées {sent} · répondues {returned} (valides {valid}) · coupées avant la réponse {cut_out} · p50 {p50} s · p95 {p95} s · échecs {kinds}",
- "monitor.recall": "MCP recall : {calls} appels · sens demandé (semantic_k) {asked} · ajouté sans demande car les mots étaient incertains {auto} · le sens a renvoyé quelque chose {returned} · échecs {fails}",
+ "monitor.recall": "MCP recall : {calls} appels · mots incertains {unsure} (synonymes appris ajoutés {bridged} · ordonné par mots, sens et passage {reordered}) · sens demandé (semantic_k) {asked} · ajouté sans demande car les mots étaient incertains {auto} · le sens a renvoyé quelque chose {returned} · échecs {fails}",
  "monitor.deferred": "Processus de fond : {runs} exécutions · terminées {cleared} · stockages {stores}",
  "monitor.use": "Ouvertes ensuite : {opened} mémoires indexées · brain en avait montré {shown} juste avant (le hook {hook} · recall {recall}) · en premier {first} · dans les 3 premières {top3}",
  "monitor.facts": "Ce qui ressort",

@@ -36,8 +36,9 @@ _RECALL_DESC = (
     "the question (a question about 'stopped' → a memory that says 'halted'), and a question with no "
     "word in common finds nothing. "
     "Give 5~10 other spellings{langs}, abbreviations, and related identifiers. "
-    "Words and meaning find different answers: when the words are unsure, recall adds by itself, in a "
-    "separate list, a few memories closest in ★meaning★ that the words did not find. Pass `semantic_k` "
+    "Words and meaning find different answers: when the words are unsure, recall adds your learned "
+    "synonyms, orders the list by words, meaning and the passage that matched together, and adds, in a "
+    "separate list, a few memories closest in ★meaning★ that are not shown above. Pass `semantic_k` "
     "to always get that many (for example 3), or 0 for none. It adds that many to read, and one embedding "
     "call for a question not asked before."
 )
@@ -68,7 +69,8 @@ TOOLS: List[Dict[str, Any]] = [
                 "semantic_k": {"type": "integer",
                                "description": "also return up to this many memories close in ★meaning★ that "
                                               "the words did not find, in a separate list. Omitted: a few are "
-                                              "added only when the words are unsure; 0: never. Words and "
+                                              "added only when the words are unsure; 0: never, and meaning "
+                                              "does not order the list either. Words and "
                                               "meaning find different answers; this is more to read, and one "
                                               "embedding call unless the question was asked before."},
             },
@@ -256,19 +258,20 @@ def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int, auto: b
 
 
 def _note_recall(args: dict, rows: List[dict], sk: int, mrows, why: str, cached, t0: float,
-                 auto: bool = False) -> None:
+                 auto: bool = False, unsure: bool = False, bridged: int = 0, reordered: bool = False) -> None:
     """One row per `recall` (§observe) — whether an agent asked for meaning too, and what each way returned.
     ⛔ No query, no terms, no filter values: counts, a fixed failure code and which database answered."""
     from brain import observe, stores, vectors
     row = {"k": int(args.get("k") or 8), "terms": len(args.get("terms") or []),
            "filtered": bool(args.get("kinds") or args.get("sources")),
            "semantic_k": int(args.get("semantic_k") or 0), "auto": auto,
+           "unsure": unsure, "bridged": bridged, "reordered": reordered,
            "words": len([r for r in rows if not r.get("related")]),
            "related": len([r for r in rows if r.get("related")]),
            "graph": stores.last_served("graph") or None,
            "meaning": None if mrows is None else len(mrows),
            "meaning_fail": (why.split(":")[0] or None) if why else None,
-           "embed_cached": cached, "vector": vectors.last_search() if sk > 0 else None,
+           "embed_cached": cached, "vector": vectors.last_search() if sk > 0 or reordered else None,
            "secs": round(time.time() - t0, 3)}
     observe.write("recall", row)
 
@@ -329,26 +332,50 @@ def call_tool(db, name: str, args: dict) -> str:
             db, int(args.get("days") or 7), int(args.get("limit") or 25)))
     if name == "recall":
         t0 = time.time()
-        rows = search.recall(db, args["query"], k=int(args.get("k") or 8),
-                             extra_terms=args.get("terms") or [],
-                             kinds=args.get("kinds"), sources=args.get("sources"))
+        q, k = args["query"], int(args.get("k") or 8)
+        terms = args.get("terms") or []
+        rows = search.recall(db, q, k=k, extra_terms=terms, kinds=args.get("kinds"), sources=args.get("sources"))
         hint = ""
         if not args.get("terms"):
             hint = ("\n\n⛔ hint: called with no `terms`. A memory is usually worded differently "
                     "from the question — call again with 5~10 synonyms.")
+        # ★When the words are unsure★ (2026-10-14 · §search.fused) — ① the person's learned synonyms, asked for
+        #   here although the measured decision keeps them out of the hook (there they decide whether to attach;
+        #   here an agent asked); ② still unsure → words, meaning and the whole-body passage order the list.
+        #   Where the words are sure the answer is exactly what it was.
+        from brain import vectors
+        unsure = _words_unsure(db, rows)
+        was_unsure, bridged, reordered, head = unsure, [], False, ""
+        cached = vectors._qcache_get(db, q) is not None if unsure else None
+        if unsure:
+            wide = search.recall(db, q, k=search.FUSE_POOL, extra_terms=terms, kinds=args.get("kinds"),
+                                 sources=args.get("sources"), log=False, bridge=True)
+            bridged = search.last_bridged()
+            if bridged:
+                unsure = _words_unsure(db, wide)
+                head = "— learned synonyms added: %s —\n\n" % ", ".join(bridged)
+            if unsure and args.get("semantic_k") != 0:          # 0: meaning is never used
+                rows, _why = search.fused(db, q, wide, k, extra_terms=list(terms) + bridged,
+                                          kinds=args.get("kinds"), sources=args.get("sources"), width=SHOWN)
+                reordered = True
+                if rows:
+                    head += ("— the words were unsure: ordered by words, meaning and the passage that matched, "
+                             "together —\n\n")
+            elif bridged:
+                rows = [r for r in wide if not r.get("related")][:k] + [r for r in wide if r.get("related")]
         more = ""
         sk = int(args.get("semantic_k") or 0)
-        auto = args.get("semantic_k") is None and _words_unsure(db, rows)
+        auto = args.get("semantic_k") is None and unsure
         if auto:
             sk = AUTO_MEANING
-        mrows, why, cached = None, "", None
+        mrows, why = None, ""
         if sk > 0:
-            # ★Opt-in, apart from the answer list★ (2026-10-13 · docs/notes/retrieval-fusion-plan.md step 3).
-            #   The word results above are exactly what they were; this adds a second list, never a re-rank.
-            from brain import vectors
-            cached = vectors._qcache_get(db, args["query"]) is not None
+            # ★Apart from the answer list★ (2026-10-13 · docs/notes/retrieval-fusion-plan.md step 3) — a second
+            #   list of what is close in meaning and not shown above, never a re-rank of it.
+            if cached is None:
+                cached = vectors._qcache_get(db, q) is not None
             cost = "query embedding cached" if cached else "one embedding call"
-            mrows, why = search.meaning(db, args["query"], sk, exclude=[r["name"] for r in rows],
+            mrows, why = search.meaning(db, q, sk, exclude=[r["name"] for r in rows],
                                         kinds=args.get("kinds"), sources=args.get("sources"),
                                         width=SHOWN)
             start = len([r for r in rows if not r.get("related")]) + 1
@@ -356,8 +383,9 @@ def call_tool(db, name: str, args: dict) -> str:
             #    engine chosen would read "unavailable" under every unsure answer.
             if mrows or not auto:
                 more = "\n\n" + _fmt_meaning(mrows, why, cost, start, auto=auto)
-        _note_recall(args, rows, sk, mrows, why, cached, t0, auto=auto)
-        return _fmt_recall(rows) + more + hint
+        _note_recall(args, rows, sk, mrows, why, cached, t0, auto=auto,
+                     unsure=was_unsure, bridged=len(bridged), reordered=reordered)
+        return head + _fmt_recall(rows) + more + hint
     if name == "remember":
         return _do_remember(db, args)
     if name == "neighbors":
