@@ -285,16 +285,20 @@ def main() -> int:
     hosts.pin_from_argv()
     prompt = _read_prompt()
     # A host command (`/clear`, `!ls` …) is not the person's own question — ★the host's syntax★ (§hosts)
-    if not prompt or prompt[:1] in hosts.active().command_prefixes():
-        return 0
+    # ★Each way out is recorded★ (2026-10-14) — without them the record's rows are not "every prompt", and a
+    # rate computed over them says nothing about the prompts that never reached a search.
+    if not prompt:
+        return _excluded("empty", t0)
+    if prompt[:1] in hosts.active().command_prefixes():
+        return _excluded("command", t0)
     if os.environ.get("BRAIN_HOOK_DISABLED"):
-        return 0
+        return _excluded("disabled", t0)
     # ⛔ ★A declared trigger comes before the length gate★ (measured 2026-08-19) — `MIN_PROMPT_CHARS`
     #    is a score-world heuristic for "short talk has nothing worth recalling". A declared phrase is a
     #    lookup, not a score, so its length is irrelevant: an 11-character phrase and a 9-character phrase
     #    were both caught by that gate and fell silent.
     if len(prompt) < MIN_PROMPT_CHARS and not _named(prompt):
-        return 0
+        return _excluded("short", t0)
 
     # ★The wall is kept on total elapsed time, whatever is blocking★ (2026-09-29 · §brain/deadline.py).
     #   The host cancels this hook at `HOOK_TIMEOUT_SEC`, and did so ★123 times★ while the only guard
@@ -305,13 +309,15 @@ def main() -> int:
     #   ★writes down which stage it was in★ — so the next such burst says what it was.
     from brain import deadline
     state = {"t0": t0, "stage": "index", "path": "lexical", "ready": [],
-             "fb": None, "fb_hit": False, "hit": False, "cut": False, "judge": None}
+             "fb": None, "fb_hit": False, "hit": False, "cut": False, "judge": None,
+             "t": {}, "reindex": None, "shown": []}
 
     def expire() -> None:
         state["cut"] = True
         if state["ready"]:
             _emit(_format(state["ready"]))
             state["hit"] = True
+            state["shown"] = list(state["ready"])
         _record(state)
 
     wd = deadline.watchdog(
@@ -326,6 +332,7 @@ def main() -> int:
     if keep:
         _emit(_format(keep))
         state["hit"] = True
+        state["shown"] = list(keep)
     _record(state)
     return 0
 
@@ -345,11 +352,18 @@ def _answer(prompt: str, state: dict):
     # ⛔ `recalibrate=False` — calibration runs 138 recalls and takes 3.3 seconds.
     #   Left on, one index run becomes 3.6 seconds, the hook gives up on its time budget, and
     #   **the memory just fixed is not caught in that very prompt.** The scale is measured at session start.
+    t = time.time()
     try:
         if store.needs_reindex(db):
-            store.reindex(db, recalibrate=False)
-    except Exception:                                    # noqa: BLE001
-        pass                                             # a failed index must not block recall
+            state["reindex"] = {"ran": True, "secs": None, "changed": None}
+            stats = store.reindex(db, recalibrate=False)
+            state["reindex"].update(secs=round(time.time() - t, 3),
+                                    changed=sum(int(stats.get(k) or 0) for k in ("added", "updated", "removed")))
+        else:
+            state["reindex"] = {"ran": False}
+    except Exception as exc:                             # noqa: BLE001
+        state["reindex"] = {"ran": True, "failed": type(exc).__name__}   # a failed index must not block recall
+    state["t"]["index"] = round(time.time() - t, 3)
 
     if time.time() - state["t0"] > TIME_BUDGET_SEC * 3:
         return []
@@ -358,7 +372,9 @@ def _answer(prompt: str, state: dict):
     # Counting something that runs automatically on every prompt as "used" would make weight and
     # self-improvement suggestions reflect the hook's own firing rate rather than **what a human actually looked for**.
     state["stage"] = "lexical"
+    t = time.time()
     keep = lexical(db, prompt)
+    state["t"]["lexical"] = round(time.time() - t, 3)
 
     # ★A declared trigger phrase is attached regardless of score★ (user instruction 2026-08-19:
     # "do not gate it by a score threshold — there needs to be a clearer query and a way to confirm it.")
@@ -366,7 +382,9 @@ def _answer(prompt: str, state: dict):
     # ★Looked up before the fallback★ (2026-09-29) — it is a lookup and costs milliseconds, so it is
     # what the watchdog can still hand over if the slow stage below never returns.
     state["stage"] = "triggers"
+    t = time.time()
     named = _named(prompt[:MAX_PROMPT_CHARS], db)
+    state["t"]["triggers"] = round(time.time() - t, 3)
 
     # ★Look again by meaning, but only when words fall silent★ (2026-08-21)
     #
@@ -382,7 +400,7 @@ def _answer(prompt: str, state: dict):
         t = time.time()
         state["judge"] = search.judge_observation()
         keep = fallback(db, prompt, observe=state["judge"])
-        state["fb"] = round(time.time() - t, 3)
+        state["fb"] = state["t"]["fallback"] = round(time.time() - t, 3)
         state["fb_hit"] = bool(keep)
 
     state["stage"] = "merge"
@@ -410,17 +428,41 @@ def _with_triggers(named, keep, db):
 
 # ★Where the time went, one line per run★ (2026-09-29) — the record that was missing when 123
 # cancellations had to be explained after the fact. ⛔ Never the prompt: only timings, the stage and
-# whether anything was attached. Bounded — past the cap the older half is dropped.
+# whether anything was attached.
 # Since 2026-10-13 a run that reached the second stage also carries ★what the judge said before the
 # threshold★ (§search.judge_observation) — the sample a threshold measured from a person's own prompts
 # is drawn from, at no extra call. Still no prompt and no document text: counts, scores and names of models.
-TIMING_FILE = "hook-timing.jsonl"
-TIMING_MAX_BYTES = 256 * 1024
+# Since 2026-10-14 it is one row per run in the day's file of §observe (appended only — the old single file
+# was trimmed by rewriting it, and two processes trimming at once lost rows), with the ways out, the time of
+# each stage, the reindex, and what was attached by which source.
 
 
 def _timing_path() -> str:
-    from brain import store
-    return os.path.join(store.brain_home(), TIMING_FILE)
+    from brain import observe
+    return observe.path("hook")
+
+
+def _excluded(reason: str, t0: float) -> int:
+    """Record a prompt that never reached a search, and leave."""
+    from brain import observe
+    observe.write("hook", {"excluded": reason, "total": round(time.time() - t0, 3)}, to=_timing_path())
+    return 0
+
+
+def _sources(rows) -> dict:
+    """What was attached, by the source that found it — words, a declared trigger, meaning, or a graph
+    neighbour in a spare slot (§select)."""
+    out = {"lexical": 0, "trigger": 0, "semantic": 0, "graph": 0}
+    for r in rows or []:
+        if r.get("via_graph") == "declared trigger":     # §_with_triggers presents it this way
+            out["trigger"] += 1
+        elif r.get("via_vector"):
+            out["semantic"] += 1
+        elif r.get("related"):
+            out["graph"] += 1
+        else:
+            out["lexical"] += 1
+    return out
 
 
 def _judge_record(state: dict):
@@ -435,26 +477,24 @@ def _judge_record(state: dict):
     out = dict(obs)
     if state.get("cut") and out.get("outcome") == "pending":
         out["outcome"] = "cut"
+        if out.get("phase") == "judge":                  # ★out at the judge★: was the request already sent?
+            from brain import rerank
+            call = rerank.call_state()
+            out["sent"], out["returned"] = call["sent"], call["returned"]
     return out
 
 
 def _record(state: dict) -> None:
     try:
-        line = json.dumps({
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(state["t0"])),
+        from brain import observe
+        observe.write("hook", {
             "total": round(time.time() - state["t0"], 3),
             "stage": state["stage"], "path": state["path"], "fb": state["fb"],
             "fb_hit": state["fb_hit"], "hit": state["hit"], "cut": state["cut"],
+            "t": dict(state.get("t") or {}), "reindex": state.get("reindex"),
+            "attached": _sources(state.get("shown")),
             "judge": _judge_record(state),
-        }) + "\n"
-        path = _timing_path()
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(line)
-        if os.path.getsize(path) > TIMING_MAX_BYTES:
-            with open(path, encoding="utf-8") as fh:
-                lines = fh.readlines()
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.writelines(lines[len(lines) // 2:])
+        }, to=_timing_path())
     except Exception:                                    # noqa: BLE001
         pass                                             # a record must never cost the answer
 

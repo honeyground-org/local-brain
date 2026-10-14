@@ -556,6 +556,19 @@ def record(db: sqlite3.Connection, role: str, **fields) -> None:
 _DOWN: Dict[str, float] = {}
 
 
+_SERVED: Dict[str, dict] = {}      # role → which database answered the last question, and why (§last_served)
+
+
+def last_served(role: str) -> dict:
+    """Which database answered this process's last question for `role` — {"by": "remote"|"local",
+    "why": None | "not_synced" | "down_recently" | "failed"}. {} before any question.
+
+    ⛔ An answer from the local copy looks exactly like one from the chosen database; only this says which
+       it was (2026-10-14 — the monitor of words-and-meaning needs to know the database really served it).
+    """
+    return dict(_SERVED.get(role) or {})
+
+
 def serve(db: sqlite3.Connection, role: str, target: str, remote: Callable[[], object],
           local: Callable[[], object]):
     """Ask the dedicated database — ★only if it is known to hold this target in sync★ — else the local copy.
@@ -564,14 +577,21 @@ def serve(db: sqlite3.Connection, role: str, target: str, remote: Callable[[], o
        `DOWN_RETRY_SEC`, so a database that is down costs one timeout, not one per question.
     """
     h = health(db, role)
-    if h.get("synced") != target or time.time() - _DOWN.get(role, 0.0) < DOWN_RETRY_SEC:
+    if h.get("synced") != target:
+        _SERVED[role] = {"by": "local", "why": "not_synced"}
+        return local()
+    if time.time() - _DOWN.get(role, 0.0) < DOWN_RETRY_SEC:
+        _SERVED[role] = {"by": "local", "why": "down_recently"}
         return local()
     try:
-        return remote()
+        out = remote()
+        _SERVED[role] = {"by": "remote", "why": None}
+        return out
     except StoreError as exc:
         _DOWN[role] = time.time()
         lost = {"synced": ""} if gone(exc) else {}       # it no longer holds this copy — the next sync heals it
         record(db, role, ok=False, error=str(exc)[:300], fallbacks=int(h.get("fallbacks") or 0) + 1, **lost)
+        _SERVED[role] = {"by": "local", "why": "failed"}
         return local()
 
 

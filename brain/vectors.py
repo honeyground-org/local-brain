@@ -666,6 +666,16 @@ def _qcache_put(db: sqlite3.Connection, query: str, vec: array.array) -> None:
         pass                                             # a failed cache must not block search
 
 
+_LAST_SEARCH: Dict[str, object] = {}
+
+
+def last_search() -> dict:
+    """How this process's last `search` went — {embedded: a new embedding call was made, embed_s, store: the
+    backend that answered, by: remote|local, why: why not the chosen one, store_s}. For the per-request
+    record (§observe); no text."""
+    return dict(_LAST_SEARCH)
+
+
 def search(db: sqlite3.Connection, query: str, k: int = 5,
            qvec: Optional[Sequence[float]] = None) -> List[Tuple[int, float, float]]:
     """Documents close in meaning [(doc_id, cosine, ★ratio★)] — a full scan.
@@ -676,26 +686,37 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
     (using the mean would always lose long documents — every one of our project memories has that shape).
     """
     ensure_table(db)
+    _LAST_SEARCH.clear()
+    t0 = time.time()
     if qvec is not None:
         q = _unit(qvec)
+        _LAST_SEARCH["embedded"] = False
     else:
         q = _qcache_get(db, query)
+        _LAST_SEARCH["embedded"] = q is None
         if q is None:
             q = _unit(embed([query], side="query")[0])
             _qcache_put(db, query, q)
+    _LAST_SEARCH["embed_s"] = round(time.time() - t0, 3)
     # ★Where the similarity search runs is the chosen vector store's★ (§stores · §vecstore) — the local
     # scan by default. Every backend returns the same thing: documents by their closest chunk, best first.
     from brain import stores, vecstore
     n = max(k, TOPN_FOR_MEAN)
     local = vecstore.SqliteVectors()
     c = stores.choice("vector")
+    t1 = time.time()
     if c["backend"] == "sqlite" or c.get("error"):
         order = local.search(db, q, model_tag(), DIM, n)
+        _LAST_SEARCH.update(store="sqlite", by="local", why="choice_error" if c.get("error") else None)
     else:
         be = vecstore.make(c)
         order = stores.serve(db, "vector", be.target(model_tag(), DIM),
                              lambda: be.search(db, q, model_tag(), DIM, n),
                              lambda: local.search(db, q, model_tag(), DIM, n))
+        served = stores.last_served("vector")
+        _LAST_SEARCH.update(store=c["backend"] if served.get("by") == "remote" else "sqlite",
+                            by=served.get("by"), why=served.get("why"))
+    _LAST_SEARCH["store_s"] = round(time.time() - t1, 3)
     if not order:
         return []
     head = [c for _, c in order[:TOPN_FOR_MEAN]]

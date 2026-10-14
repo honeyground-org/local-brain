@@ -485,7 +485,11 @@ def measure(db: sqlite3.Connection) -> dict:
 #   26 (2026-10-13)  `search.meaning` — up to k memories close in meaning that a caller asked for by number (MCP
 #       `recall`'s `semantic_k`, default 0), apart from the word results. Nothing that measures the ruler calls
 #       it; bumped because `search` changed.
-CODE_GENERATION = 26
+#   27 (2026-10-14)  per-request records (§observe): the hook writes every way out, each stage's time, the reindex,
+#       what was attached by which source and where its second stage was; `stores.serve` and the graph say
+#       which database answered; MCP `recall` writes a row per call. Nothing returned or attached changed and
+#       no call was added; bumped because `hook`, `search`, `stores` and `graphstore` changed.
+CODE_GENERATION = 27
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

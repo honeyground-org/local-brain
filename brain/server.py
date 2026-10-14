@@ -242,6 +242,22 @@ def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int) -> str:
     return "\n\n".join(out)
 
 
+def _note_recall(args: dict, rows: List[dict], sk: int, mrows, why: str, cached, t0: float) -> None:
+    """One row per `recall` (§observe) — whether an agent asked for meaning too, and what each way returned.
+    ⛔ No query, no terms, no filter values: counts, a fixed failure code and which database answered."""
+    from brain import observe, stores, vectors
+    row = {"k": int(args.get("k") or 8), "terms": len(args.get("terms") or []),
+           "filtered": bool(args.get("kinds") or args.get("sources")), "semantic_k": sk,
+           "words": len([r for r in rows if not r.get("related")]),
+           "related": len([r for r in rows if r.get("related")]),
+           "graph": stores.last_served("graph") or None,
+           "meaning": None if mrows is None else len(mrows),
+           "meaning_fail": (why.split(":")[0] or None) if why else None,
+           "embed_cached": cached, "vector": vectors.last_search() if sk > 0 else None,
+           "secs": round(time.time() - t0, 3)}
+    observe.write("recall", row)
+
+
 def _memory_dir() -> str:
     import os
     cfg = store.load_config()
@@ -286,6 +302,7 @@ def call_tool(db, name: str, args: dict) -> str:
         return timeline.render(timeline.recent(
             db, int(args.get("days") or 7), int(args.get("limit") or 25)))
     if name == "recall":
+        t0 = time.time()
         rows = search.recall(db, args["query"], k=int(args.get("k") or 8),
                              extra_terms=args.get("terms") or [],
                              kinds=args.get("kinds"), sources=args.get("sources"))
@@ -295,17 +312,19 @@ def call_tool(db, name: str, args: dict) -> str:
                     "from the question — call again with 5~10 synonyms.")
         more = ""
         sk = int(args.get("semantic_k") or 0)
+        mrows, why, cached = None, "", None
         if sk > 0:
             # ★Opt-in, apart from the answer list★ (2026-10-13 · docs/notes/retrieval-fusion-plan.md step 3).
             #   The word results above are exactly what they were; this adds a second list, never a re-rank.
             from brain import vectors
-            cost = ("query embedding cached" if vectors._qcache_get(db, args["query"]) is not None
-                    else "one embedding call")
+            cached = vectors._qcache_get(db, args["query"]) is not None
+            cost = "query embedding cached" if cached else "one embedding call"
             mrows, why = search.meaning(db, args["query"], sk, exclude=[r["name"] for r in rows],
                                         kinds=args.get("kinds"), sources=args.get("sources"),
                                         width=SHOWN)
             start = len([r for r in rows if not r.get("related")]) + 1
             more = "\n\n" + _fmt_meaning(mrows, why, cost, start)
+        _note_recall(args, rows, sk, mrows, why, cached, t0)
         return _fmt_recall(rows) + more + hint
     if name == "remember":
         return _do_remember(db, args)
