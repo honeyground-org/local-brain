@@ -162,6 +162,15 @@ def _run(env_key: str, name: str, body) -> int:
         except Exception as exc:                         # noqa: BLE001
             fh.write("⛔ stopped — %s: %s\n" % (type(exc).__name__, str(exc)[:200]))
             failed = True
+        # ★The day's summary of words and meaning★ (§monitor) — written by whichever daily job runs first;
+        #   idempotent, no model call, and never what decides this job's own success.
+        try:
+            from brain import monitor
+            got = monitor.record()
+            if got["recorded"] or got["pruned"]:
+                fh.write(json.dumps({"monitor": got}, ensure_ascii=False) + "\n")
+        except Exception as exc:                         # noqa: BLE001
+            fh.write("monitor: %s\n" % type(exc).__name__)
         fh.write("-- end\n")
         fh.flush()
     finally:

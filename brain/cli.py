@@ -45,6 +45,7 @@ HELP_GROUPS = (
         ("score --axes", "cli.help.cmd.score_axes"),
         ("score --full", "cli.help.cmd.score_full"),
         ("score --history", "cli.help.cmd.score_history"),
+        ("monitor", "cli.help.cmd.monitor"),
         ("budget", "cli.help.cmd.budget"),
         ("i18n --check", "cli.help.cmd.i18n_check"),
     )),
@@ -408,6 +409,12 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("status", help="Status — ★what to fix★, separated from the metrics")
     p.add_argument("--json", action="store_true", help="everything as JSON")
+    p = sub.add_parser("monitor", help="Are words and meaning used together — from the per-request records")
+    p.add_argument("--hours", type=float, default=24.0, help="the window, ending now (default 24)")
+    p.add_argument("--day", default="", help="one UTC day (YYYY-MM-DD) instead of the window")
+    p.add_argument("--record", action="store_true",
+                   help="summarise every completed day not yet recorded, and prune old record files")
+    p.add_argument("--json", action="store_true", help="the summary as JSON")
     sub.add_parser("calibrate", help="Re-measure the hook threshold against this corpus")
     p = sub.add_parser("recent",
                        help="Chronological view — 'what was I doing' (the question with no keyword)")
@@ -745,6 +752,25 @@ def main(argv=None) -> int:
         _p(search.neighbors(db, args.name))
     elif args.cmd == "calibrate":
         _p(calib.calibrate(db))
+    elif args.cmd == "monitor":
+        from brain import monitor
+        if args.record:
+            got = monitor.record()
+            print(i18n.t("monitor.recorded", n=len(got["recorded"]), path=monitor._history_path(),
+                         pruned=got["pruned"]))
+        if args.day:
+            rec, label = monitor.rows([args.day]), args.day + " (UTC)"
+        else:
+            days, since = monitor.window(args.hours)
+            rec, label = monitor.rows(days, since), "%gh" % args.hours
+        s = monitor.summarise(rec)
+        before = [r for r in monitor.history() if r["day"] != args.day]
+        tr = monitor.trend(monitor.metrics(s), before)
+        if args.json:
+            _p({"window": label, "summary": s, "metrics": monitor.metrics(s), "trend": tr,
+                "facts": monitor.facts(s)})
+            return 0
+        print(monitor.render(s, tr, label))
     elif args.cmd == "status":
         st = health.status(db)
         if args.json:
@@ -771,6 +797,13 @@ def main(argv=None) -> int:
                 print("   ↳ %s" % i18n.t("guard.off.deployed", before=lu.get("from"),
                                           after=lu.get("deployed"),
                                           at=(lu.get("at") or "")[:16]))
+
+        # ★Are words and meaning used together★ — the last recorded day, read from its summary only (§monitor)
+        try:
+            from brain import monitor
+            print("\n" + monitor.status_line())
+        except Exception:                                # noqa: BLE001
+            pass
 
         sch = st.get("schedules") or {}
         if sch.get("jobs"):
