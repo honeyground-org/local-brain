@@ -73,6 +73,7 @@ RPD = int(os.environ.get("BRAIN_RERANK_RPD", "")
 RESERVE = int(os.environ.get("BRAIN_RERANK_RESERVE", "150") or 150)
 _LAST = [0.0]
 _LAST_FAIL = [""]           # ★why it failed★ — a bare None cannot say limit from network
+_LAST_KIND = [""]           # ★what kind of failure★ (§last_failure_kind) — for code that must act on it
 _LAST_CACHED = [False]      # ★whether the last answer came from the cache★ — a cached call costs no time
                             # and no budget, so a record of the hook's judge must say which one it was
 _LAST_SHAPE = [None]        # ★what the last fresh answer covered★ (§last_answer_shape)
@@ -234,6 +235,29 @@ def last_failure() -> str:
     """The ★reason★ for the last failure. `score()` still contracts to None, but the checks and the cron
     must tell 'the limit' from 'the network' from 'the reserve' — all three have different prescriptions."""
     return _LAST_FAIL[0]
+
+
+# What a caller can do about a failure differs by kind, and a sentence meant for a person is no way to tell.
+TRANSIENT = ("overloaded", "rate_limited", "network")    # the provider or the way to it — ask again later
+
+
+def last_failure_kind() -> str:
+    """The kind of the last failure — "" after a success.
+
+      daily_wall    the provider's daily limit (known or just reported)
+      reserve       the share kept for the hook would be spent
+      overloaded    the provider answered 5xx (measured 2026-10-14: "503 … high demand", and 5–9 s answers
+                    before it — the hook's second stage was cut on 15 of 16 runs)
+      rate_limited  the provider answered 429 for the minute, not the day
+      refused       any other HTTP error
+      network       no answer: DNS, a timeout, a reset
+      no_key        no key for the chosen engine
+      unreadable    an answer with no scores in it
+
+    A measurement stops on a `TRANSIENT` kind and resumes later, instead of counting the provider's bad hour
+    as the method's result.
+    """
+    return _LAST_KIND[0]
 
 
 def last_answer_shape() -> Optional[dict]:
@@ -655,6 +679,7 @@ def score(query: str, candidates: Sequence[dict],
     from brain import vectors
     cands = list(candidates)[:MAX_CAND]
     _LAST_CACHED[0] = False
+    _LAST_KIND[0] = ""
     _LAST_SHAPE[0] = None
     if not cands:
         return []
@@ -691,10 +716,12 @@ def score(query: str, candidates: Sequence[dict],
                 return hit
         b = budget(db)
         if b["wall"]:
+            _LAST_KIND[0] = "daily_wall"
             _LAST_FAIL[0] = i18n.t("rerank.fail.daily_wall",
                                    day=b["day"], used=b["used"], limit=b["limit"])
             return None
         if reserve and b["left"] is not None and b["left"] <= reserve:
+            _LAST_KIND[0] = "reserve"
             _LAST_FAIL[0] = i18n.t("rerank.fail.reserve", reserve=reserve, left=b["left"])
             return None
         # ⛔ ★This is an outbound door — mask the secrets before sending★ (§privacy). Real credentials
@@ -711,15 +738,20 @@ def score(query: str, candidates: Sequence[dict],
         except _engines.JudgeError as exc:
             if exc.daily:                                # ★one parser only★ (§vectors.parse_quota)
                 _note_wall(db, exc.limit)
+                _LAST_KIND[0] = "daily_wall"
                 _LAST_FAIL[0] = i18n.t("rerank.fail.daily_lie",
                                        limit=int(exc.limit or RPD), retry=int(exc.retry_after))
             else:
+                _LAST_KIND[0] = ("overloaded" if 500 <= (exc.status or 0) < 600 else
+                                 "rate_limited" if exc.status == 429 else "refused")
                 _LAST_FAIL[0] = "HTTP %s %s %s" % (exc.status, exc.code, exc.message[:120])
             return None
         except vectors.NoKey as exc:
+            _LAST_KIND[0] = "no_key"
             _LAST_FAIL[0] = str(exc)[:160]
             return None
         except (urllib.error.URLError, OSError, ValueError) as exc:
+            _LAST_KIND[0] = "network"
             _LAST_FAIL[0] = i18n.t("rerank.fail.network",
                                    kind=type(exc).__name__, detail=str(exc)[:120])
             return None
@@ -727,6 +759,7 @@ def score(query: str, candidates: Sequence[dict],
         seen = _remember_answering(db, model)
         out = _parse(text, len(cands))
         if out is None:
+            _LAST_KIND[0] = "unreadable"
             return None
         # ⛔ The cache holds ★only successes★ — holding a failure kills that slot forever.
         #    Filed under ★the model that gave it★: the key looked up before the call carried the last
