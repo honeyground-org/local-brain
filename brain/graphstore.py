@@ -89,6 +89,7 @@ def ask(db: sqlite3.Connection, question: str, *args):
     """One graph question, answered by the chosen backend when it is in sync — else by the local copy (§stores.serve)."""
     c = stores.choice("graph")
     if c["backend"] == "sqlite" or c.get("error"):
+        stores._SERVED["graph"] = {"by": "local", "why": "choice_error" if c.get("error") else None}
         return getattr(LOCAL, question)(db, *args)
     be = make(c)
     return stores.serve(db, "graph", be.target(), lambda: getattr(be, question)(db, *args),

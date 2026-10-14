@@ -10,8 +10,9 @@
   "areas": {
     "calibration": {
       "impact": "high",
-      "summary": "the threshold, the margin filter, the scorecard",
-      "paths": ["brain/calibrate.py", "brain/adaptive.py", "brain/evalinit.py", "brain/scorecard.py"],
+      "summary": "the threshold, the margin filter, the scorecard, the per-request records",
+      "paths": ["brain/calibrate.py", "brain/adaptive.py", "brain/evalinit.py", "brain/scorecard.py",
+                "brain/observe.py"],
       "owners": []
     },
     "retrieval": {

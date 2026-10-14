@@ -74,6 +74,7 @@ RESERVE = int(os.environ.get("BRAIN_RERANK_RESERVE", "150") or 150)
 _LAST = [0.0]
 _LAST_FAIL = [""]           # ★why it failed★ — a bare None cannot say limit from network
 _LAST_KIND = [""]           # ★what kind of failure★ (§last_failure_kind) — for code that must act on it
+_CALL = {"sent": 0.0, "returned": 0.0}   # when the last request went out / came back (§call_state)
 _LAST_CACHED = [False]      # ★whether the last answer came from the cache★ — a cached call costs no time
                             # and no budget, so a record of the hook's judge must say which one it was
 _LAST_SHAPE = [None]        # ★what the last fresh answer covered★ (§last_answer_shape)
@@ -239,6 +240,17 @@ def last_failure() -> str:
 
 # What a caller can do about a failure differs by kind, and a sentence meant for a person is no way to tell.
 TRANSIENT = ("overloaded", "rate_limited", "network")    # the provider or the way to it — ask again later
+
+
+def call_state() -> dict:
+    """Whether the last `score()` sent a request and whether it came back — {sent, returned, waited}.
+
+    Read by the hook's watchdog when it ends a run: "cut while the judge was out" (sent, not returned) is a
+    different fact from "cut before asking" (not sent) — the first spent a call for nothing (2026-10-14).
+    """
+    s, r = _CALL["sent"], _CALL["returned"]
+    return {"sent": bool(s), "returned": bool(r),
+            "waited": round((r or time.time()) - s, 3) if s else None}
 
 
 def last_failure_kind() -> str:
@@ -681,6 +693,7 @@ def score(query: str, candidates: Sequence[dict],
     _LAST_CACHED[0] = False
     _LAST_KIND[0] = ""
     _LAST_SHAPE[0] = None
+    _CALL["sent"] = _CALL["returned"] = 0.0
     if not cands:
         return []
     # ★Know before hitting the wall★ — one 429 wastes a round trip and a 4-second wait. And going on
@@ -733,9 +746,11 @@ def score(query: str, candidates: Sequence[dict],
                 time.sleep(wait)
         _LAST[0] = time.time()
         _note_call(db)                                   # ⛔ count what was sent (before success)
+        _CALL["sent"] = time.time()
         try:
             text = _engines.judge_text(sent_text, timeout=TIMEOUT, model=model)
         except _engines.JudgeError as exc:
+            _CALL["returned"] = time.time()
             if exc.daily:                                # ★one parser only★ (§vectors.parse_quota)
                 _note_wall(db, exc.limit)
                 _LAST_KIND[0] = "daily_wall"
@@ -747,14 +762,17 @@ def score(query: str, candidates: Sequence[dict],
                 _LAST_FAIL[0] = "HTTP %s %s %s" % (exc.status, exc.code, exc.message[:120])
             return None
         except vectors.NoKey as exc:
+            _CALL["returned"] = time.time()
             _LAST_KIND[0] = "no_key"
             _LAST_FAIL[0] = str(exc)[:160]
             return None
         except (urllib.error.URLError, OSError, ValueError) as exc:
+            _CALL["returned"] = time.time()
             _LAST_KIND[0] = "network"
             _LAST_FAIL[0] = i18n.t("rerank.fail.network",
                                    kind=type(exc).__name__, detail=str(exc)[:120])
             return None
+        _CALL["returned"] = time.time()
         _LAST_FAIL[0] = ""                               # ★success erases the previous failure★
         seen = _remember_answering(db, model)
         out = _parse(text, len(cands))

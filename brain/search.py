@@ -873,10 +873,19 @@ def judge_observation() -> dict:
 
     outcome  pending · no_vectors · uncalibrated · vector_failed · no_candidates · failed · below · fired
              · error · cut (still pending when the watchdog ended the run)
+    phase    where it is — vector (embedding and the store) · inputs · judge · done. A cut run says
+             where it was cut (2026-10-14: "cut" alone could not tell the judge from the embedding)
+    vector   how the vector search went (§vectors.last_search) — embedded or cached, which store answered
+    sent · returned   whether the judge request went out and came back (§rerank.call_state)
+    valid    whether a fresh answer scored every candidate once, within 0–10 (None: cached or none)
+    kind · fail   a fixed failure code (§rerank.last_failure_kind) — never the provider's words
+    decision below · fired — the judge's verdict against the threshold; what reached the person is the
+             hook's own record
     """
     return {"outcome": "pending", "n": None, "top": None, "second": None, "ties": None,
             "floor": None, "model": None, "scale": None, "policy": None, "cached": None,
-            "secs": None, "fail": None}
+            "secs": None, "fail": None, "phase": None, "vector": None, "sent": None,
+            "returned": None, "valid": None, "kind": None, "decision": None}
 
 
 def judge_inputs(db: sqlite3.Connection, query: str, hits, excerpt: str = "head",
@@ -948,14 +957,18 @@ def judged(db: sqlite3.Connection, query: str, k: int = 20,
         raise ValueError("excerpt must be one of %s" % (EXCERPTS,))
     obs = observe if observe is not None else {}
     obs["policy"] = judge_policy(k, excerpt)
+    obs["phase"] = "vector"
     try:
         hits = vectors.search(db, query, k=k)
     except Exception as exc:                             # noqa: BLE001
+        obs["vector"] = vectors.last_search()
         obs["outcome"] = "vector_failed"
         obs["fail"] = type(exc).__name__
         if strict:
             raise JudgeUnavailable("vector search failed: %s" % exc) from exc
         return []
+    obs["vector"] = vectors.last_search()
+    obs["phase"] = "inputs"
     rows, cands, found = judge_inputs(db, query, hits, excerpt)
     if not cands:
         obs["outcome"] = "no_candidates"
@@ -966,15 +979,23 @@ def judged(db: sqlite3.Connection, query: str, k: int = 20,
     #   It reduces answers splitting on identical input: 20 at once 62% → 5 at a time 100% (2026-08-31).
     # ⛔ `cache=False` exists for ★measurement★ — a measurement reading its own earlier answer
     #    "reproduces" anything (that is what happened to the precision axis on 2026-08-31). Production keeps the cache on.
+    obs["phase"] = "judge"
     t = time.time()
     scores = rerank.score_chunked(query, cands, db=db, cache=cache)
     obs["secs"] = round(time.time() - t, 3)
+    obs["phase"] = "done"
     obs["cached"] = rerank.last_was_cached()
+    call = rerank.call_state()
+    obs["sent"], obs["returned"] = call["sent"], call["returned"]
+    obs["kind"] = rerank.last_failure_kind() or None
+    shape = rerank.last_answer_shape()
+    obs["valid"] = (None if shape is None else
+                    shape["answered"] == shape["n"] and not shape["duplicates"] and not shape["out_of_range"])
     obs["model"] = rerank.answering(db) or None
     obs["scale"] = rerank.scale_id(db)
     if scores is None:                                   # ★call failure★ — not the absence of an answer
         obs["outcome"] = "failed"
-        obs["fail"] = rerank.last_failure()[:160] or None
+        obs["fail"] = obs["kind"] or "unknown"
         if strict:
             raise JudgeUnavailable("judge call failed (quota or network) — this is not silence")
         return []                                        # ⛔ production stays quiet
@@ -987,9 +1008,9 @@ def judged(db: sqlite3.Connection, query: str, k: int = 20,
                ties=ranked.count(ranked[0]), floor=floor)
     best = max(range(len(scores)), key=lambda i: scores[i])
     if scores[best] < floor:
-        obs["outcome"] = "below"
+        obs["outcome"] = obs["decision"] = "below"
         return []
-    obs["outcome"] = "fired"
+    obs["outcome"] = obs["decision"] = "fired"
     row, cos, ratio = rows[best]
     r = _present(row, 0.0, [], None, [], db, 0.0)
     r["via_vector"] = True
