@@ -20,6 +20,7 @@ known content:
   ⑤ the scan is incremental — scanning again adds nothing; no name or text is in the `use` record
   ⑥ names on a line that are not indexed documents (another hook's bullets) are never counted as shown
   ⑦ `brain monitor` counts them, and compares the shown-first ratio with the person's own history
+  ⑧ the index holds one spelling of a path and the host writes another (Windows: an 8.3 short name) — matched
 
 ⛔ Control: the same transcript without the hook's attachment records that memory as not shown — so ① can fail.
 """
@@ -131,6 +132,25 @@ def main() -> int:
           monitor.metrics(sm)["shown_before_open"] == 0.667)
     from brain import i18n
     check("⑦ the screen says it", i18n.t("monitor.use", **sm["use"]) in monitor.render(sm, {}, "test"))
+
+    # ── the index holds one spelling of the path, the host writes another ────
+    #    (Windows: a short 8.3 name against the long one — here a linked folder stands in for it)
+    link = os.path.join(_TMP, "linked")
+    try:
+        os.symlink(_MEM, link, target_is_directory=True)
+    except (OSError, NotImplementedError, AttributeError):
+        link = None
+    if link:
+        with db:
+            db.execute("UPDATE docs SET path=? WHERE name='quiet_note'", (os.path.join(link, "quiet_note.md"),))
+        before = len(observe.read("use", [observe.day()])[0])
+        t3 = os.path.join(_TMP, "session3.jsonl")
+        transcript(t3, [user("again"), tool_use("r9", "Read", {"file_path": p("quiet_note")})])
+        tail.scan(t3, {"session_id": "s3", "offset": 0, "tail": tail._blank_tail(), "saves": 0})
+        check("⑧ the index holds the file under another spelling of its path — still matched",
+              len(observe.read("use", [observe.day()])[0]) == before + 1)
+    else:
+        print("⏭ ⑧ skipped — this system cannot make a linked folder")
 
     # ── control: no attachment → that memory was not shown ───────────────────
     os.remove(observe.path("use"))

@@ -262,11 +262,22 @@ def _names(db, text: str, pattern) -> list:
 
 
 def _doc_of(db, path: str):
+    """The indexed document at this path, as the host wrote it.
+
+    ⛔ Windows (CI, 2026-10-14): the host may write a short 8.3 name, either separator, another case — so
+       after the exact forms, the documents of the same file name are compared in one shape (§_norm of
+       both the path and its real path). Comparing the shaped path with the stored one matched nothing there.
+    """
     if not path:
         return None
     for p in (path, os.path.realpath(path)):
         r = db.execute("SELECT name, path FROM docs WHERE path=?", (p,)).fetchone()
         if r:
+            return r
+    want = {_norm(path), _norm(os.path.realpath(path))}
+    base = os.path.basename(path.replace("\\", "/"))
+    for r in db.execute("SELECT name, path FROM docs WHERE path LIKE ?", ("%" + base,)):
+        if want & {_norm(r["path"]), _norm(os.path.realpath(r["path"]))}:
             return r
     return None
 
@@ -289,7 +300,7 @@ def _use(ev: tuple, rec: dict) -> None:
                  and db.execute("SELECT 1 FROM docs WHERE name=?", (n,)).fetchone()]
         u["shown"] = (u["shown"] + [{"via": "recall", "names": names, "turn": u["turn"]}])[-SHOWN_KEEP:]
     elif kind == "read":
-        doc = _doc_of(db, _norm(str(ev[1] or "")))
+        doc = _doc_of(db, str(ev[1] or ""))
         if doc is None or [u["turn"], doc["name"]] in u["opened"]:
             return
         u["opened"] = (u["opened"] + [[u["turn"], doc["name"]]])[-LIST_CAP:]
