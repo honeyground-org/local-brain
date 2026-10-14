@@ -106,6 +106,10 @@ def summarise(rec: Dict[str, list]) -> dict:
     # `auto` (2026-10-14): meaning added unasked because the words were unsure — apart from an asked list
     m = {"calls": len(rc), "semantic_asked": sum(1 for r in rc if int(r.get("semantic_k") or 0) > 0),
          "auto": sum(1 for r in rc if r.get("auto")),
+         # (2026-10-14) words unsure → learned synonyms asked for · the list ordered by words, meaning and passage
+         "unsure": sum(1 for r in rc if r.get("unsure")),
+         "bridged": sum(1 for r in rc if int(r.get("bridged") or 0) > 0),
+         "reordered": sum(1 for r in rc if r.get("reordered")),
          "meaning_returned": sum(1 for r in rc if int(r.get("meaning") or 0) > 0),
          "meaning_fail": dict(Counter(r.get("meaning_fail") for r in rc if r.get("meaning_fail"))),
          "vector": {"remote": sum(1 for v in rvec if v.get("by") == "remote"),
@@ -319,6 +323,7 @@ def render(s: dict, tr: Dict[str, dict], label: str) -> str:
                     cut_out=sec["cut_out"], p50=_s(sec["latency"]["p50"]), p95=_s(sec["latency"]["p95"]),
                     kinds=_kv(sec["kinds"])),
              i18n.t("monitor.recall", calls=m["calls"], asked=m["semantic_asked"], auto=m.get("auto", 0),
+                    unsure=m.get("unsure", 0), bridged=m.get("bridged", 0), reordered=m.get("reordered", 0),
                     returned=m["meaning_returned"], fails=_kv(m["meaning_fail"])),
              i18n.t("monitor.deferred", runs=d["runs"], cleared=d["cleared"], stores=_kv(d["stores"])),
              i18n.t("monitor.use", **s.get("use", {"opened": 0, "shown": 0, "hook": 0, "recall": 0,

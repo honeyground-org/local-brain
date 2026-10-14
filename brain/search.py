@@ -377,7 +377,11 @@ def recall(db: sqlite3.Connection, query: str, k: int = 8,
            extra_terms: Sequence[str] = (), kinds: Optional[Sequence[str]] = None,
            sources: Optional[Sequence[str]] = None, graph: bool = True,
            bridge_floor: Optional[float] = None,
-           log: bool = True, drop_index_docs: bool = True) -> List[dict]:
+           log: bool = True, drop_index_docs: bool = True,
+           bridge: Optional[bool] = None) -> List[dict]:
+    """`bridge` — the person's learned synonyms (§lexicon): None follows the measured decision (§lexicon.decide,
+    made on the hook's firing and noise), True asks for them, False leaves them out."""
+    _LAST_RECALL["bridged"] = []
     stats = store.corpus_stats(db)
     n_docs = max(1, stats["docs"])
     avg_len = max(1.0, stats["avg_doclen"])
@@ -402,14 +406,16 @@ def recall(db: sqlite3.Connection, query: str, k: int = 8,
     # fills that 47pp by passing `terms` every time — a new user has neither that instruction nor their own term list.
     # ⛔ Same place and same rule as translit: widen on the query side only, and put the added words in
     #    `bridged` so they are ★excluded from the coverage calculation★ (a bridge must not inflate the score).
-    if query:
+    if query and bridge is not False:
         try:
             from brain import lexicon
-            got = lexicon.bridge(db, query)
+            # asked for → the knobs the measurement chose, passed out loud (§lexicon.bridge measures regardless)
+            got = lexicon.bridge(db, query, *lexicon.knobs(db)) if bridge else lexicon.bridge(db, query)
             add = [w for w in got if w not in (extra_terms or ())]
             if add:
                 bridged |= set(add)
                 extra_terms = list(extra_terms) + add
+                _LAST_RECALL["bridged"] = sorted(add)
         except Exception:                                # noqa: BLE001
             pass                                         # recall still runs without the bridge
 
@@ -773,6 +779,92 @@ def meaning(db: sqlite3.Connection, query: str, k: int, exclude: Sequence[str] =
                 r["excerpt"] = _WS.sub(" ", ev["text"]).strip()
         out.append(r)
     return out, ""
+
+
+_LAST_RECALL: Dict[str, list] = {"bridged": []}
+
+
+def last_bridged() -> List[str]:
+    """The learned synonyms the last `recall` in this process added to the question."""
+    return list(_LAST_RECALL.get("bridged") or [])
+
+
+# ★When the words are unsure, three rankings decide the order★ (2026-10-14 · an agent's `recall` only)
+#
+# The answer is usually already among the candidates — on the author's 66 labelled questions it sat in the
+# top 50 of words or meaning for 63 (question alone) — and was lost in the ordering: 28 sat at 4–50. Three
+# rankings, each blind where another sees: words (BM25 over the whole body, which docks long documents),
+# meaning (the chunks embedded), and ★the passage★ — how grep sees a document: the one window that holds the
+# most of the question, wherever it sits, with no penalty for the length around it. Merged by reciprocal rank.
+# Measured, no model, as `recall` runs with the agent's terms (unsure → learned synonyms first, then this):
+# top 3 43 → 48 of 66 (paired 95% +0..+10); answers anywhere in what is shown 52 → 52, read 9.0 → 8.3.
+# ⛔ Not in the hook: there the order of what it attaches did not move (15 → 13–14 · 18 → 19), and synonyms
+#    deciding ★whether★ to attach took prompts that need no memory from 3 to 17 of 34 attached.
+# ⛔ Graph agreement (what the top candidates link to) was measured as a fourth ranking and lowered every arm.
+FUSE_POOL = 20        # how deep each ranking is read
+FUSE_K = 60           # the reciprocal-rank constant — the usual one, not tuned here
+FUSE_WIDTH = 1200     # the passage window — one embedded chunk's width (§vectors.CHUNK_CHARS)
+
+
+def passage_worth(text: str, weights, width: int = FUSE_WIDTH) -> float:
+    """The most question worth one window of `width` characters holds anywhere in `text` — a word counts
+    once, with its IDF, if a gram that carries it (§query_weights) starts inside the window."""
+    low = (text or "").lower()
+    occ: List[Tuple[int, int, float]] = []
+    for wi, (_word, idf, grams) in enumerate(weights):
+        for g in grams:
+            g = g.lower()
+            i = low.find(g)
+            while i >= 0:
+                occ.append((i, wi, idf))
+                i = low.find(g, i + 1)
+    if not occ:
+        return 0.0
+    occ.sort()
+    best = cur = 0.0
+    j = 0
+    held: Dict[int, int] = {}
+    for pos, wi, idf in occ:
+        held[wi] = held.get(wi, 0) + 1
+        if held[wi] == 1:
+            cur += idf
+        while occ[j][0] < pos - width:
+            _p, wj, idfj = occ[j]
+            held[wj] -= 1
+            if held[wj] == 0:
+                cur -= idfj
+            j += 1
+        best = max(best, cur)
+    return best
+
+
+def fused(db: sqlite3.Connection, query: str, rows: List[dict], k: int,
+          extra_terms: Sequence[str] = (), kinds: Optional[Sequence[str]] = None,
+          sources: Optional[Sequence[str]] = None, width: int = 0) -> Tuple[List[dict], str]:
+    """Words (`rows`, best first), meaning and the whole-body passage merged by reciprocal rank — the top `k`
+    as `recall` rows (a document only meaning found reads the passage of the chunk that matched, §meaning).
+    Returns (rows, why meaning gave nothing) — without meaning the other two still order."""
+    words = [r for r in rows if not r.get("related")][:FUSE_POOL]
+    mrows, why = meaning(db, query, FUSE_POOL, kinds=kinds, sources=sources, width=width)
+    by_path: Dict[str, dict] = {}
+    for r in mrows + words:                              # a document words found keeps its words row
+        by_path[r["path"]] = r
+    pool = list(dict.fromkeys([r["path"] for r in words] + [r["path"] for r in mrows]))
+    weights = query_weights(db, " ".join([query] + list(extra_terms)))
+    text: Dict[str, str] = {}
+    for p in pool:
+        d = db.execute("SELECT title, description, body FROM docs WHERE path=?", (p,)).fetchone()
+        text[p] = "\n".join(x or "" for x in (d["title"], d["description"], d["body"])) if d else ""
+    lists = [[r["path"] for r in words], [r["path"] for r in mrows]]
+    base = {p: i for i, p in enumerate(pool)}
+    worth = {p: passage_worth(text[p], weights) for p in pool}
+    lists.append(sorted(pool, key=lambda p: (-worth[p], base[p])))
+    score: Dict[str, float] = {}
+    for lst in lists:
+        for i, p in enumerate(lst):
+            score[p] = score.get(p, 0.0) + 1.0 / (FUSE_K + i + 1)
+    order = sorted(pool, key=lambda p: (-score[p], base[p]))
+    return [by_path[p] for p in order[:k]], why
 
 
 class JudgeUnavailable(RuntimeError):

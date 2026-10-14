@@ -501,7 +501,11 @@ def measure(db: sqlite3.Connection) -> dict:
 #       changed (§store._TOUCHED), from the postings as before; a full pass and a first index still rebuild both.
 #       `verify_terms_recount` holds the tables equal to a full recount after every round of random edits. No number
 #       is expected to move; bumped because `store` changed.
-CODE_GENERATION = 30
+#   31 (2026-10-14)  `recall(bridge=)` lets a caller ask for the person's learned synonyms or leave them out (None =
+#       the measured decision, as before), and `search.fused` merges words, meaning and the whole-body passage by
+#       reciprocal rank — used by MCP `recall` only when the words are unsure. The hook and every measurement call
+#       recall as before; bumped because `search` changed.
+CODE_GENERATION = 31
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

@@ -20,7 +20,9 @@ This builds a corpus whose vectors it writes itself (no network, no budget) and 
   ⑥ ★unasked, meaning comes only when the words are unsure★ (2026-10-14) — the hook's own rule with the calibrated
      threshold finds nothing to attach: then a few are added, said to be added for that reason; where the words
      are sure, the answer is the word results alone and no embedding is asked for; `semantic_k: 0` turns it off;
-     a failure while unasked is recorded, not shown; the record tells an added list from an asked one
+     a failure while unasked is recorded, not shown; the record tells an added list from an asked one.
+     Unsure, the list itself is also ordered by words, meaning and the passage (§search.fused ·
+     tests/verify_recall_unsure_order.py), so meaning's own list adds only what is not shown there
 
 ⛔ Control: the meaning list's top item is one the words do not find at all — so ② would be red on code that
    re-ranked words instead of searching by meaning.
@@ -153,10 +155,10 @@ def main() -> int:
           and section.find("quarry_note") < section.find("deep_note"), "%s" % listed)
     check("② at most k, and none already shown above", len(listed) == 2 and "books_rule" not in listed,
           "%s" % listed)
-    rsec = refs.split("— close in meaning")[-1]
+    # the kinds filter leaves the words nothing, so they are unsure and meaning orders the list (§search.fused)
     check("② the kinds filter applies — and asks again when the filter eats the pool",
-          "copper_note" in rsec and not any(n in rsec for n in NOTES if n != "copper_note"),
-          rsec.strip()[:160])
+          "copper_note" in refs and not any(n in refs for n in NOTES if n != "copper_note"),
+          refs.strip()[:160])
 
     # ── ③ the passage that matched ───────────────────────────────────────────
     deep_item = section[section.find("deep_note"):]
@@ -183,19 +185,22 @@ def main() -> int:
     rec, _ = observe.read("recall", [observe.day()])
     check("⑥ words sure, unasked: no embedding asked for", not any(r.get("vector") for r in rec[:2])
           and all(r.get("meaning") is None for r in rec[:2]), "%s" % [(r.get("auto"), r.get("meaning")) for r in rec[:2]])
-    usec = unsure[len(plain):]
+    main, _, usec = unsure.partition("— close in meaning")
     added = [n for n in NOTES if "%s  [" % n in usec]
-    check("⑥ words unsure, unasked: the word results come first, unchanged, then meaning's list",
-          unsure.startswith(plain) and "quarry_note" in added, "%s" % added)
-    check("⑥ the list says why it came, and holds at most %d" % server.AUTO_MEANING,
-          "the words were unsure" in usec and 0 < len(added) <= server.AUTO_MEANING)
-    check("⑥ `semantic_k: 0` turns it off", unsure_off == plain)
+    check("⑥ words unsure, unasked: the list says it is ordered by words, meaning and the passage together",
+          "ordered by words, meaning" in main and "books_rule" in main, main[:160])
+    check("⑥ then meaning's own list: none shown above, at most %d, saying why it came" % server.AUTO_MEANING,
+          "quarry_note" in added and 0 < len(added) <= server.AUTO_MEANING
+          and not any("%s  [" % n in main for n in added) and "the words were unsure" in usec, "%s" % added)
+    check("⑥ `semantic_k: 0` keeps meaning out — no list, and it does not order the list either",
+          "close in meaning" not in unsure_off and "ordered by words, meaning" not in unsure_off)
     check("⑥ a failure while unasked is not shown — the word results alone",
           "unavailable" not in unsure_fail and "close in meaning" not in unsure_fail)
     tail_rows = rec[sure_rows:]
     check("⑥ the record tells an added list from an asked one (semantic_k 0 · auto) — and keeps the failure",
           [(r.get("semantic_k"), r.get("auto")) for r in tail_rows] == [(0, True), (0, False), (0, True)]
-          and tail_rows[0].get("meaning") and tail_rows[2].get("meaning_fail") == "NoKey",
+          and tail_rows[0].get("meaning") and tail_rows[2].get("meaning_fail") == "NoKey"
+          and [(r.get("unsure"), r.get("reordered")) for r in tail_rows] == [(True, True), (True, False), (True, True)],
           "%s" % [(r.get("semantic_k"), r.get("auto"), r.get("meaning"), r.get("meaning_fail")) for r in tail_rows])
     from brain import monitor
     ms = monitor.summarise(monitor.rows([observe.day()]))
@@ -203,7 +208,9 @@ def main() -> int:
           # added: the two unsure calls, and the question no word matches even with the words sure (nothing found
           # is the surest kind of unsure)
           (ms["recall"]["calls"], ms["recall"]["semantic_asked"], ms["recall"]["auto"]) == (9, 3, 3)
-          and monitor.metrics(ms)["meaning_used_rate"] == round(3 / 9, 3), "%s" % ms["recall"])
+          # meaning returned a list for 2: the asked list, and the unsure one (the kinds call's only reference
+          # note is already in its ordered list, so its own list finds nothing more)
+          and monitor.metrics(ms)["meaning_used_rate"] == round(2 / 9, 3), "%s" % ms["recall"])
     db.close()
 
     print("=" * 78)

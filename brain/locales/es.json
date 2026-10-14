@@ -656,7 +656,7 @@
  "monitor.second": "Segunda etapa (significado + juez): alcanzada {reached} · terminada {finished} · {outcomes}",
  "monitor.vector": "Búsqueda por significado respondida por: el almacén elegido {remote} · la copia local {local} ({why}) · nuevos embeddings de consulta {embedded}",
  "monitor.judge": "Juez: enviadas {sent} · respondidas {returned} (válidas {valid}) · cortadas antes de responder {cut_out} · p50 {p50} s · p95 {p95} s · fallos {kinds}",
- "monitor.recall": "MCP recall: {calls} llamadas · pidieron significado (semantic_k) {asked} · añadido sin pedirlo porque las palabras dudaban {auto} · el significado devolvió algo {returned} · fallos {fails}",
+ "monitor.recall": "MCP recall: {calls} llamadas · palabras dudosas {unsure} (sinónimos aprendidos añadidos {bridged} · ordenado por palabras, significado y pasaje {reordered}) · pidieron significado (semantic_k) {asked} · añadido sin pedirlo porque las palabras dudaban {auto} · el significado devolvió algo {returned} · fallos {fails}",
  "monitor.deferred": "Proceso de fondo: {runs} ejecuciones · completadas {cleared} · almacenes {stores}",
  "monitor.use": "Abiertas después: {opened} memorias indexadas · brain había mostrado {shown} justo antes (el hook {hook} · recall {recall}) · en primer lugar {first} · entre las 3 primeras {top3}",
  "monitor.facts": "Lo que destaca",

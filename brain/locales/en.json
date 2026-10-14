@@ -658,7 +658,7 @@
  "monitor.second": "Second stage (meaning + judge): reached {reached} · finished {finished} · {outcomes}",
  "monitor.vector": "Meaning search answered by: the chosen store {remote} · the local copy {local} ({why}) · new query embeddings {embedded}",
  "monitor.judge": "Judge: sent {sent} · answered {returned} (valid {valid}) · cut while out {cut_out} · p50 {p50}s · p95 {p95}s · failures {kinds}",
- "monitor.recall": "MCP recall: {calls} calls · asked for meaning (semantic_k) {asked} · added unasked because the words were unsure {auto} · meaning returned something {returned} · failures {fails}",
+ "monitor.recall": "MCP recall: {calls} calls · words unsure {unsure} (learned synonyms added {bridged} · ordered by words, meaning and passage {reordered}) · asked for meaning (semantic_k) {asked} · added unasked because the words were unsure {auto} · meaning returned something {returned} · failures {fails}",
  "monitor.deferred": "Worker: {runs} runs · cleared {cleared} · stores {stores}",
  "monitor.use": "Opened afterwards: {opened} indexed memories · brain had shown {shown} of them just before (the hook {hook} · recall {recall}) · first {first} · top 3 {top3}",
  "monitor.facts": "What stands out",

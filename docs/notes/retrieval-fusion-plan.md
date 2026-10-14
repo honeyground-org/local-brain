@@ -66,6 +66,15 @@ calls. "Top 3" means the answer is among the first three.
    → 52 at 11 to read; + meaning 3 only when unsure → the same 52, added on 22 of 66 (9.0 to read). Where
    the words were sure (44) they held the answer 43 times. `semantic_k: 0` turns it off; a failure while
    unasked is recorded, not shown.
+   **Still unsure: learned synonyms, then three rankings** (2026-10-14 · `search.fused`): the answer was found and
+   lost in the ordering — in the top 50 of words or meaning for 63 of 66, in the top 3 for 35 (question alone).
+   With the words unsure, `recall` asks for the person's learned synonyms (`recall(bridge=True)`, although the
+   measured decision keeps them out of the hook), and if still unsure merges words, meaning and the whole-body
+   passage (the window holding the most of the question, how grep sees a line) by reciprocal rank. Same 66
+   questions with their terms: top 3 43 → 48 (paired 95% +0..+10); answers anywhere in what is shown 52 → 52,
+   read 9.0 → 8.3. Not in the hook: the order of what it attaches did not move (15 → 13–14 · 18 → 19 on real
+   turns), and synonyms deciding whether to attach took prompts needing no memory from 3 to 17 of 34. A graph
+   agreement ranking lowered every arm.
 4. **Judge the union** of words 20 and meaning 20 (at most 40, one call).
 5. **The hook**, only after the criteria below hold.
 
