@@ -161,6 +161,11 @@ def main() -> int:
     schema = [t for t in server.TOOLS if t["name"] == "recall"][0]["inputSchema"]["properties"]
     check("⑤ the tool says it is opt-in (default 0)", "semantic_k" in schema
           and "default 0" in schema["semantic_k"]["description"])
+    # ⛔ ★An option nobody is told about is never used★ (2026-10-14: the first day of records showed MCP recall
+    #    called and meaning never asked for) — the tool's own description says when to ask for it.
+    listed = [t for t in server.tools_for(db) if t["name"] == "recall"][0]     # what a host is sent
+    check("⑤ the tool's description tells a caller when to ask for meaning",
+          "semantic_k" in listed["description"] and "meaning" in listed["description"], listed["description"][-160:])
     db.close()
 
     print("=" * 78)

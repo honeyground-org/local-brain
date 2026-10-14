@@ -35,7 +35,11 @@ _RECALL_DESC = (
     "⛔ **Always pass synonyms in `terms`** — a memory is usually written in different words than "
     "the question (a question about 'stopped' → a memory that says 'halted'), and a question with no "
     "word in common finds nothing. "
-    "Give 5~10 other spellings{langs}, abbreviations, and related identifiers."
+    "Give 5~10 other spellings{langs}, abbreviations, and related identifiers. "
+    "Words and meaning find different answers: pass `semantic_k` (for example 3) to also get, in a "
+    "separate list, the memories closest in ★meaning★ that the words did not find — use it when the "
+    "note may be worded differently from the question. It adds that many to read, and one embedding "
+    "call for a question not asked before."
 )
 _LANG_EN = {"en": "English", "ko": "Korean", "de": "German", "es": "Spanish",
             "fr": "French", "ja": "Japanese"}
