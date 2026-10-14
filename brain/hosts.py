@@ -188,6 +188,16 @@ class Host:
         rates are measured from this, so what is measured and what fires stay the same thing."""
         return []
 
+    def brain_events(self, line: str) -> List[tuple]:
+        """One log line → what brain showed and what was then opened (§tail · 2026-10-14):
+          ("hook", text)               what the recall hook attached, as the agent saw it
+          ("recall_call", call_id)     a `recall` tool call …
+          ("result", call_id, text)    … and the text it returned
+          ("read", path)               a file the agent opened
+        A host whose log is not read for this returns nothing — and nothing is counted, never zero.
+        """
+        return []
+
     # ── ③ how it hooks in ────────────────────────────────────────────────
     def hooks_file(self) -> str:
         return ""
@@ -329,6 +339,40 @@ class ClaudeCode(Host):
                 out.append((name, "path", inp.get("file_path") or inp.get("notebook_path") or ""))
             else:
                 out.append((name, "", ""))
+        return out
+
+    def brain_events(self, line: str) -> List[tuple]:
+        """`attachment.hook_additional_context` carries what the recall hook attached; a `tool_use` of a
+        name ending in `recall` and its `tool_result` carry MCP recall; `Read` carries the opened file."""
+        if '"hook_additional_context"' not in line and '"tool_use"' not in line and '"tool_result"' not in line:
+            return []
+        try:
+            d = json.loads(line)
+        except ValueError:
+            return []
+        out: List[tuple] = []
+        att = d.get("attachment") if isinstance(d, dict) else None
+        if isinstance(att, dict) and att.get("type") == "hook_additional_context":
+            content = att.get("content")
+            for c in content if isinstance(content, list) else [content]:
+                if isinstance(c, str):
+                    out.append(("hook", c))
+        content = ((d.get("message") or {}).get("content") if isinstance(d, dict) else None)
+        read = set(self.tool_names("read_file"))
+        for x in content if isinstance(content, list) else []:
+            if not isinstance(x, dict):
+                continue
+            if x.get("type") == "tool_use":
+                name = x.get("name") or ""
+                if name in read:
+                    out.append(("read", (x.get("input") or {}).get("file_path") or ""))
+                elif name == "recall" or name.endswith("__recall"):
+                    out.append(("recall_call", x.get("id") or ""))
+            elif x.get("type") == "tool_result":
+                c = x.get("content")
+                text = c if isinstance(c, str) else " ".join(
+                    y.get("text", "") for y in c or [] if isinstance(y, dict) and y.get("type") == "text")
+                out.append(("result", x.get("tool_use_id") or "", text))
         return out
 
     def hook_calls(self, line: str) -> List[tuple]:

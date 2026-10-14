@@ -51,7 +51,7 @@ def window(hours: float = 24.0, now: Optional[float] = None) -> Tuple[List[str],
 def rows(days: List[str], since: str = "") -> Dict[str, list]:
     from brain import observe
     out, broken = {}, 0
-    for kind in ("hook", "recall", "deferred"):
+    for kind in ("hook", "recall", "deferred", "use"):
         got, b = observe.read(kind, days)
         out[kind] = [r for r in got if r.get("ts", "") >= since]
         broken += b
@@ -114,7 +114,15 @@ def summarise(rec: Dict[str, list]) -> dict:
     d = {"runs": len(dr), "cleared": sum(1 for r in dr if r.get("cleared")),
          "stores": dict(Counter(v for r in dr for v in (r.get("stores") or {}).values())),
          "p50": _pct([r["secs"] for r in dr if r.get("secs") is not None], 0.5)}
-    return {"hook": h, "second": s, "recall": m, "deferred": d, "broken": rec.get("broken", 0)}
+    # ★What the agent then opened★ (§tail) — the one measure of "the right memory was found" that needs no
+    #   label: was the opened memory shown by brain just before, and at which rank.
+    us = rec.get("use") or []
+    hit = [r for r in us if r.get("via")]
+    u = {"opened": len(us), "shown": len(hit), "hook": sum(1 for r in hit if r["via"] == "hook"),
+         "recall": sum(1 for r in hit if r["via"] == "recall"),
+         "first": sum(1 for r in hit if r.get("rank") == 1),
+         "top3": sum(1 for r in hit if (r.get("rank") or 99) <= 3)}
+    return {"hook": h, "second": s, "recall": m, "deferred": d, "use": u, "broken": rec.get("broken", 0)}
 
 
 # ── what stands out ──────────────────────────────────────────────────────────
@@ -145,7 +153,8 @@ def facts(s: dict) -> List[Tuple[str, str, dict]]:
     return out
 
 
-METRICS = ("attach_rate", "silent_reindex_rate", "second_finish_rate", "judge_p50", "meaning_ask_rate")
+METRICS = ("attach_rate", "silent_reindex_rate", "second_finish_rate", "judge_p50", "meaning_ask_rate",
+           "shown_before_open")
 
 
 def metrics(s: dict) -> Dict[str, Optional[float]]:
@@ -158,7 +167,8 @@ def metrics(s: dict) -> Dict[str, Optional[float]]:
             "silent_reindex_rate": ratio(h["silent_reindex"], h["searched"]),
             "second_finish_rate": ratio(sec["finished"], sec["reached"]),
             "judge_p50": sec["latency"]["p50"],
-            "meaning_ask_rate": ratio(m["semantic_asked"], m["calls"])}
+            "meaning_ask_rate": ratio(m["semantic_asked"], m["calls"]),
+            "shown_before_open": ratio(s.get("use", {}).get("shown", 0), s.get("use", {}).get("opened", 0))}
 
 
 def trend(now: Dict[str, Optional[float]], before: List[dict]) -> Dict[str, dict]:
@@ -273,7 +283,8 @@ def _metric_name(k: str) -> str:
             "silent_reindex_rate": i18n.t("monitor.metric.silent_reindex_rate"),
             "second_finish_rate": i18n.t("monitor.metric.second_finish_rate"),
             "judge_p50": i18n.t("monitor.metric.judge_p50"),
-            "meaning_ask_rate": i18n.t("monitor.metric.meaning_ask_rate")}.get(k, k)
+            "meaning_ask_rate": i18n.t("monitor.metric.meaning_ask_rate"),
+            "shown_before_open": i18n.t("monitor.metric.shown_before_open")}.get(k, k)
 
 
 def _kv(d: dict) -> str:
@@ -306,6 +317,8 @@ def render(s: dict, tr: Dict[str, dict], label: str) -> str:
              i18n.t("monitor.recall", calls=m["calls"], asked=m["semantic_asked"],
                     returned=m["meaning_returned"], fails=_kv(m["meaning_fail"])),
              i18n.t("monitor.deferred", runs=d["runs"], cleared=d["cleared"], stores=_kv(d["stores"])),
+             i18n.t("monitor.use", **s.get("use", {"opened": 0, "shown": 0, "hook": 0, "recall": 0,
+                                                    "first": 0, "top3": 0})),
              "", i18n.t("monitor.facts")]
     fs = facts(s)
     lines += ["  " + _fact_line(c, v) for _lv, c, v in fs] or ["  " + i18n.t("monitor.fact.none")]

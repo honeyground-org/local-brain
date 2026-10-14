@@ -211,12 +211,98 @@ def scan(transcript: str, rec: dict) -> dict:
                     saves += 1
     except OSError:
         return rec
+    finally:
+        _close_db()
 
     rec["offset"] = offset
     rec["tail"] = tail
     rec["saves"] = saves
     rec["updated_at"] = int(time.time())
     return rec
+
+
+# ---- what brain showed, and what was then opened (2026-10-14) ----------------
+#
+# ★The one signal of "was the right memory found" that needs no label and no model★: the agent opens the
+# memory it needed. Matched against what brain had just shown — the hook's attachment or a `recall` result —
+# it says at which rank the needed memory sat, or that brain never showed it at all (a miss nobody saw).
+# ⛔ Recorded, not acted on: `usage.opens` grows, the document's weight does not (`health.feedback("open")`
+#    would move the ranking — unmeasured); the per-request record (§observe "use") holds no name.
+_RECALL_LINE = re.compile(r"^\s*(\d+)\.\s+(\S+)\s+\[")
+_HOOK_LINE = re.compile(r"^\s*[·•]\s+(\S+)")
+SHOWN_KEEP = 8          # the last few things shown are enough: a memory is opened right after it is shown
+_DB: list = []          # one connection for a whole scan, opened only when brain's events appear in it
+
+
+def _db():
+    if not _DB:
+        _DB.append(store.connect())
+    return _DB[0]
+
+
+def _close_db() -> None:
+    while _DB:
+        try:
+            _DB.pop().close()
+        except Exception:                                # noqa: BLE001
+            pass
+
+
+def _names(db, text: str, pattern) -> list:
+    """Names of indexed documents in the order brain listed them (anything else on such a line is dropped)."""
+    out = []
+    for line in (text or "").splitlines():
+        m = pattern.match(line)
+        if not m:
+            continue
+        n = m.groups()[-1]
+        if n not in out and db.execute("SELECT 1 FROM docs WHERE name=?", (n,)).fetchone():
+            out.append(n)
+    return out
+
+
+def _doc_of(db, path: str):
+    if not path:
+        return None
+    for p in (path, os.path.realpath(path)):
+        r = db.execute("SELECT name, path FROM docs WHERE path=?", (p,)).fetchone()
+        if r:
+            return r
+    return None
+
+
+def _use(ev: tuple, rec: dict) -> None:
+    u = rec.setdefault("use", {"turn": 0, "shown": [], "calls": [], "opened": []})
+    kind = ev[0]
+    if kind == "recall_call":
+        u["calls"] = (u["calls"] + [ev[1]])[-SHOWN_KEEP:]
+        return
+    db = _db()
+    if kind == "hook":
+        names = _names(db, ev[1], _HOOK_LINE)
+        if names:
+            u["shown"] = (u["shown"] + [{"via": "hook", "names": names, "turn": u["turn"]}])[-SHOWN_KEEP:]
+    elif kind == "result" and ev[1] in u["calls"]:
+        names = [n for _rank, n in sorted((int(m.group(1)), m.group(2)) for m in
+                                          (_RECALL_LINE.match(x) for x in (ev[2] or "").splitlines()) if m)]
+        names = [n for i, n in enumerate(names) if n not in names[:i]
+                 and db.execute("SELECT 1 FROM docs WHERE name=?", (n,)).fetchone()]
+        u["shown"] = (u["shown"] + [{"via": "recall", "names": names, "turn": u["turn"]}])[-SHOWN_KEEP:]
+    elif kind == "read":
+        doc = _doc_of(db, _norm(str(ev[1] or "")))
+        if doc is None or [u["turn"], doc["name"]] in u["opened"]:
+            return
+        u["opened"] = (u["opened"] + [[u["turn"], doc["name"]]])[-LIST_CAP:]
+        hit = next((s for s in reversed(u["shown"]) if doc["name"] in s["names"]
+                    and u["turn"] - s["turn"] <= 1), None)
+        from brain import observe
+        observe.write("use", {"via": hit["via"] if hit else None,
+                              "rank": hit["names"].index(doc["name"]) + 1 if hit else None,
+                              "shown": len(hit["names"]) if hit else None,
+                              "turns_ago": u["turn"] - hit["turn"] if hit else None})
+        with db:
+            db.execute("INSERT INTO usage(path, opens) VALUES(?, 1) "
+                       "ON CONFLICT(path) DO UPDATE SET opens=opens+1", (doc["path"],))
 
 
 def _apply(line: str, tail: dict, rec: dict) -> None:
@@ -228,7 +314,14 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
     text = host.user_text(line)
     if text:
         tail["user_says"] = (tail["user_says"] + [text[:USER_SAY_CHARS]])[-LIST_CAP:]
+        u = rec.setdefault("use", {"turn": 0, "shown": [], "calls": [], "opened": []})
+        u["turn"] += 1
         return
+    for ev in host.brain_events(line):
+        try:
+            _use(ev, rec)
+        except Exception:                                # noqa: BLE001
+            pass                                         # a record must never cost the tail
     for name, kind, arg in host.tool_calls(line):
         # ★A memory save resets the tail to 0★ — whether via a remember call or a direct file write.
         if name.endswith("remember"):
