@@ -74,7 +74,7 @@ RESERVE = int(os.environ.get("BRAIN_RERANK_RESERVE", "150") or 150)
 _LAST = [0.0]
 _LAST_FAIL = [""]           # ★why it failed★ — a bare None cannot say limit from network
 _LAST_KIND = [""]           # ★what kind of failure★ (§last_failure_kind) — for code that must act on it
-_CALL = {"sent": 0.0, "returned": 0.0}   # when the last request went out / came back (§call_state)
+_CALL = {"sent": 0.0, "returned": 0.0, "retry_after": 0.0}   # the last request (§call_state)
 _LAST_CACHED = [False]      # ★whether the last answer came from the cache★ — a cached call costs no time
                             # and no budget, so a record of the hook's judge must say which one it was
 _LAST_SHAPE = [None]        # ★what the last fresh answer covered★ (§last_answer_shape)
@@ -250,7 +250,8 @@ def call_state() -> dict:
     """
     s, r = _CALL["sent"], _CALL["returned"]
     return {"sent": bool(s), "returned": bool(r),
-            "waited": round((r or time.time()) - s, 3) if s else None}
+            "waited": round((r or time.time()) - s, 3) if s else None,
+            "retry_after": _CALL["retry_after"] or None}
 
 
 def last_failure_kind() -> str:
@@ -693,7 +694,7 @@ def score(query: str, candidates: Sequence[dict],
     _LAST_CACHED[0] = False
     _LAST_KIND[0] = ""
     _LAST_SHAPE[0] = None
-    _CALL["sent"] = _CALL["returned"] = 0.0
+    _CALL["sent"] = _CALL["returned"] = _CALL["retry_after"] = 0.0
     if not cands:
         return []
     # ★Know before hitting the wall★ — one 429 wastes a round trip and a 4-second wait. And going on
@@ -751,6 +752,7 @@ def score(query: str, candidates: Sequence[dict],
             text = _engines.judge_text(sent_text, timeout=TIMEOUT, model=model)
         except _engines.JudgeError as exc:
             _CALL["returned"] = time.time()
+            _CALL["retry_after"] = float(exc.retry_after or 0)
             if exc.daily:                                # ★one parser only★ (§vectors.parse_quota)
                 _note_wall(db, exc.limit)
                 _LAST_KIND[0] = "daily_wall"

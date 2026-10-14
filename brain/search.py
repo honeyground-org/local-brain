@@ -881,11 +881,14 @@ def judge_observation() -> dict:
     kind · fail   a fixed failure code (§rerank.last_failure_kind) — never the provider's words
     decision below · fired — the judge's verdict against the threshold; what reached the person is the
              hook's own record
+    gate     whether a fresh request was let through and why (§judgegate) — `skipped` when it was not
+    waited · retry_after   how long the request was out, and how long the provider asked to wait
     """
     return {"outcome": "pending", "n": None, "top": None, "second": None, "ties": None,
             "floor": None, "model": None, "scale": None, "policy": None, "cached": None,
             "secs": None, "fail": None, "phase": None, "vector": None, "sent": None,
-            "returned": None, "valid": None, "kind": None, "decision": None}
+            "returned": None, "valid": None, "kind": None, "decision": None, "gate": None,
+            "waited": None, "retry_after": None}
 
 
 def judge_inputs(db: sqlite3.Connection, query: str, hits, excerpt: str = "head",
@@ -932,7 +935,8 @@ def judge_inputs(db: sqlite3.Connection, query: str, hits, excerpt: str = "head"
 
 def judged(db: sqlite3.Connection, query: str, k: int = 20,
            strict: bool = False, cache: bool = True,
-           observe: Optional[dict] = None, excerpt: str = "head") -> List[dict]:
+           observe: Optional[dict] = None, excerpt: str = "head",
+           deadline: Optional[float] = None) -> List[dict]:
     """★Two-stage search★ — cosine picks k candidates, the reranker judges whether they are the answer.
 
     Why this shape (measured 2026-08-25): neither absolute cosine nor a ratio is a ruler for "is this the
@@ -979,14 +983,31 @@ def judged(db: sqlite3.Connection, query: str, k: int = 20,
     #   It reduces answers splitting on identical input: 20 at once 62% → 5 at a time 100% (2026-08-31).
     # ⛔ `cache=False` exists for ★measurement★ — a measurement reading its own earlier answer
     #    "reproduces" anything (that is what happened to the precision axis on 2026-08-31). Production keeps the cache on.
+    # ★Only if it can answer in the time left★ (§judgegate) — the hook passes its wall as `deadline`; an
+    #   answer already in the cache costs nothing and is never held back. Measurements pass no deadline.
+    probe = False
+    if deadline is not None and not (cache and rerank.cached(query, cands, db) is not None):
+        from brain import judgegate
+        remaining = round(deadline - time.time(), 3)
+        ask, why, probe = judgegate.decide(remaining)
+        obs["gate"] = {"ask": ask, "why": why, "probe": probe, "remaining": remaining}
+        if not ask:
+            obs["outcome"], obs["phase"] = "skipped", "gated"
+            return []
     obs["phase"] = "judge"
     t = time.time()
-    scores = rerank.score_chunked(query, cands, db=db, cache=cache)
+    try:
+        scores = rerank.score_chunked(query, cands, db=db, cache=cache)
+    finally:
+        if probe:
+            from brain import judgegate
+            judgegate.release_probe()
     obs["secs"] = round(time.time() - t, 3)
     obs["phase"] = "done"
     obs["cached"] = rerank.last_was_cached()
     call = rerank.call_state()
     obs["sent"], obs["returned"] = call["sent"], call["returned"]
+    obs["waited"], obs["retry_after"] = call["waited"], call["retry_after"]
     obs["kind"] = rerank.last_failure_kind() or None
     shape = rerank.last_answer_shape()
     obs["valid"] = (None if shape is None else

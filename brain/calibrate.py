@@ -493,7 +493,11 @@ def measure(db: sqlite3.Connection) -> dict:
 #       and the trigger self-healing to one worker (§deferred · `store.reindex(sync=False, heal=False)`). Every
 #       other caller is unchanged; the words index the ruler reads is the same. Bumped because `hook` and `store`
 #       changed.
-CODE_GENERATION = 28
+#   29 (2026-10-14)  the hook asks the judge only when it can answer in the time left (§judgegate · `judged(deadline=)`):
+#       an unwell provider is probed after an exponential backoff instead of asked every time, and a usual
+#       answer slower than the time left is not asked. Measurements pass no deadline and are unchanged; an
+#       answer already cached is always served. Bumped because `hook` and `search` changed.
+CODE_GENERATION = 29
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·
