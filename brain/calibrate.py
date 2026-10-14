@@ -497,7 +497,11 @@ def measure(db: sqlite3.Connection) -> dict:
 #       an unwell provider is probed after an exponential backoff instead of asked every time, and a usual
 #       answer slower than the time left is not asked. Measurements pass no deadline and are unchanged; an
 #       answer already cached is always served. Bumped because `hook` and `search` changed.
-CODE_GENERATION = 29
+#   30 (2026-10-14)  an incremental pass recounts df and the transliteration skeletons for the terms whose postings it
+#       changed (§store._TOUCHED), from the postings as before; a full pass and a first index still rebuild both.
+#       `verify_terms_recount` holds the tables equal to a full recount after every round of random edits. No number
+#       is expected to move; bumped because `store` changed.
+CODE_GENERATION = 30
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

@@ -945,6 +945,20 @@ def history_of(path: str, db: Optional[sqlite3.Connection] = None) -> List[str]:
 
 
 
+# ★The terms whose postings this pass changed★ (2026-10-14) — None outside an incremental pass. Their df is
+# recounted from the postings (§_recount_terms), the same count `_rebuild_terms` makes, for them alone: a whole
+# recount cost 0.14 s and the skeletons 0.07 s of the hook's 0.6 s for one changed document.
+_TOUCHED: Optional[set] = None
+
+
+def _touch(db: sqlite3.Connection, doc_id: Optional[int] = None, terms=()) -> None:
+    if _TOUCHED is None:
+        return
+    if doc_id is not None:
+        _TOUCHED.update(r[0] for r in db.execute("SELECT term FROM postings WHERE doc_id=?", (doc_id,)))
+    _TOUCHED.update(terms)
+
+
 def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0) -> int:
     fields = [
         (doc["name"].replace("_", " "), _W_NAME),
@@ -960,8 +974,10 @@ def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0) -> int:
     doclen = sum(tf.values()) or 1.0
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     cur = db.execute("SELECT id FROM docs WHERE path=?", (doc["path"],)).fetchone()
+    _touch(db, terms=tf.keys())
     if cur:
         doc_id = cur["id"]
+        _touch(db, doc_id)                               # the terms it had, before they go
         db.execute("DELETE FROM postings WHERE doc_id=?", (doc_id,))
         db.execute("DELETE FROM links WHERE src_id=?", (doc_id,))
         # ★Never touch weight★ — it is built by usage records, and letting a reindex
@@ -1053,6 +1069,22 @@ def _rebuild_terms(db: sqlite3.Connection) -> None:
                    "SELECT term, COUNT(*) FROM postings GROUP BY term")
 
 
+def _chunks(xs: List[str], n: int = 400):
+    for i in range(0, len(xs), n):
+        yield xs[i:i + n]
+
+
+def _recount_terms(db: sqlite3.Connection, touched: set) -> None:
+    """The same count as `_rebuild_terms`, for the terms whose postings changed — still recounted from the
+    postings, never adjusted by hand. Every other term's postings are untouched, so its df is already right."""
+    with db:
+        for part in _chunks(sorted(touched)):
+            q = ",".join("?" * len(part))
+            db.execute("DELETE FROM terms WHERE term IN (%s)" % q, part)
+            db.execute("INSERT INTO terms(term, df) SELECT term, COUNT(*) FROM postings "
+                       "WHERE term IN (%s) GROUP BY term" % q, part)
+
+
 def _rebuild_skeletons(db: sqlite3.Connection) -> int:
     """Rebuild the consonant-skeleton table for Latin words — ★derived, so only at index time★.
 
@@ -1073,6 +1105,23 @@ def _rebuild_skeletons(db: sqlite3.Connection) -> int:
         db.execute("DELETE FROM skeletons")
         db.executemany("INSERT OR REPLACE INTO skeletons(skel,term,df) VALUES(?,?,?)",
                        vals)
+    return len(vals)
+
+
+def _recount_skeletons(db: sqlite3.Connection, touched: set) -> int:
+    """`_rebuild_skeletons` for the touched terms only — the same rows, from the same `terms` table."""
+    from brain import translit
+    latin = sorted(t for t in touched if t[:1].isascii() and t.isalpha() and t.islower() and t.isascii())
+    vals = []
+    with db:
+        for part in _chunks(latin):
+            q = ",".join("?" * len(part))
+            db.execute("DELETE FROM skeletons WHERE term IN (%s)" % q, part)
+            for r in db.execute("SELECT term, df FROM terms WHERE df >= 2 AND term IN (%s)" % q, part):
+                k = translit.skeleton_key(r["term"])
+                if len(k) >= 2:
+                    vals.append((k, r["term"], r["df"]))
+        db.executemany("INSERT OR REPLACE INTO skeletons(skel,term,df) VALUES(?,?,?)", vals)
     return len(vals)
 
 
@@ -1248,6 +1297,9 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # rowids survive, and only vanished files are cleaned up below.
     existing = {r["path"]: (r["id"], r["mtime"], r["size"], r["sha"])
                 for r in db.execute("SELECT id,path,mtime,size,sha FROM docs")}
+    # ★An incremental pass recounts only what it touched★ (§_TOUCHED) — a full pass or a first index recounts all.
+    global _TOUCHED
+    _TOUCHED = set() if (existing and not full) else None
     # ★Index only one copy of identical content★ (measured 2026-08-19)
     #
     # Worktrees and copies were each indexed and the corpus jumped 1,176 → 1,369:
@@ -1312,6 +1364,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
         gone = [(p, pid) for p, (pid, _, _, _) in existing.items() if p not in seen_paths]
         removed = [pid for _, pid in gone]
         for path, doc_id in gone:
+            _touch(db, doc_id)
             db.execute("DELETE FROM postings WHERE doc_id=?", (doc_id,))
             db.execute("DELETE FROM links WHERE src_id=?", (doc_id,))
             # ★Delete what hangs off it as well★ — leave it, and the moment the next document
@@ -1328,7 +1381,11 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                 pass                                     # no semantic layer on this machine yet
     _build_basename_aliases(db)
     _resolve_path_links(db)
-    _rebuild_terms(db)
+    touched = _TOUCHED
+    if touched is None:
+        _rebuild_terms(db)
+    else:
+        _recount_terms(db, touched)
     # ★Stamp which tokenizer read the documents★ — only when every one of them was read by this one
     # (a full pass, or an index that was empty before this run). A partial pass keeps the old stamp,
     # so the next human-run index still rebuilds.
@@ -1342,7 +1399,11 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # ★only the report disappears, silently★ (this actually happened once on 2026-08-20:
     # the tables were built but never showed up in the statistics).
     try:
-        stats["skeletons"] = _rebuild_skeletons(db)
+        if touched is None:
+            stats["skeletons"] = _rebuild_skeletons(db)
+        else:
+            _recount_skeletons(db, touched)
+            stats["skeletons"] = db.execute("SELECT COUNT(*) FROM skeletons").fetchone()[0]
     except Exception:                                    # noqa: BLE001
         pass                                             # a derived-table failure must not block indexing
     try:
@@ -1429,6 +1490,9 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     else:
         try:
             n_healed = heal_triggers(db, cfg)
+            if n_healed and touched is not None:         # healed documents were reindexed: recount theirs too
+                _recount_terms(db, touched)
+                _recount_skeletons(db, touched)
             if n_healed:
                 stats["triggers_healed"] = n_healed
         except Exception:                                # noqa: BLE001
@@ -1453,6 +1517,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
         set_meta(db, "index_code", str(_cal.code_stamp()))
     except Exception:                                    # noqa: BLE001
         pass
+    _TOUCHED = None
     return stats
 
 

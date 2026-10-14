@@ -28,6 +28,10 @@ these apart; that is why the first step is the record.
    with its old content (`store.needs_reindex`, 2026-08-12) — and leaves the databases' update and the trigger
    healing to one detached worker (`brain/deferred.py`, started after the answer, one at a time). Until it lands
    the stores answer from the local copy (§stores.serve). The hook's pass went from 0.58–1.33 s to 0.32 s.
+   Then the derived tables: an incremental pass recounted every term's df (0.14 s) and every skeleton (0.07 s)
+   for one changed document; it now recounts, from the postings, only the terms it touched — held equal to a
+   full recount after every round of random edits (`verify_terms_recount`). On copies of the author's index the
+   hook's pass for one changed document: median 0.360 s → 0.283 s.
 3. **The judge within the time left** (`brain/judgegate.py`). The hook passes its wall as a deadline; an answer
    already cached is always served. From this installation's own records: when the last request sent was cut
    while out or refused for a transient reason, the provider is not asked — except one probe at a time after an
