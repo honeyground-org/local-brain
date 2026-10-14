@@ -32,10 +32,13 @@ these apart; that is why the first step is the record.
    call can finish in the time left is judged from this installation's own records — cut runs count as lower
    bounds, never as completions; when the provider is overloaded, stop asking and probe for recovery through a
    shared slot (respecting `Retry-After`), so a bad hour costs no budget.
-4. **`brain monitor`** — a daily summary, a line in `brain status`, history. Facts first ("12 second-stage runs,
-   0 finished"); change against the person's own history second, with the sample size, and "not enough data"
-   when it is small. No composite score, no automatic action, ★no model call★ (a question whose vector is not
-   cached is reported as unmeasured, not embedded).
+4. **`brain monitor`** (`brain/monitor.py`) — a daily summary, a line in `brain status`, history. Facts first
+   ("the second stage was reached 12 times and finished 0" — finished means the judge reached a verdict, not
+   merely replied), raised by the event and never by a tuned number; change against the person's own history
+   second (the median and range of earlier days, "not enough history" until there are two). No composite
+   score, no automatic action, ★no model call★. A completed UTC day is summarised once into `monitor.jsonl`
+   by whichever daily job runs first (or `brain monitor --record`); raw record files are removed only after
+   their day is summarised and older than `observe_keep_days` (default 14).
 5. **Quality against the person's own history** — on the day's corpus and the stores in use: words top 3 ·
    meaning top 3 · ★words 3 + meaning 3 (as MCP `recall` returns it) against words 6★ at the same reading, the
    answers gained and lost, vector freshness (current sha and every chunk, `embed: false` excluded) and the
