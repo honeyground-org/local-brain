@@ -36,9 +36,9 @@ _RECALL_DESC = (
     "the question (a question about 'stopped' → a memory that says 'halted'), and a question with no "
     "word in common finds nothing. "
     "Give 5~10 other spellings{langs}, abbreviations, and related identifiers. "
-    "Words and meaning find different answers: pass `semantic_k` (for example 3) to also get, in a "
-    "separate list, the memories closest in ★meaning★ that the words did not find — use it when the "
-    "note may be worded differently from the question. It adds that many to read, and one embedding "
+    "Words and meaning find different answers: when the words are unsure, recall adds by itself, in a "
+    "separate list, a few memories closest in ★meaning★ that the words did not find. Pass `semantic_k` "
+    "to always get that many (for example 3), or 0 for none. It adds that many to read, and one embedding "
     "call for a question not asked before."
 )
 _LANG_EN = {"en": "English", "ko": "Korean", "de": "German", "es": "Spanish",
@@ -67,9 +67,10 @@ TOOLS: List[Dict[str, Any]] = [
                           "description": "narrow to kinds of memory (the frontmatter `type`){kinds}"},
                 "semantic_k": {"type": "integer",
                                "description": "also return up to this many memories close in ★meaning★ that "
-                                              "the words did not find, in a separate list (default 0 = none). "
-                                              "Words and meaning find different answers; this is more to read, "
-                                              "and one embedding call unless the question was asked before."},
+                                              "the words did not find, in a separate list. Omitted: a few are "
+                                              "added only when the words are unsure; 0: never. Words and "
+                                              "meaning find different answers; this is more to read, and one "
+                                              "embedding call unless the question was asked before."},
             },
             "required": ["query"],
         },
@@ -191,6 +192,12 @@ def tools_for(db) -> List[Dict[str, Any]]:
 
 # ------------------------------------------------------------------ presentation
 SHOWN = 280      # characters of a result's excerpt shown to the caller
+# ★How many memories of meaning are added when the words are unsure★ (2026-10-14) — the same number an
+#  agent was advised to ask for. Measured on the author's 66 labelled questions, asked with their terms as
+#  agents ask (no model): words' 8 held the answer for 46; adding meaning's 3 ★always★ → 52, at 11 to read;
+#  ★only when the hook's own rule finds nothing to attach★ → the same 52, adding on 22 of 66 (9.0 to read).
+#  Where the words were sure (44), they held the answer 43 times and meaning added none.
+AUTO_MEANING = 3
 
 
 def _fmt_recall(rows: List[dict]) -> str:
@@ -228,9 +235,11 @@ def _fmt_recall(rows: List[dict]) -> str:
     return "\n\n".join(out)
 
 
-def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int) -> str:
+def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int, auto: bool = False) -> str:
     """The `semantic_k` list — kept apart from the word results, because it was found another way."""
-    head = "— close in meaning (found by meaning, not by the words · %s) —" % cost
+    head = ("— close in meaning (%s · %s) —"
+            % ("the words were unsure, so meaning was asked too" if auto
+               else "found by meaning, not by the words", cost))
     if not rows:
         return head + "\n  " + ("unavailable — %s" % why_none if why_none else "nothing more found")
     out = [head]
@@ -246,12 +255,14 @@ def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int) -> str:
     return "\n\n".join(out)
 
 
-def _note_recall(args: dict, rows: List[dict], sk: int, mrows, why: str, cached, t0: float) -> None:
+def _note_recall(args: dict, rows: List[dict], sk: int, mrows, why: str, cached, t0: float,
+                 auto: bool = False) -> None:
     """One row per `recall` (§observe) — whether an agent asked for meaning too, and what each way returned.
     ⛔ No query, no terms, no filter values: counts, a fixed failure code and which database answered."""
     from brain import observe, stores, vectors
     row = {"k": int(args.get("k") or 8), "terms": len(args.get("terms") or []),
-           "filtered": bool(args.get("kinds") or args.get("sources")), "semantic_k": sk,
+           "filtered": bool(args.get("kinds") or args.get("sources")),
+           "semantic_k": int(args.get("semantic_k") or 0), "auto": auto,
            "words": len([r for r in rows if not r.get("related")]),
            "related": len([r for r in rows if r.get("related")]),
            "graph": stores.last_served("graph") or None,
@@ -300,6 +311,17 @@ def _do_remember(db, args: dict) -> str:
             % ("updated" if existed else "saved", name, json.dumps(stats, ensure_ascii=False), path))
 
 
+def _words_unsure(db, rows: List[dict]) -> bool:
+    """★The hook's own rule★ (§hook.select with the calibrated threshold) finds nothing to attach in what the
+    words returned — the one definition of "the words were unsure" brain has, measured per person. Not a
+    new number: a threshold chosen here would be one more rule written in two places."""
+    try:
+        from brain import calibrate, hook
+        return not hook.select(rows, calibrate.threshold(db))
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
 def call_tool(db, name: str, args: dict) -> str:
     if name == "timeline":
         from brain import timeline
@@ -316,6 +338,9 @@ def call_tool(db, name: str, args: dict) -> str:
                     "from the question — call again with 5~10 synonyms.")
         more = ""
         sk = int(args.get("semantic_k") or 0)
+        auto = args.get("semantic_k") is None and _words_unsure(db, rows)
+        if auto:
+            sk = AUTO_MEANING
         mrows, why, cached = None, "", None
         if sk > 0:
             # ★Opt-in, apart from the answer list★ (2026-10-13 · docs/notes/retrieval-fusion-plan.md step 3).
@@ -327,8 +352,11 @@ def call_tool(db, name: str, args: dict) -> str:
                                         kinds=args.get("kinds"), sources=args.get("sources"),
                                         width=SHOWN)
             start = len([r for r in rows if not r.get("related")]) + 1
-            more = "\n\n" + _fmt_meaning(mrows, why, cost, start)
-        _note_recall(args, rows, sk, mrows, why, cached, t0)
+            # ⛔ Added unasked, a failure is recorded (§observe) and not shown — a person with no embedding
+            #    engine chosen would read "unavailable" under every unsure answer.
+            if mrows or not auto:
+                more = "\n\n" + _fmt_meaning(mrows, why, cost, start, auto=auto)
+        _note_recall(args, rows, sk, mrows, why, cached, t0, auto=auto)
         return _fmt_recall(rows) + more + hint
     if name == "remember":
         return _do_remember(db, args)

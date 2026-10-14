@@ -281,9 +281,11 @@ def main() -> int:
     server.call_tool(db, "recall", {"query": "never embedded %s" % PROBE, "k": 1, "semantic_k": 2})
     rows, _ = observe.read("recall", [observe.day()])
     a, b, c = (rows + [{}, {}, {}])[:3]
-    check("⑤ a recall without semantic_k: words counted, meaning not asked",
-          a.get("semantic_k") == 0 and a.get("meaning") is None and a.get("terms") == 2 and a.get("words", 0) >= 1,
-          json.dumps({k: a.get(k) for k in ("semantic_k", "meaning", "terms", "words")}))
+    # unasked, meaning is added only when the words are unsure (§server._words_unsure) — the record says which
+    check("⑤ a recall without semantic_k: words counted, not asked, and whether meaning was added unasked",
+          a.get("semantic_k") == 0 and a.get("auto") in (True, False)
+          and (a.get("meaning") is None) == (not a.get("auto")) and a.get("terms") == 2 and a.get("words", 0) >= 1,
+          json.dumps({k: a.get(k) for k in ("semantic_k", "auto", "meaning", "terms", "words")}))
     check("⑤ with it: how many meaning returned, filtered, embedding cached, which store",
           b.get("semantic_k") == 2 and b.get("meaning") is not None and b.get("filtered") is True
           and b.get("embed_cached") is True and (b.get("vector") or {}).get("store") == "sqlite",
