@@ -22,10 +22,12 @@ these apart; that is why the first step is the record.
    the second stage was (vector · inputs · judge · done; request sent and returned; a valid answer; a fixed
    failure code). Which database answered (`stores.last_served`, `vectors.last_search`). MCP `recall`: a row per
    call. One file per kind per UTC day, appended only, no text.
-2. **Reindex out of the hook.** One worker reindexes and syncs; the hook reads the last complete index. ⛔ Not
-   "once a day": a memory edited must not be recalled with its old content (`store.needs_reindex`, 2026-08-12) —
-   an edited or removed document is held back until the new index has it, and a write through `remember` goes
-   first.
+2. **Reindex out of the hook.** Measured first (2026-10-14, author's index, one changed document): 1.70 s, of
+   which ★1.10 s updating the graph database★ and 0.17 s re-reading every file for trigger declarations. So the
+   hook keeps updating the words index in place — ⛔ never "once a day": a memory edited must not be recalled
+   with its old content (`store.needs_reindex`, 2026-08-12) — and leaves the databases' update and the trigger
+   healing to one detached worker (`brain/deferred.py`, started after the answer, one at a time). Until it lands
+   the stores answer from the local copy (§stores.serve). The hook's pass went from 0.58–1.33 s to 0.32 s.
 3. **The judge within the time left.** One deadline for embedding, search and judge; the cache first; whether a
    call can finish in the time left is judged from this installation's own records — cut runs count as lower
    bounds, never as completions; when the provider is overloaded, stop asking and probe for recovery through a

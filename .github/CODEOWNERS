@@ -46,6 +46,7 @@
 /brain/adaptive.py @wangjacsi
 /brain/dashview.py @wangjacsi
 /brain/deadline.py @wangjacsi
+/brain/deferred.py @wangjacsi
 /brain/discover.py @wangjacsi
 /brain/evalinit.py @wangjacsi
 /brain/langdata.py @wangjacsi
