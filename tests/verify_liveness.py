@@ -312,18 +312,19 @@ def main():
     #    ⛔ Unit-testing a module cannot see this. The seam is "what does the scheduler start".
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     binder = os.path.join(root, "bin")
-    scripts = sorted(f for f in os.listdir(binder) if not f.startswith("."))
+    scripts = sorted(f for f in os.listdir(binder) if not f.startswith((".", "_")))   # `_run.py` is the runner
     holds_logic = [f for f in scripts
                    if "<<'PY'" in open(os.path.join(binder, f), encoding="utf-8").read()]
     check("★no script under bin/ carries its own copy of a job★ (an inline heredoc is the tell)",
           not holds_logic, ", ".join(holds_logic) or "%d script(s) clean" % len(scripts))
+    # ★through the runner★ (§bin/_run.py) — `-m brain.x` runs a `brain/` in the host's folder instead
     no_dispatch = [f for f in scripts
-                   if "-m brain." not in open(os.path.join(binder, f), encoding="utf-8").read()]
+                   if '_run.py" brain.' not in open(os.path.join(binder, f), encoding="utf-8").read()]
     check("every script under bin/ ★hands off to a module★",
           not no_dispatch, ", ".join(no_dispatch) or "all %d dispatch" % len(scripts))
     for job in ("brain-vec-daily", "brain-rules-daily"):
         body = open(os.path.join(binder, job), encoding="utf-8").read()
-        check("  %s runs ★brain.jobs★" % job, "-m brain.jobs" in body)
+        check("  %s runs ★brain.jobs★" % job, '_run.py" brain.jobs' in body)
 
     # ⛔ ★control★ — the row above must be able to fail. A script that holds a body is planted in a
     #    temporary bin/ and the same rule is applied to it.
@@ -333,7 +334,7 @@ def main():
         with open(planted, "w", encoding="utf-8") as fh:
             fh.write("#!/bin/sh\npython3 - <<" + "'PY'\nprint(1)\nPY\n")
         caught = "<<'PY'" in open(planted, encoding="utf-8").read()
-        missing = "-m brain." not in open(planted, encoding="utf-8").read()
+        missing = '_run.py" brain.' not in open(planted, encoding="utf-8").read()
         check("★control★: both rules catch a script that was planted with a body", caught and missing)
 
     # The registered program, where it can be read — ★what production actually starts★.
@@ -349,7 +350,7 @@ def main():
         prog = re.search(r"<string>([^<]*brain-%s[^<]*)</string>" % job, text)
         leads = False
         if prog and os.path.isfile(prog.group(1)):
-            leads = "-m brain.jobs" in open(prog.group(1), encoding="utf-8").read()
+            leads = "brain.jobs" in open(prog.group(1), encoding="utf-8").read()
         elif "brain.jobs" in text:
             leads = True                                  # registered as `python -m brain.jobs`
         check("★the registered %s program leads to brain.jobs★" % job, leads,

@@ -515,10 +515,13 @@ class Codex(Host):
         # ⛔ Codex keeps it in `config.toml` — ★never merged by hand★ (a mistake there breaks the user's
         #    other settings wholesale), so it is handed to a human as a snippet. A pasted snippet names
         #    ★this python and the module★ rather than `cmd`: it must not depend on what is on PATH.
-        import sys
+        #    ⛔ Not `-m brain.server`: Codex starts it in the project folder, and `-m` runs a `brain/` found
+        #    there instead (§launch).
+        from brain import launch
+        av = launch.argv("brain.server")
         return {"file": os.path.join(self.root(), "config.toml"),
-                "snippet": ["[mcp_servers.brain]", "command = %s" % json.dumps(sys.executable),
-                            'args = ["-m", "brain.server"]']}
+                "snippet": ["[mcp_servers.brain]", "command = %s" % json.dumps(av[0]),
+                            "args = %s" % json.dumps(av[1:])]}
 
     def hook_events(self) -> Dict[str, str]:
         # Measured 2026-09-02: hooks.json was carrying these eight —
