@@ -15,4 +15,4 @@
 # ⛔ Exit code is ★meaningful★: 0 = it did its work (or the daily quota is simply spent),
 #    3 = it ran and did not. The liveness verdict reads it.
 DIR=$(cd "$(dirname "$0")/.." && pwd)
-exec env PYTHONPATH="$DIR" python3 -m brain.jobs vec "$@"
+exec python3 "$DIR/bin/_run.py" brain.jobs vec "$@"

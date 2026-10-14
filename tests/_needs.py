@@ -75,14 +75,15 @@ def prompts(at_least: int = 1) -> None:
 
 def entry(script: str, module: str) -> list:
     """The command for one of brain's entry points, the way the installer picks it (§install.entry_command):
-    the repo's `bin/<script>` on POSIX, `<this python> -m <module>` on Windows — which has no `sh` to run
-    the scripts (WinError 193, CI 2026-10-10). The installed `.exe` shims are checked by verify_package.
+    the repo's `bin/<script>` on POSIX, `<this python> bin/_run.py <module>` on Windows — which has no `sh`
+    to run the scripts (WinError 193, CI 2026-10-10). The installed `.exe` shims are checked by verify_package.
     """
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     local = os.path.join(root, "bin", script)
     if os.name != "nt" and os.path.isfile(local):
         return [local]
-    return [sys.executable, "-m", module]
+    from brain import launch
+    return launch.argv(module)
 
 
 def private_index() -> str:

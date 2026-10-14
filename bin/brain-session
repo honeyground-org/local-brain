@@ -3,7 +3,7 @@
 # A failure never blocks the session. ① keeps stdout empty; only ② goes out into the context.
 DIR=$(cd "$(dirname "$0")/.." && pwd)
 PAYLOAD=$(cat)
-printf '%s' "$PAYLOAD" | env PYTHONPATH="$DIR" python3 -m brain.cli index >/dev/null 2>&1 || true
+printf '%s' "$PAYLOAD" | python3 "$DIR/bin/_run.py" brain.cli index >/dev/null 2>&1 || true
 # ⛔ only the notice call takes the flags — `brain.cli index` parses argv with argparse and would reject them
-printf '%s' "$PAYLOAD" | env PYTHONPATH="$DIR" python3 -m brain.tail notice "$@" 2>/dev/null || true
+printf '%s' "$PAYLOAD" | python3 "$DIR/bin/_run.py" brain.tail notice "$@" 2>/dev/null || true
 exit 0

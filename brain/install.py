@@ -78,7 +78,8 @@ def entry_command(script: str, module: str) -> str:
     ⛔ ★Pointing at a shell script doesn't run on Windows★ — the order is:
         1. an installed entry point (`brain-hook` / `brain-hook.exe`) on PATH, if there is one
         2. the repo's `bin/<script>`, if it exists and is ★POSIX★ (the shell prefilter is fast)
-        3. `<this python> -m <module>` — ★the last resort that runs anywhere★
+        3. `<this python> <repo>/bin/_run.py <module>` — ★the last resort that runs anywhere★ (§launch:
+           never `-m` alone, which runs a `brain/` package found in the folder the host starts it in)
     """
     found = shutil.which(script)
     if found:
@@ -86,7 +87,8 @@ def entry_command(script: str, module: str) -> str:
     local = os.path.join(ROOT, "bin", script)
     if os.name != "nt" and os.path.isfile(local):
         return _quote(local)
-    return "%s -m %s" % (_quote(sys.executable), module)
+    from brain import launch
+    return launch.command(module, _quote)
 
 
 # ── 1. prerequisites ────────────────────────────────────────────────────────────────

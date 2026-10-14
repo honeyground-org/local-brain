@@ -11,4 +11,4 @@
 # ⛔ Exit code: 0 = it did its work (the judge's daily budget wall counts as done — it lifts at
 #    Pacific midnight), 3 = it ran and did not.
 DIR=$(cd "$(dirname "$0")/.." && pwd)
-exec env PYTHONPATH="$DIR" python3 -m brain.jobs rules "$@"
+exec python3 "$DIR/bin/_run.py" brain.jobs rules "$@"

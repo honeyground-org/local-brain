@@ -408,7 +408,9 @@ def _become_new_code(pending: bytes) -> None:
     sys.stderr.write("brain: the code on disk changed — continuing as it (pid %d)\n" % os.getpid())
     sys.stderr.flush()
     try:
-        os.execve(sys.executable, [sys.executable, "-m", "brain.server"] + sys.argv[1:], env)
+        from brain import launch                         # never `-m` from the host's folder (§launch)
+        av = launch.argv("brain.server")
+        os.execve(av[0], av + sys.argv[1:], env)
     except OSError as exc:                               # keep answering with the code in hand
         sys.stderr.write("brain: could not switch to the new code (%s) — staying on the old\n" % exc)
 

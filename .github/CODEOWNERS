@@ -30,6 +30,7 @@
 /SETUP-PROMPT.md @wangjacsi
 /brain/backends/ @wangjacsi
 /brain/health.py @wangjacsi
+/brain/launch.py @wangjacsi
 /brain/rerank.py @wangjacsi
 /brain/search.py @wangjacsi
 /brain/server.py @wangjacsi
