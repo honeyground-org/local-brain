@@ -14,9 +14,10 @@ Rules
 - ⛔ ★No text★ — no prompt, no document, no raw error message. Counts, durations, names of models and
   backends, and short fixed codes (`overloaded`, `not_synced`, `NoKey`) only.
 - One file per kind per UTC day (`observe/<kind>-YYYY-MM-DD.jsonl` under the brain's home), ★appended
-  only★: each row is one `os.write` on a file opened for appending, so rows from processes writing at once
-  do not interleave, and nothing is ever rewritten in place — a size cap that drops the older half (the old
-  timing file) loses rows when two processes trim at once. Old days are pruned by whoever summarises them.
+  only★: each row is one `os.write` on a file opened for appending (on Windows, under a lock — §_write_locked),
+  so rows from processes writing at once do not interleave, and nothing is ever rewritten in place — a size
+  cap that drops the older half (the old timing file) loses rows when two processes trim at once. Old days
+  are pruned by whoever summarises them.
 - Every row carries `schema`, a random `run` id, the UTC time and the measuring code's generation, so rows
   from another version of the code are never mixed in silently.
 - A record must never cost the answer: every failure here is swallowed.
@@ -62,7 +63,9 @@ def write(kind: str, row: dict, to: Optional[str] = None) -> bool:
         line = (json.dumps(out, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
         p = to or path(kind)
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
+        if os.name == "nt":
+            return _write_locked(p, line)
+        fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         try:
             os.write(fd, line)                           # ★one write per row★ — see the module docstring
         finally:
@@ -70,6 +73,30 @@ def write(kind: str, row: dict, to: Optional[str] = None) -> bool:
         return True
     except Exception:                                    # noqa: BLE001
         return False
+
+
+# ⛔ ★Windows does not append atomically★ (CI, 2026-10-14: six processes at once left 1,557 of 1,800 rows
+#    readable and 21 broken). Its C runtime emulates O_APPEND as "seek to the end, then write", so two
+#    processes can land on the same offset. There, a row is written under a lock on one byte past any size a
+#    record file reaches — beyond the end, so a reader is never blocked by it.
+_LOCK_AT = 2 ** 31 - 2
+
+
+def _write_locked(p: str, line: bytes) -> bool:
+    import msvcrt
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
+    try:
+        os.lseek(fd, _LOCK_AT, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)           # waits (it retries for about ten seconds)
+        try:
+            os.lseek(fd, 0, os.SEEK_END)
+            os.write(fd, line)
+        finally:
+            os.lseek(fd, _LOCK_AT, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return True
+    finally:
+        os.close(fd)
 
 
 def read(kind: str, days: List[str]) -> Tuple[List[dict], int]:
