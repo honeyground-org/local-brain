@@ -62,6 +62,7 @@
 /brain/dashboard.py @wangjacsi
 /brain/dashstyle.py @wangjacsi
 /brain/graphview.py @wangjacsi
+/brain/judgegate.py @wangjacsi
 /brain/scheduler.py @wangjacsi
 /brain/scorecard.py @wangjacsi
 /brain/textindex.py @wangjacsi

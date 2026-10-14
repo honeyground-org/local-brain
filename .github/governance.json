@@ -19,7 +19,7 @@
       "impact": "medium",
       "summary": "search, the text index, the language bridge, vectors, triggers, the recall hook",
       "paths": ["brain/search.py", "brain/textindex.py", "brain/translit.py", "brain/lexicon.py", "brain/langdata.py",
-                "brain/rerank.py", "brain/vectors.py", "brain/triggers.py", "brain/hook.py"],
+                "brain/rerank.py", "brain/vectors.py", "brain/triggers.py", "brain/hook.py", "brain/judgegate.py"],
       "owners": []
     },
     "storage": {

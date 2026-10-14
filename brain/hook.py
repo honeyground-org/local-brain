@@ -212,7 +212,7 @@ def lexical(db, prompt: str) -> list:
 
 
 def fallback(db, prompt: str, strict: bool = False, cache: bool = True,
-             observe: dict = None):
+             observe: dict = None, deadline: float = None):
     """★Look again by meaning, but only when words fall silent★ (2026-08-21).
 
     ⛔ ★The check calls this function too★ (2026-08-25). Before, this logic lived only inside `main()` and
@@ -255,7 +255,7 @@ def fallback(db, prompt: str, strict: bool = False, cache: bool = True,
             obs["outcome"] = "no_vectors"
         elif rerank.min_score(db) <= 10.0:
             return search.judged(db, prompt[:MAX_PROMPT_CHARS], strict=strict,
-                                 cache=cache, observe=obs)[:1]
+                                 cache=cache, observe=obs, deadline=deadline)[:1]
         else:
             # ⛔ ★Where a person without a labelled sample stands today★ — no threshold was measured for
             #    this judge, so it is never asked. Recorded so that silence shows up as a count.
@@ -412,7 +412,9 @@ def _answer(prompt: str, state: dict):
         state["stage"], state["path"] = "fallback", "fallback"
         t = time.time()
         state["judge"] = search.judge_observation()
-        keep = fallback(db, prompt, observe=state["judge"])
+        # the judge is asked only if it can answer before the watchdog's wall (§judgegate)
+        keep = fallback(db, prompt, observe=state["judge"],
+                        deadline=state["t0"] + HOOK_TIMEOUT_SEC - WATCHDOG_MARGIN_SEC)
         state["fb"] = state["t"]["fallback"] = round(time.time() - t, 3)
         state["fb_hit"] = bool(keep)
 
@@ -494,6 +496,7 @@ def _judge_record(state: dict):
             from brain import rerank
             call = rerank.call_state()
             out["sent"], out["returned"] = call["sent"], call["returned"]
+            out["waited"], out["retry_after"] = call["waited"], call["retry_after"]
     return out
 
 

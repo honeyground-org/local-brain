@@ -28,10 +28,14 @@ these apart; that is why the first step is the record.
    with its old content (`store.needs_reindex`, 2026-08-12) — and leaves the databases' update and the trigger
    healing to one detached worker (`brain/deferred.py`, started after the answer, one at a time). Until it lands
    the stores answer from the local copy (§stores.serve). The hook's pass went from 0.58–1.33 s to 0.32 s.
-3. **The judge within the time left.** One deadline for embedding, search and judge; the cache first; whether a
-   call can finish in the time left is judged from this installation's own records — cut runs count as lower
-   bounds, never as completions; when the provider is overloaded, stop asking and probe for recovery through a
-   shared slot (respecting `Retry-After`), so a bad hour costs no budget.
+3. **The judge within the time left** (`brain/judgegate.py`). The hook passes its wall as a deadline; an answer
+   already cached is always served. From this installation's own records: when the last request sent was cut
+   while out or refused for a transient reason, the provider is not asked — except one probe at a time after an
+   exponential backoff counted in chances (n failures in a row → 2^(n-1) − 1 skipped; prompts come minutes
+   apart, so a backoff in seconds would skip nothing), and after any `Retry-After`; when it is well but the
+   median of its recent answers is slower than the time left, it is not asked. Replayed over the author's
+   records from the evening the provider was overloaded: 22 second-stage runs, 21 cut while the judge was out;
+   with the gate, 8 asked and 14 held back — 14 calls and about 3.5 s of each of those prompts saved.
 4. **`brain monitor`** (`brain/monitor.py`) — a daily summary, a line in `brain status`, history. Facts first
    ("the second stage was reached 12 times and finished 0" — finished means the judge reached a verdict, not
    merely replied), raised by the event and never by a tuned number; change against the person's own history
