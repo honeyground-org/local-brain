@@ -66,11 +66,15 @@ if doc_id:
 else:
     hook._named = lambda p, db=None: []
 search.recall = lambda *a, **k: []                    # words fall silent → the fallback runs
+# ⛔ ★Indexing is not what A and the control measure★ (2026-10-13). Run on a machine whose notes keep
+#    changing, the hook first reindexes; when that takes longer than its own time budget it withdraws at
+#    "index" — by design — and A's stage and the control's answer depended on how much had changed since
+#    the last reindex (1 run in 3 went red on the author's machine). Only B blocks in indexing, on purpose.
+from brain import store
+store.needs_reindex = lambda db: shape == "lock"
 if shape == "network":
     hook.fallback = lambda db, prompt, **k: (time.sleep(block), [])[1]
 elif shape == "lock":
-    from brain import store
-    store.needs_reindex = lambda db: True
     def _stuck(db, **k):                              # ★a real busy-wait, inside sqlite3's C code★
         c = sqlite3.connect(lockdb, timeout=block)
         c.execute("INSERT INTO t VALUES (1)")
