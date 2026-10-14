@@ -60,6 +60,12 @@ calls. "Top 3" means the answer is among the first three.
    filters, the passage that matched, and "unavailable — reason" when there is no embedding engine. It is a
    larger reading budget, so it is compared at the same budget (author's 66 questions, question alone, no
    judge): words 6 → 25, words 3 + meaning 3 → 37; words 11 → 31, words 8 + meaning 3 → 42.
+   **Unasked when the words are unsure** (2026-10-14): with `semantic_k` omitted, 3 are added when the hook's
+   own rule (§hook.select, the calibrated threshold) finds nothing to attach in what the words returned —
+   no new number. Same 66 questions, asked with their terms as agents ask: words 8 → 46; + meaning 3 always
+   → 52 at 11 to read; + meaning 3 only when unsure → the same 52, added on 22 of 66 (9.0 to read). Where
+   the words were sure (44) they held the answer 43 times. `semantic_k: 0` turns it off; a failure while
+   unasked is recorded, not shown.
 4. **Judge the union** of words 20 and meaning 20 (at most 40, one call).
 5. **The hook**, only after the criteria below hold.
 

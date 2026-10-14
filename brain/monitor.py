@@ -103,7 +103,9 @@ def summarise(rec: Dict[str, list]) -> dict:
                                     if j.get("valid") and j.get("top") is not None).items()))}
     rc = rec.get("recall") or []
     rvec = [r.get("vector") or {} for r in rc if r.get("vector")]
+    # `auto` (2026-10-14): meaning added unasked because the words were unsure — apart from an asked list
     m = {"calls": len(rc), "semantic_asked": sum(1 for r in rc if int(r.get("semantic_k") or 0) > 0),
+         "auto": sum(1 for r in rc if r.get("auto")),
          "meaning_returned": sum(1 for r in rc if int(r.get("meaning") or 0) > 0),
          "meaning_fail": dict(Counter(r.get("meaning_fail") for r in rc if r.get("meaning_fail"))),
          "vector": {"remote": sum(1 for v in rvec if v.get("by") == "remote"),
@@ -148,13 +150,13 @@ def facts(s: dict) -> List[Tuple[str, str, dict]]:
                                                "why": ", ".join("%s %d" % kv for kv in sorted(lost.items()))}))
     if sec["outcomes"].get("uncalibrated"):
         out.append(("info", "judge_uncalibrated", {"n": sec["outcomes"]["uncalibrated"]}))
-    if m["calls"] and not m["semantic_asked"]:
+    if m["calls"] and not m["semantic_asked"] and not m["auto"]:
         out.append(("info", "meaning_never_asked", {"n": m["calls"]}))
     return out
 
 
 METRICS = ("attach_rate", "silent_reindex_rate", "second_finish_rate", "judge_p50", "meaning_ask_rate",
-           "shown_before_open")
+           "shown_before_open", "meaning_used_rate")
 
 
 def metrics(s: dict) -> Dict[str, Optional[float]]:
@@ -168,7 +170,8 @@ def metrics(s: dict) -> Dict[str, Optional[float]]:
             "second_finish_rate": ratio(sec["finished"], sec["reached"]),
             "judge_p50": sec["latency"]["p50"],
             "meaning_ask_rate": ratio(m["semantic_asked"], m["calls"]),
-            "shown_before_open": ratio(s.get("use", {}).get("shown", 0), s.get("use", {}).get("opened", 0))}
+            "shown_before_open": ratio(s.get("use", {}).get("shown", 0), s.get("use", {}).get("opened", 0)),
+            "meaning_used_rate": ratio(m["meaning_returned"], m["calls"])}
 
 
 def trend(now: Dict[str, Optional[float]], before: List[dict]) -> Dict[str, dict]:
@@ -284,7 +287,8 @@ def _metric_name(k: str) -> str:
             "second_finish_rate": i18n.t("monitor.metric.second_finish_rate"),
             "judge_p50": i18n.t("monitor.metric.judge_p50"),
             "meaning_ask_rate": i18n.t("monitor.metric.meaning_ask_rate"),
-            "shown_before_open": i18n.t("monitor.metric.shown_before_open")}.get(k, k)
+            "shown_before_open": i18n.t("monitor.metric.shown_before_open"),
+            "meaning_used_rate": i18n.t("monitor.metric.meaning_used_rate")}.get(k, k)
 
 
 def _kv(d: dict) -> str:
@@ -314,7 +318,7 @@ def render(s: dict, tr: Dict[str, dict], label: str) -> str:
              i18n.t("monitor.judge", sent=sec["sent"], returned=sec["returned"], valid=sec["valid"],
                     cut_out=sec["cut_out"], p50=_s(sec["latency"]["p50"]), p95=_s(sec["latency"]["p95"]),
                     kinds=_kv(sec["kinds"])),
-             i18n.t("monitor.recall", calls=m["calls"], asked=m["semantic_asked"],
+             i18n.t("monitor.recall", calls=m["calls"], asked=m["semantic_asked"], auto=m.get("auto", 0),
                     returned=m["meaning_returned"], fails=_kv(m["meaning_fail"])),
              i18n.t("monitor.deferred", runs=d["runs"], cleared=d["cleared"], stores=_kv(d["stores"])),
              i18n.t("monitor.use", **s.get("use", {"opened": 0, "shown": 0, "hook": 0, "recall": 0,
