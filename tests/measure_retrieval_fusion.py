@@ -14,7 +14,8 @@ Judge-free controls (no calls): words top 3 · meaning top 3 · reciprocal-rank 
 the union in its input order (min of the two ranks) top 3.
 
 ⛔ This spends judge calls (about one per question and arm). It stops before the hook's reserve
-   (`rerank.RESERVE`) and picks up where it stopped on the next run — the cache holds every answer, so a
+   (`rerank.RESERVE`), and at the first transient failure of the provider (`rerank.TRANSIENT` — overloaded,
+   rate-limited, unreachable), and picks up where it stopped on the next run — the cache holds every answer, so a
    re-run of a finished arm is free. The calls go in a seeded shuffle of (question, arm), so an arm is not
    tied to a day.
 
@@ -232,8 +233,11 @@ def main() -> int:
             spent += not rerank.last_was_cached()
             if sc is None:
                 why = rerank.last_failure() or "?"
-                if b["left"] is not None and rerank.budget(db)["left"] <= rerank.RESERVE:
-                    stopped, missing = why, missing + 1
+                kind = rerank.last_failure_kind()
+                # ⛔ ★The provider's bad hour is not the method's result★ (2026-10-14: 503 "high demand",
+                #    5–9 s answers). A transient failure stops the run; the next run asks again from here.
+                if kind in rerank.TRANSIENT or kind in ("reserve", "daily_wall"):
+                    stopped, missing = "%s (%s)" % (kind, why[:80]), missing + 1
                     continue
                 errors[arm].append((i, "failed: " + why[:80]))
                 results[arm][i] = ("error", [])

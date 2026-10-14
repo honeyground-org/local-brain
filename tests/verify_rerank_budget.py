@@ -75,6 +75,12 @@ MINUTE_429 = {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED",
     {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "59s"}]}}
 
 OK_BODY = {"candidates": [{"content": {"parts": [{"text": '[{"i":0,"s":9}]'}]}}]}
+# the provider's own words when it is overloaded (measured 2026-10-14)
+BUSY_503 = {"error": {"code": 503, "status": "UNAVAILABLE",
+                      "message": "This model is currently experiencing high demand. Spikes in demand are "
+                                 "usually temporary. Please try again later."}}
+BAD_400 = {"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": "bad request"}}
+NO_SCORES = {"candidates": [{"content": {"parts": [{"text": "I would rather not say."}]}}]}
 
 
 class Fake:
@@ -96,6 +102,14 @@ class Fake:
         self.calls += 1
         if self.mode == "ok":
             return _Resp(OK_BODY)
+        if self.mode == "no_scores":
+            return _Resp(NO_SCORES)
+        if self.mode == "network":
+            raise urllib.error.URLError("connection reset")
+        if self.mode in ("busy", "bad"):
+            code, body = (503, BUSY_503) if self.mode == "busy" else (400, BAD_400)
+            raise urllib.error.HTTPError("http://x", code, "error", {},
+                                         io.BytesIO(json.dumps(body).encode("utf-8")))
         payload = DAILY_429 if self.mode == "daily" else MINUTE_429
         raise urllib.error.HTTPError(
             "http://x", 429, "Too Many Requests", {},
@@ -313,6 +327,23 @@ def main():
           "scheduled spending is counted ★only within this window★", "%d entries · %d calls" % (len(due), booked))
     check(booked >= 0, "★it reports scheduled spending too, not only the balance★ — the same wallet is shared",
           "%d calls reserved (%s)" % (booked, ", ".join(d["job"] for d in due) or "none"))
+
+    head("Failure kinds — what a caller can act on, not a sentence to parse")
+    # A measurement stops on a transient failure and resumes later (§rerank.TRANSIENT): the provider's bad
+    # hour must not be recorded as the method's result (2026-10-14: 503 "high demand").
+    for mode, want in (("busy", "overloaded"), ("minute", "rate_limited"), ("network", "network"),
+                       ("bad", "refused"), ("no_scores", "unreadable"), ("ok", "")):
+        db = fresh_db()
+        out, n = call(db, mode)
+        got = rerank.last_failure_kind()
+        check(got == want and (out is None) == (want != "") and n == 1,
+              "%-9s → %-12s" % (mode, want or "(success)"), "kind %r · calls %d" % (got, n))
+    check(rerank.TRANSIENT == ("overloaded", "rate_limited", "network"),
+          "★transient★ = overloaded · rate-limited · unreachable — a refusal or an unreadable answer is not retried")
+    db = fresh_db()
+    call(db, "busy")
+    call(db, "ok")
+    check(rerank.last_failure_kind() == "", "★control★: a success clears the kind")
 
     head("Result")
     os.environ.pop("BRAIN_LANG", None)
