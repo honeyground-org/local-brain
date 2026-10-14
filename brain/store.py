@@ -1203,11 +1203,20 @@ def _learn_index_aliases(db: sqlite3.Connection) -> int:
 def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
             full: bool = False, verbose: bool = False,
             recalibrate: bool = True,
-            refresh_history: Optional[bool] = None) -> dict:
+            refresh_history: Optional[bool] = None,
+            sync: bool = True, heal: bool = True) -> dict:
     """Incremental indexing. Change detection is (mtime, size, sha) — identical on all three, skip.
 
     `recalibrate=False` exists for the places that run **on every prompt, like the hook**.
     The reasoning is in the comment at the calibration call below (index 364ms vs calibrate 3,279ms).
+
+    `sync=False` / `heal=False` leave the dedicated databases' update and the trigger self-healing for later
+    (§deferred) and say so in `stats["deferred"]`. The hook passes both: measured 2026-10-14 on the author's
+    index, one changed document cost 1.70 s here — ★1.10 s of it the graph database's update★, 0.17 s
+    re-reading every file for trigger declarations — against the hook's 0.6 s, so 27% of a day's prompts
+    withdrew while reindexing and attached nothing. The words index itself is still updated in place, so an
+    edited memory is never recalled with its old content; until the update lands the stores answer from the
+    local copy (§stores.serve), which holds the same answers.
     """
     cfg = cfg or load_config()
     # ★Was the index built by an older tokenizer★ — then unchanged files must be re-read as well, or
@@ -1358,7 +1367,10 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
             pass                                         # no semantic layer on this machine yet
     # ★A chosen dedicated database gets the difference★ (§stores) — before calibration, which reads the graph.
     # Nothing at all happens with the default; on the hook path only when a document actually changed.
-    if added or updated or removed or recalibrate:
+    deferred: List[str] = []
+    if (added or updated or removed) and not sync:
+        deferred.append("sync")
+    elif added or updated or removed or recalibrate:
         try:
             from brain import stores as _stores
             pushed = _stores.sync_if_chosen(db)
@@ -1411,12 +1423,23 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
             pass                                         # a failure here must not block indexing
 
     # ★Fill in declared triggers missing from the table★ — the hole left when old code indexed (§heal_triggers)
-    try:
-        n_healed = heal_triggers(db, cfg)
-        if n_healed:
-            stats["triggers_healed"] = n_healed
-    except Exception:                                    # noqa: BLE001
-        pass                                             # a healing failure must not block indexing
+    if not heal:
+        if added or updated or removed:
+            deferred.append("heal")
+    else:
+        try:
+            n_healed = heal_triggers(db, cfg)
+            if n_healed:
+                stats["triggers_healed"] = n_healed
+        except Exception:                                # noqa: BLE001
+            pass                                         # a healing failure must not block indexing
+    if deferred:
+        stats["deferred"] = deferred
+        try:
+            from brain import deferred as _deferred
+            _deferred.mark(db, deferred)
+        except Exception:                                # noqa: BLE001
+            pass
 
     if tok_stale:
         if full:

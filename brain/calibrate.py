@@ -489,7 +489,11 @@ def measure(db: sqlite3.Connection) -> dict:
 #       what was attached by which source and where its second stage was; `stores.serve` and the graph say
 #       which database answered; MCP `recall` writes a row per call. Nothing returned or attached changed and
 #       no call was added; bumped because `hook`, `search`, `stores` and `graphstore` changed.
-CODE_GENERATION = 27
+#   28 (2026-10-14)  the hook's reindex updates the words index in place and leaves the dedicated databases' update
+#       and the trigger self-healing to one worker (§deferred · `store.reindex(sync=False, heal=False)`). Every
+#       other caller is unchanged; the words index the ruler reads is the same. Bumped because `hook` and `store`
+#       changed.
+CODE_GENERATION = 28
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

@@ -334,7 +334,17 @@ def main() -> int:
         state["hit"] = True
         state["shown"] = list(keep)
     _record(state)
+    _after()
     return 0
+
+
+def _after() -> None:
+    """Once the answer is out: start the worker for whatever indexing left for later (§deferred). Never waits."""
+    try:
+        from brain import deferred, store
+        deferred.kick(store.connect())
+    except Exception:                                    # noqa: BLE001
+        pass
 
 
 def _answer(prompt: str, state: dict):
@@ -356,9 +366,12 @@ def _answer(prompt: str, state: dict):
     try:
         if store.needs_reindex(db):
             state["reindex"] = {"ran": True, "secs": None, "changed": None}
-            stats = store.reindex(db, recalibrate=False)
+            # ★The words index here, the databases later★ (2026-10-14 · §deferred) — updating the graph
+            #   database alone took 1.10 s of a 0.6 s budget, and 27% of a day's prompts withdrew here.
+            stats = store.reindex(db, recalibrate=False, sync=False, heal=False)
             state["reindex"].update(secs=round(time.time() - t, 3),
-                                    changed=sum(int(stats.get(k) or 0) for k in ("added", "updated", "removed")))
+                                    changed=sum(int(stats.get(k) or 0) for k in ("added", "updated", "removed")),
+                                    deferred=stats.get("deferred"))
         else:
             state["reindex"] = {"ran": False}
     except Exception as exc:                             # noqa: BLE001
