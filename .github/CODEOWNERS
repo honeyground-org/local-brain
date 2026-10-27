@@ -51,6 +51,7 @@
 /brain/discover.py @wangjacsi
 /brain/evalinit.py @wangjacsi
 /brain/langdata.py @wangjacsi
+/brain/personal.py @wangjacsi
 /brain/portable.py @wangjacsi
 /brain/ruledisc.py @wangjacsi
 /brain/timeline.py @wangjacsi
@@ -61,6 +62,7 @@
 /brain/calibrate.py @wangjacsi
 /brain/dashboard.py @wangjacsi
 /brain/dashstyle.py @wangjacsi
+/brain/embedplan.py @wangjacsi
 /brain/graphview.py @wangjacsi
 /brain/judgegate.py @wangjacsi
 /brain/scheduler.py @wangjacsi
@@ -68,6 +70,8 @@
 /brain/textindex.py @wangjacsi
 /brain/graphstore.py @wangjacsi
 /brain/indexaudit.py @wangjacsi
+/brain/localembed.py @wangjacsi
 /config.example.json @wangjacsi
 /brain/dockerstores.py @wangjacsi
+/runtime/embeddinggemma/ @wangjacsi
 /brain/config.example.json @wangjacsi

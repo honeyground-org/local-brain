@@ -505,7 +505,7 @@ def measure(db: sqlite3.Connection) -> dict:
 #       the measured decision, as before), and `search.fused` merges words, meaning and the whole-body passage by
 #       reciprocal rank — used by MCP `recall` only when the words are unsure. The hook and every measurement call
 #       recall as before; bumped because `search` changed.
-CODE_GENERATION = 31
+CODE_GENERATION = 34  # Carry each user's language policy through host context.
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·
@@ -514,7 +514,7 @@ CODE_GENERATION = 31
 #    so editing those moves the floor without moving this fingerprint. They are frozen control
 #    text that nobody edits casually, and `_bench` still guards the deployment.
 RULER_MODULES = ("adaptive", "calibrate", "evalinit", "graphstore", "hook", "langdata", "lexicon", "search",
-                 "store", "stores", "textindex", "translit")
+                 "store", "stores", "textindex", "translit", "vectors", "embedplan", "localembed")
 
 
 def fire_rate_at(real_tops, threshold: float):
@@ -998,7 +998,7 @@ def _measured_on_another_corpus(db: sqlite3.Connection) -> bool:
 NO_RULER = float("inf")
 
 
-def threshold(db: sqlite3.Connection, default: float = NO_RULER) -> float:
+def threshold(db: sqlite3.Connection, default: float = NO_RULER, measure: bool = True) -> float:
     """The value the hook reads. If it has never been calibrated, calibrate right here —
     ★so that a skipped installation step does not break the hook quietly★."""
     raw = store.get_meta(db, _META_KEY, "")
@@ -1009,7 +1009,9 @@ def threshold(db: sqlite3.Connection, default: float = NO_RULER) -> float:
             saved = None
         if saved is not None and not _measured_on_another_corpus(db):
             return saved
-        # a stale ruler falls through to be re-measured on the spot
+        # A read-only hook must not calibrate on its latency-critical path.
+    if not measure or db.execute("PRAGMA query_only").fetchone()[0]:
+        return default
     try:
         return calibrate(db)["threshold"]
     except Exception:                                    # noqa: BLE001

@@ -94,6 +94,7 @@ def _read_prompt() -> str:
 def _emit(text: str) -> None:
     """Attach it as context, in the calling host's shape (§hosts.Host.hook_output)."""
     from brain import hosts
+    text = i18n.host_language_instruction() + "\n\n" + text
     sys.stdout.write(hosts.active().hook_output("user_prompt_submit", text))
 
 
@@ -206,8 +207,8 @@ def lexical(db, prompt: str) -> list:
     short prompts (§select), so some of the prompts it counted as silent are ones the hook answers.
     """
     from brain import calibrate, search
-    min_score = calibrate.threshold(db)
-    rows = search.recall(db, prompt[:MAX_PROMPT_CHARS], k=MAX_ITEMS + 2, log=False)
+    min_score = calibrate.threshold(db, measure=False)
+    rows = search.recall(db, prompt[:MAX_PROMPT_CHARS], k=MAX_ITEMS + 2, log=False, bridge_floor=min_score)
     return select(rows, min_score)
 
 
@@ -342,7 +343,7 @@ def _after() -> None:
     """Once the answer is out: start the worker for whatever indexing left for later (§deferred). Never waits."""
     try:
         from brain import deferred, store
-        deferred.kick(store.connect())
+        deferred.kick(scan=True)
     except Exception:                                    # noqa: BLE001
         pass
 
@@ -350,36 +351,17 @@ def _after() -> None:
 def _answer(prompt: str, state: dict):
     """Everything between the prompt and the answer. `state` says where it is, for the watchdog."""
     from brain import search, store
-    db = store.connect()
-
-    # ★A newly created or **edited** memory is indexed right there★
-    # Without it the hook cannot recall a memory just saved (measured: 0 recalls right after creating a file directly).
-    #
-    # ⛔ Until 2026-08-12 this check **missed an edit entirely** — because it looked only at the
-    #   directory mtime. So a user saying "this memory is wrong, fix it" and getting it fixed still had
-    #   **the old content recalled all session long.** Now every file's own mtime is checked (16~20ms).
-    #
-    # ⛔ `recalibrate=False` — calibration runs 138 recalls and takes 3.3 seconds.
-    #   Left on, one index run becomes 3.6 seconds, the hook gives up on its time budget, and
-    #   **the memory just fixed is not caught in that very prompt.** The scale is measured at session start.
     t = time.time()
     try:
-        if store.needs_reindex(db):
-            state["reindex"] = {"ran": True, "secs": None, "changed": None}
-            # ★The words index here, the databases later★ (2026-10-14 · §deferred) — updating the graph
-            #   database alone took 1.10 s of a 0.6 s budget, and 27% of a day's prompts withdrew here.
-            stats = store.reindex(db, recalibrate=False, sync=False, heal=False)
-            state["reindex"].update(secs=round(time.time() - t, 3),
-                                    changed=sum(int(stats.get(k) or 0) for k in ("added", "updated", "removed")),
-                                    deferred=stats.get("deferred"))
-        else:
-            state["reindex"] = {"ran": False}
-    except Exception as exc:                             # noqa: BLE001
-        state["reindex"] = {"ran": True, "failed": type(exc).__name__}   # a failed index must not block recall
-    state["t"]["index"] = round(time.time() - t, 3)
-
-    if time.time() - state["t0"] > TIME_BUDGET_SEC * 3:
+        db = store.connect(initialize=False, timeout=0.05)
+    except sqlite3.Error as exc:
+        state["reindex"] = {"ran": False, "deferred": ["index"], "failed": type(exc).__name__}
+        state["t"]["index"] = round(time.time() - t, 3)
         return []
+    # The completed WAL snapshot is immediately available during background indexing.
+    # Changed/deleted selected files are withheld by _fresh; the worker refreshes them after the answer.
+    state["reindex"] = {"ran": False, "deferred": ["index"]}
+    state["t"]["index"] = round(time.time() - t, 3)
 
     # ⛔ `log=False` — the hook's own recall is not added to the usage record.
     # Counting something that runs automatically on every prompt as "used" would make weight and
@@ -408,7 +390,7 @@ def _answer(prompt: str, state: dict):
     # ⛔ Not knowing the threshold, nothing is attached (§vectors.min_cos fallback 1.01).
     if not keep:
         if named:
-            state["ready"] = _with_triggers(named, [], db)
+            state["ready"] = _fresh(db, _with_triggers(named, [], db))
         state["stage"], state["path"] = "fallback", "fallback"
         t = time.time()
         state["judge"] = search.judge_observation()
@@ -421,6 +403,8 @@ def _answer(prompt: str, state: dict):
     state["stage"] = "merge"
     if named:
         keep = _with_triggers(named, keep, db)
+    keep = _fresh(db, keep)
+    db.close()
     return keep
 
 
@@ -513,6 +497,22 @@ def _record(state: dict) -> None:
         }, to=_timing_path())
     except Exception:                                    # noqa: BLE001
         pass                                             # a record must never cost the answer
+
+
+
+
+def _fresh(db, rows):
+    """Never attach a deleted or edited file from an older completed index."""
+    out = []
+    for row in rows:
+        try:
+            indexed = db.execute("SELECT mtime,size FROM docs WHERE path=?", (row["path"],)).fetchone()
+            st = os.stat(row["path"])
+            if indexed and abs(st.st_mtime - indexed["mtime"]) < 1e-6 and st.st_size == indexed["size"]:
+                out.append(row)
+        except (OSError, KeyError):
+            pass
+    return out
 
 
 if __name__ == "__main__":

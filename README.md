@@ -58,6 +58,130 @@ flowchart LR
 - **When the agent asks.** Eight MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
   `brain_suggest` · `brain_feedback` · `reindex` · `timeline`.
 
+## Personal memory and performance
+
+**Current local embedding design:** [EmbeddingGemma optimisation](docs/plans/embeddinggemma-optimisation.md).
+Brain will call a local `embeddinggemma-300m` service directly; subscription CLIs are not in the
+embedding path. The plan covers exact token budgeting, complete source coverage, per-chunk reuse,
+a resident model with query-priority scheduling, measured dimension/precision choices, graph context
+and reversible per-user adaptation. The [reference runtime and adapter](runtime/embeddinggemma/README.md)
+now implement token-safe planning, cached incremental ingestion and a resident query-priority service.
+Contract checks pass with a fake encoder. An actual pinned-model offline CPU smoke check also passed:
+Korean/English 768-dimensional outputs, exact prompt parity and full-source token planning.
+A full-corpus diagnostic and repeated runtime measurements have completed: source coverage passed,
+while the initial component comparison did not establish retrieval parity. A three-arm host study
+now compares native memory, the preserved old index and the integrated current Brain. Development
+continues on the current Brain, including backend integration and request-local reuse; the initial
+model swap is not its final assessment. The optional runtime remains experimental;
+independent chronological validation and complete accelerator-memory accounting remain pending.
+Automatic tuning/promotion remains planned. Existing Gemini selections remain unchanged. The
+subscription workflow below concerns memory authoring only.
+
+
+The objective is a memory system that adapts to **your** vocabulary, documents and work as you use it.
+The method ships with the program; learned policies and observations stay in your own brain home.
+A value measured on one person's notes is not another person's optimum.
+
+- **Recall reads the existing index.** The prompt hook does not scan and rebuild the corpus before
+  answering. After the response, one detached worker refreshes it. A selected file that has been edited
+  or deleted is withheld until it is indexed again; a newly saved file may therefore appear on the next
+  request. Explicit `remember` and `reindex` still update synchronously.
+- **Background work has a wall.** `BRAIN_WORKER_TIMEOUT` sets the worker's total elapsed-time limit
+  (600 seconds by default, an administrative ceiling). A blocked run exits non-zero, keeps unfinished
+  work and backs off before another attempt. The next worker reclaims the lease after its owner exits. Completed database batches are
+  recorded in the sync ledger. A live worker's lease is not stolen just because it is old.
+- **Long documents are covered to the end.** Ingestion no longer truncates a document after twelve
+  chunks. Completed current-model chunks survive interruption and quota exhaustion; the next build
+  fills missing chunks. Existing capped documents are recognised as incomplete. This requires new
+  embeddings for their missing suffixes, subject to the chosen provider's quota and cost.
+- **Explicit search aliases belong to a memory.** MCP `remember` accepts optional `search_aliases`,
+  persisted as document metadata and indexed as authored vocabulary. They are not global synonym
+  rules, graph facts, or automatic trigger declarations.
+- **Serving indexes must be current.** Changing local documents invalidates the dedicated serving
+  indexes in the same transaction. Retrieval uses the local copy until sync succeeds. Stale local
+  vectors whose content hash no longer matches the document are excluded from similarity search.
+
+### Automatic policy loop: experimental, not a quality claim
+
+A background policy experiment records independent document reads, separates reads following a brain
+exposure, and excludes turns that edit documents. It compares the existing ranking with reciprocal-rank
+fusion and a graph-expanded candidate pool using cached query vectors only. The graph supplies linked
+candidates; their own text and vector evidence determine ranking. Link counts are not relevance votes.
+
+Policies are evaluated on successive time partitions with an exact sign-test guard, independent session
+units, a serving-cost budget and rollback to the baseline when new evidence or serving failures justify
+it. Repeated query/document pairs do not add confidence. Evidence for changed/deleted documents is not
+reused. The state and history live in the local index under `personal_policy_v1` and its `_terms` variant; per-request diagnostics
+contain no query text. The existing Claude Code read-event adapter supplies this experiment's signals;
+hosts without equivalent read events retain the baseline.
+
+**Serving remains off by default.** The loop and rollback mechanics have isolated checks, but synthetic
+checks do not establish retrieval quality. `BRAIN_PERSONAL_EXPERIMENT=1` enables the measured policy for
+unfiltered MCP recall at its evaluated width (8), with separate policies for queries with and without
+caller-supplied expansion terms. Calls with filters, another width, or `semantic_k: 0` retain the established path. `BRAIN_PERSONAL_DISABLED=1` always
+forces the baseline. Neither switch installs models or authorises additional remote embedding calls.
+
+Release requires both labelled evaluation and chronological real-use replay, including losses, noise,
+latency and resource costs. Vector/graph synergy and automatic embedding-model selection are **not yet
+validated release features**. A failed or inconclusive comparison keeps the current policy; it is not
+reported as an optimisation success.
+
+### Use an existing subscription assistant on your PC
+
+The intended integration is to reuse an already installed, signed-in assistant such as Claude Code or
+Codex CLI for memory authoring, instead of adding a separate paid generation API. The assistant can
+propose aliases, summaries and relationships; local-brain stores and retrieves the memory locally.
+This is a subscription-backed CLI workflow, not a requirement to download another model. Inference
+still takes place in the subscription provider's cloud, and plan usage limits still apply.
+
+The existing MCP `remember` interface accepts authored memory and optional search aliases. A separate,
+automatic subscription-CLI worker is **planned, not implemented**: it should process changed documents
+outside recall, deduplicate by content hash, accept schema-validated output, preserve provenance, and
+stop at the configured time and usage budget. Child runs must disable memory hooks and MCP discovery
+so they cannot recursively invoke local-brain. Failed or rate-limited runs must retain pending work;
+they must not silently switch to a paid API. CLI authentication remains with the official client.
+
+See [Claude Code programmatic usage](https://code.claude.com/docs/en/headless),
+[Claude Code subscription access](https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-or-max-plan)
+and [Codex non-interactive mode](https://developers.openai.com/codex/noninteractive).
+Claude Code's `--bare` mode does not read subscription credentials; it is not the subscription path.
+
+A generation CLI does not expose an embedding endpoint. Existing stored vectors can be searched
+without new document-embedding calls, but new documents and uncached semantic queries still need an
+embedding provider. A local embedding service is a separate option if eliminating those API calls is
+required; installing one is not implied by choosing a subscription assistant. Keep that decision
+separate from the CLI integration, and never treat model-generated lists of numbers as embeddings.
+
+
+#### Planned defaults: reuse the active agent, make Gemini optional
+
+Prefer the Claude or Codex session that already understands the work: add memory aliases and evidence
+when it makes an existing `remember` call. This still consumes tokens, but avoids starting another
+agent and resending the conversation just to process the same memory. A separate subscription CLI
+worker is a batch backfill option for changed, unprocessed documents, not a requirement for each
+recall. Ordinary retrieval should not launch a generation CLI or require an LLM judge.
+
+The planned engine contract separates memory enrichment from embedding capability. An adapter that
+supports both may fill both roles; an unsupported embedding role must be reported as unsupported.
+An existing subscription login does not imply access to an embedding API. Users should be able to
+start without a Gemini key, with lexical, authored-alias and graph retrieval, then explicitly choose
+local or Gemini embeddings for semantic retrieval. Without an embedding engine, new vectors and
+uncached semantic queries are unavailable; lexical and graph search are not equivalent substitutes
+for full semantic coverage. A local embedding service is an additional component, not a capability
+of the subscription model.
+
+Gemini remains an explicit choice, never an automatic paid fallback when subscription limits are
+reached. Show the actual provider, execution location and available capabilities. Changing only the
+enrichment engine preserves existing vectors. Changing the embedding engine requires a separately
+built index and matching query cache, validation, and a reversible activation; incompatible vector
+spaces must never be mixed. These profiles and automatic transitions are **design requirements, not
+implemented controls**. Existing engine selections are unchanged.
+
+Measure total host, background and retrieval-context tokens as well as latency and recall quality.
+Avoid duplicate enrichment by content hash, process only missing work, and adapt background timing
+and retrieval size within the user's selected engines and resource budget. Fewer tokens alone do
+not establish better personalised memory.
+
 ## Adaptable by design
 
 The core stays the same. Everything around it plugs in as an adapter, so you can swap any of them
@@ -195,6 +319,22 @@ The language is chosen by, in order: `"language"` in `config.json` → `BRAIN_LA
 language is something you choose (`./install.sh --lang ko`), never something inferred from your OS.
 `brain i18n --check` counts missing keys and placeholder mismatches, so translations stay in step with the code.
 
+### Host replies and memory writing
+
+MCP initialization, recall/remember descriptions and automatic hook context carry the same language
+policy to the calling host. An explicit request in the conversation takes precedence. Otherwise the
+preference is `response_language` in `config.json` → `BRAIN_RESPONSE_LANG` → an explicitly selected
+interface `language` → `BRAIN_LANG` → the latest user message's language. Set `response_language`
+to `auto` to follow the conversation while keeping a separate interface language. Response preferences
+accept language tags such as `pt-BR` even without a matching interface catalog. No user's language is
+hardcoded, and the OS locale does not select it.
+
+The host receives an instruction, not a guarantee enforced by a text generator inside Brain.
+Existing notes, source quotations and identifiers retain their original languages. EmbeddingGemma
+receives the original text with retrieval task prefixes; it does not generate or translate replies.
+Reconnect persistent MCP clients after changing preferences. Three-arm evaluations use the same
+explicit `response_language` (default `auto`) for every arm and fingerprint it with the run inputs.
+
 ### Search (tokenizer)
 
 | Language | How it is indexed | Evaluated by |
@@ -214,8 +354,9 @@ for any language.
 
 - **Recall hook** — on every prompt; adds memories only when the score clears the
   calibrated threshold.
-- **Index refresh** — at session start, and again just before recall if a new
-  memory appeared. Write a memory file by hand and the next recall finds it.
+- **Index refresh** — at session start and through a detached worker after prompt-hook responses.
+  A hand-edited memory becomes available after the worker indexes it; explicit MCP operations retain
+  their synchronous refresh path.
 - **Scheduled jobs** — semantic indexing and rule discovery, once a day.
   `brain status` reads their logs to show the last run. On macOS the installer uses `launchd`
   (`install/launchd.sh`), which also catches up on runs that were due while the machine slept.

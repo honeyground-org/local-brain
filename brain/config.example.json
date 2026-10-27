@@ -5,6 +5,8 @@
   "⛔ Don't write a path that doesn't exist — that's not an error, it's a silently empty index nobody notices."
  ],
  "language": "",
+ "response_language": "auto",
+ "_response_language_note": "auto follows the latest user message; a language tag selects the host reply/new-memory language. Omit to inherit an explicitly chosen interface language. Source text and quotations are preserved.",
  "_embed_note": [
   "★embed★ — a source with \"embed\": false is ★never sent out★ (no embedding, no judge); word search still covers it.",
   "The default is true: once an embedding engine is chosen (\"engines\" below, or `brain engines --set`), every source may be embedded.",

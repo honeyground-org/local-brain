@@ -75,11 +75,11 @@ store.needs_reindex = lambda db: shape == "lock"
 if shape == "network":
     hook.fallback = lambda db, prompt, **k: (time.sleep(block), [])[1]
 elif shape == "lock":
-    def _stuck(db, **k):                              # ★a real busy-wait, inside sqlite3's C code★
+    def _stuck(*a, **k):                              # ★a real busy-wait, inside sqlite3's C code★
         c = sqlite3.connect(lockdb, timeout=block)
         c.execute("INSERT INTO t VALUES (1)")
         c.commit()
-    store.reindex = _stuck
+    store.connect = _stuck
 elif shape == "normal":
     hook.fallback = lambda db, prompt, **k: []
 sys.stdin = io.StringIO(json.dumps({"prompt": "a prompt long enough to pass the length gate"}))

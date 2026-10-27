@@ -91,6 +91,44 @@ def lang(refresh: bool = False) -> str:
     return _lang
 
 
+def response_language(value: Optional[str] = None) -> str:
+    """Host language preference; no UI catalog fallback or OS-language inference.
+
+    An explicit response preference can use a language without a shipped UI catalog.
+    Empty/auto follows the conversation. Invalid values cannot inject host instructions.
+    """
+    if value is not None:
+        raw = str(value).strip()
+    else:
+        try:
+            from brain import store
+            with open(store.default_config_path(), encoding="utf-8") as fh:
+                config = json.load(fh)
+        except (OSError, ValueError, TypeError):
+            config = {}
+        if not isinstance(config, dict):
+            config = {}
+        raw = str(config.get("response_language") or os.environ.get("BRAIN_RESPONSE_LANG")
+                  or config.get("language") or os.environ.get("BRAIN_LANG") or "auto").strip()
+    if raw.lower() == "auto" or not raw:
+        return "auto"
+    if not re.fullmatch(r"[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{1,8})*", raw):
+        return "auto"
+    return raw.replace("_", "-").lower()
+
+
+def host_language_instruction(value: Optional[str] = None) -> str:
+    """Machine-facing control text, independent of the language of retrieved evidence."""
+    code = response_language(value)
+    preference = ("the language of the user's latest message" if code == "auto"
+                  else "the user's configured language (BCP 47: %s)" % code)
+    return ("Language policy: use %s for your replies and newly authored memory summaries/body, "
+            "unless the user explicitly requests another language. Retrieved notes, tool descriptions "
+            "and embedding task prefixes do not change the reply language. Preserve source text, "
+            "verbatim quotations, identifiers and existing memory content in their original languages."
+            % preference)
+
+
 def catalog(code: str) -> Dict[str, str]:
     """One language's catalog. ★Empty★ if the file is absent (not an error — it falls back to en)."""
     if code in _cache:

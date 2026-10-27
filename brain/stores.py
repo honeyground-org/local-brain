@@ -569,6 +569,15 @@ def last_served(role: str) -> dict:
     return dict(_SERVED.get(role) or {})
 
 
+def invalidate(db, roles=ROLES):
+    """Invalidate serving copies in the caller's transaction, before local content changes commit."""
+    for role in roles:
+        h = health(db, role)
+        if h.get("synced"):
+            h["synced"] = None
+            db.execute("UPDATE meta SET v=? WHERE k=?", (json.dumps(h), _health_key(role)))
+
+
 def serve(db: sqlite3.Connection, role: str, target: str, remote: Callable[[], object],
           local: Callable[[], object]):
     """Ask the dedicated database — ★only if it is known to hold this target in sync★ — else the local copy.

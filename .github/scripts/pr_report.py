@@ -275,7 +275,10 @@ def import_problems(pairs: list, local: set, stdlib=None) -> list:
             out.append("`%s` does not parse" % path)
             continue
         new = head - (top_imports(base_src) or set())
-        bad = sorted(m for m in new if m not in stdlib and m not in local and m != "__future__")
+        # The explicitly optional model service runs in its own environment. Core remains stdlib-only.
+        optional = {"sentence_transformers", "torch"} if path == "runtime/embeddinggemma/service.py" else set()
+        bad = sorted(m for m in new if m not in stdlib and m not in local
+                     and m != "__future__" and m not in optional)
         if bad:
             out.append("`%s` imports %s — brain uses the standard library only"
                        % (path, ", ".join("`%s`" % b for b in bad)))

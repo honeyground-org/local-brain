@@ -154,6 +154,12 @@ else:
         [("brain/x.py", "", "import requests\n")], local)) == 1)
     check("⛔ …also as `from x import y` and inside a function", len(r.import_problems(
         [("brain/x.py", "", "def f():\n    from numpy import array\n")], local)) == 1)
+    check("optional model service permits only its declared dependencies", not r.import_problems(
+        [("runtime/embeddinggemma/service.py", "", "import torch\nfrom sentence_transformers import SentenceTransformer\n")], local))
+    check("optional dependency exception cannot leak into core", bool(r.import_problems(
+        [("brain/x.py", "", "import torch\n")], local)))
+    check("optional service does not permit arbitrary dependencies", bool(r.import_problems(
+        [("runtime/embeddinggemma/service.py", "", "import requests\n")], local)))
     check("an import already there before the change is not new", not r.import_problems(
         [("brain/x.py", "import yaml\n", "import yaml\nimport os\n")], local))
     check("⛔ a file that does not parse fails", len(r.import_problems([("brain/x.py", "", "def (\n")], local)) == 1)

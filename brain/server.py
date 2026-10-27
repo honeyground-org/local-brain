@@ -90,6 +90,8 @@ TOOLS: List[Dict[str, Any]] = [
                 "body": {"type": "string", "description": "the body (markdown). Write why it matters and how to apply it"},
                 "links": {"type": "array", "items": {"type": "string"},
                           "description": "related memory names — stored as [[links]]"},
+                "search_aliases": {"type": "array", "items": {"type": "string"},
+                                   "description": "optional alternate phrases for finding this memory; stored with the document, not as global synonyms"},
             },
             "required": ["name", "description", "type", "body"],
         },
@@ -189,6 +191,9 @@ def tools_for(db) -> List[Dict[str, Any]]:
             props = t["inputSchema"]["properties"]
             props["type"]["description"] = (props["type"]["description"].replace("{kinds}", kinds_txt)
                                             + ("" if kinds_txt else "; any short word"))
+        if t["name"] in ("recall", "remember"):
+            from brain import i18n
+            t["description"] += " " + i18n.host_language_instruction()
     return out
 
 
@@ -292,6 +297,10 @@ def _do_remember(db, args: dict) -> str:
     if not name:
         return "the name is empty."
     path = os.path.join(_memory_dir(), name + ".md")
+    import unicodedata
+    aliases = list(dict.fromkeys(unicodedata.normalize("NFKC", a).strip()
+                                 for a in args.get("search_aliases", []) if isinstance(a, str) and a.strip()))
+    alias_line = "search_aliases: " + json.dumps(aliases, ensure_ascii=False) + "\n" if aliases else ""
     links = args.get("links") or []
     link_line = ("\n\nrelated: " + " · ".join("[[%s]]" % l for l in links)) if links else ""
     # ★The evidence date is always written★ (added 2026-08-12)
@@ -302,9 +311,9 @@ def _do_remember(db, args: dict) -> str:
     # The moment of saving is exactly "the moment this content was judged true", so today's date is right.
     # An edit overwrites it with today again too — fixing something means confirming it again right then.
     doc = ("---\nname: %s\ndescription: %s\nverified_at: %s\n"
-           "metadata:\n  node_type: memory\n  type: %s\n---\n\n%s%s\n"
+           "%smetadata:\n  node_type: memory\n  type: %s\n---\n\n%s%s\n"
            % (name, args["description"].replace("\n", " "),
-              time.strftime("%Y-%m-%d"), args["type"],
+              time.strftime("%Y-%m-%d"), alias_line, args["type"],
               args["body"].rstrip(), link_line))
     existed = os.path.exists(path)
     with open(path, "w", encoding="utf-8") as fh:
@@ -325,7 +334,15 @@ def _words_unsure(db, rows: List[dict]) -> bool:
         return False
 
 
-def call_tool(db, name: str, args: dict) -> str:
+def call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=None) -> str:
+    if name == "recall":
+        from brain import vectors
+        with vectors.search_session():
+            return _call_tool(db, name, args, _measure=_measure, _capture=_capture)
+    return _call_tool(db, name, args, _measure=_measure, _capture=_capture)
+
+
+def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=None) -> str:
     if name == "timeline":
         from brain import timeline
         return timeline.render(timeline.recent(
@@ -334,7 +351,7 @@ def call_tool(db, name: str, args: dict) -> str:
         t0 = time.time()
         q, k = args["query"], int(args.get("k") or 8)
         terms = args.get("terms") or []
-        rows = search.recall(db, q, k=k, extra_terms=terms, kinds=args.get("kinds"), sources=args.get("sources"))
+        rows = search.recall(db, q, k=k, extra_terms=terms, kinds=args.get("kinds"), sources=args.get("sources"), log=not _measure)
         hint = ""
         if not args.get("terms"):
             hint = ("\n\n⛔ hint: called with no `terms`. A memory is usually worded differently "
@@ -383,8 +400,20 @@ def call_tool(db, name: str, args: dict) -> str:
             #    engine chosen would read "unavailable" under every unsure answer.
             if mrows or not auto:
                 more = "\n\n" + _fmt_meaning(mrows, why, cost, start, auto=auto)
-        _note_recall(args, rows, sk, mrows, why, cached, t0, auto=auto,
-                     unsure=was_unsure, bridged=len(bridged), reordered=reordered)
+        if not _measure:
+            if not args.get("kinds") and not args.get("sources") and k == 8 and args.get("semantic_k") != 0:
+                from brain import personal
+                rows = personal.apply(db, q, rows, k, terms=terms)
+                if mrows is not None:
+                    shown = {r["name"] for r in rows}
+                    mrows = [r for r in mrows if r["name"] not in shown]
+                    start = len([r for r in rows if not r.get("related")]) + 1
+                    more = ("\n\n" + _fmt_meaning(mrows, why, cost, start, auto=auto)
+                            if mrows or not auto else "")
+            _note_recall(args, rows, sk, mrows, why, cached, t0, auto=auto,
+                         unsure=was_unsure, bridged=len(bridged), reordered=reordered)
+        if _capture is not None:
+            _capture.extend(rows)
         return head + _fmt_recall(rows) + more + hint
     if name == "remember":
         return _do_remember(db, args)
@@ -519,10 +548,12 @@ def serve() -> int:
         mid = req.get("id")
         try:
             if method == "initialize":
+                from brain import i18n
                 pv = (req.get("params") or {}).get("protocolVersion") or PROTOCOL_FALLBACK
                 _result(mid, {"protocolVersion": pv,
                               "capabilities": {"tools": {"listChanged": False}},
-                              "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION}})
+                              "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+                              "instructions": i18n.host_language_instruction()})
             elif method in ("notifications/initialized", "initialized"):
                 continue                      # a notification gets no reply
             elif method == "ping":

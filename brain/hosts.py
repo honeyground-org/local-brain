@@ -367,7 +367,7 @@ class ClaudeCode(Host):
                 if name in read:
                     out.append(("read", (x.get("input") or {}).get("file_path") or ""))
                 elif name == "recall" or name.endswith("__recall"):
-                    out.append(("recall_call", x.get("id") or ""))
+                    out.append(("recall_call", x.get("id") or "", x.get("input") or {}))
             elif x.get("type") == "tool_result":
                 c = x.get("content")
                 text = c if isinstance(c, str) else " ".join(

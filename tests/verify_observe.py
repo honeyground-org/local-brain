@@ -217,12 +217,12 @@ def main() -> int:
     r = _run("lexical", "a question about the ledger routine")["row"]
     check("② words answered: attached by words, stage times, no reindex",
           r.get("attached") == {"lexical": 1, "trigger": 0, "semantic": 0, "graph": 0}
-          and set(r.get("t", {})) >= {"index", "lexical", "triggers"} and r.get("reindex") == {"ran": False},
+          and set(r.get("t", {})) >= {"index", "lexical", "triggers"} and r.get("reindex") == {"ran": False, "deferred": ["index"]},
           json.dumps({k: r.get(k) for k in ("attached", "t", "reindex")}))
     r = _run("reindex", "a question about the ledger routine")["row"]
     rx = r.get("reindex") or {}
-    check("② a reindex is recorded: ran, its seconds, how many documents changed",
-          rx.get("ran") is True and rx.get("changed") == 3 and (rx.get("secs") or 0) >= 0.05, json.dumps(rx))
+    check("② reindex is deferred rather than run in the request",
+          rx.get("ran") is False and rx.get("deferred") == ["index"], json.dumps(rx))
     r = _run("trigger", "a question that names a declared thread")["row"]
     check("② a declared trigger is counted as a trigger, not as words",
           r.get("attached") == {"lexical": 0, "trigger": 1, "semantic": 0, "graph": 0}, json.dumps(r.get("attached")))

@@ -189,10 +189,31 @@ def main() -> int:
     took = time.time() - t
     rec = json.loads(open(log, encoding="utf-8").read().splitlines()[-1]) if os.path.exists(log) else {}
     rx = rec.get("reindex") or {}
-    check("⑥ the hook answers from the edited note", "routine_note" in r.stdout, r.stdout[-120:])
+    check("⑥ the hook never attaches the old version of an edited note", "routine_note" not in r.stdout, r.stdout[-120:])
     check("⑥ it records the reindex and what it left for later",
-          rx.get("ran") is True and rx.get("deferred") == ["sync", "heal"], json.dumps(rx))
+          rx.get("ran") is False and rx.get("deferred") == ["index"], json.dumps(rx))
     check("⑥ and the worker it started clears the mark", wait_cleared(_TMP), "hook took %.2fs" % took)
+    r2 = subprocess.run([sys.executable, drv], capture_output=True, text=True, timeout=30,
+                        env=dict(os.environ, ROOT=ROOT, LOG=log, WORD="lavender"), encoding="utf-8")
+    check("⑥ after the worker finishes the edited note is recalled", "routine_note" in r2.stdout)
+    wait_cleared(_TMP)
+    # A live process keeps its lease even after the legacy recovery grace.
+    check("⑦ take the worker lease", deferred._take_lock())
+    os.utime(deferred._lock_path(), (old_t, old_t))
+    check("⑦ never steal a live worker's old lease", not deferred._take_lock())
+    deferred._release()
+    # A real process blocked in work must terminate with a failure, leaving pending work.
+    deferred.mark(db, ["sync"])
+    driver = "from brain import deferred; import time; deferred.run=lambda db: time.sleep(30); raise SystemExit(deferred.main())"
+    t = time.monotonic()
+    expired = subprocess.run([sys.executable, "-c", driver], cwd=ROOT,
+                             env=dict(os.environ, BRAIN_WORKER_TIMEOUT="0.2"), timeout=3)
+    check("⑧ worker wall bounds blocked work and reports failure", expired.returncode == 3
+          and time.monotonic() - t < 2 and bool(deferred.pending(db))
+          and not deferred._alive(deferred._owner().get("pid", 0)))
+    check("⑧ failed worker does not respawn immediately", not deferred.kick(db))
+    time.sleep(0.25)  # the injected worker budget also caps its cooldown
+    check("⑧ unfinished work resumes after a timeout", deferred.kick(db) and wait_cleared(_TMP))
     db.close()
 
     print("=" * 78)
