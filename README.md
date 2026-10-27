@@ -35,8 +35,8 @@ brain status
 
 Your memory files, private configuration and index stay outside the tracked source. Back up the Brain
 home before changing embedding profiles. Existing macOS/Linux MCP servers reload changed Python code
-before answering the next request; reconnect clients after changing language/engine configuration,
-and restart MCP clients on Windows. Hooks start a fresh process for each invocation.
+or configuration before answering the next request. Reconnect clients to refresh cached tool
+descriptions, and restart MCP clients on Windows. Hooks start a fresh process for each invocation.
 
 The repository also keeps an early static introduction page under [`landing/`](landing/README.md).
 Updating this README or installing the runtime does not publish or redeploy that page.

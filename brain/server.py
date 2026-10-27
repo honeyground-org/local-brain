@@ -469,6 +469,13 @@ def _code_on_disk() -> tuple:
             if n.endswith(".py"):
                 st = os.stat(os.path.join(here, n))
                 out.append((n, st.st_mtime_ns, st.st_size))
+        # Engine choice is cached at import. Existing hosts must reload configuration too.
+        config = store.default_config_path()
+        try:
+            st = os.stat(config)
+            out.append((config, st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((config, 0, 0))
     except OSError:
         return ()
     return tuple(out)
