@@ -92,6 +92,8 @@ published manifest; otherwise it is read from the brain home as `embeddinggemma.
 `BRAIN_EMBED_CHUNK_TOKENS` selects the provisional total formatted budget (default 768, maximum 2048).
 `BRAIN_EMBED_DIM` supports 768/512/256/128. `BRAIN_LOCAL_EMBED_TIMEOUT` bounds each local HTTP request
 (default 5 seconds); the hook's process watchdog remains the outer deadline.
+Background document batches use `BRAIN_LOCAL_EMBED_BUILD_TIMEOUT` (default 30 seconds), independently
+of the interactive query deadline, so a cold document batch can finish without lengthening recall.
 
 The new vector key preserves `(doc_id, chunk_no, model, dim)` spaces. Existing vectors migrate
 transactionally without changing their values. Current source versions alone are served. Plans and

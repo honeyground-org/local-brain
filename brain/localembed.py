@@ -40,11 +40,11 @@ class Client:
                 return None
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
-    def request(self, route, body):
+    def request(self, route, body, timeout=None):
         body = dict(body, space=self.space)
         req = urllib.request.Request(self.base + '/' + route, data=json.dumps(body).encode('utf-8'),
                                      headers={'Content-Type': 'application/json'})
-        with self.http.open(req, timeout=self.timeout) as response:
+        with self.http.open(req, timeout=self.timeout if timeout is None else timeout) as response:
             result = json.load(response)
         if result.get('space') != self.space:
             raise LocalEmbeddingError('runtime changed; refusing mixed vector spaces')
@@ -66,8 +66,14 @@ class Client:
     def embed(self, texts, dim, side='doc', titles=None):
         if dim not in embedplan.DIMS:
             raise LocalEmbeddingError('unsupported EmbeddingGemma output dimension')
+        timeout = self.timeout
+        if side == 'doc':
+            timeout = float(os.environ.get('BRAIN_LOCAL_EMBED_BUILD_TIMEOUT', '30'))
+            if not math.isfinite(timeout) or timeout <= 0:
+                raise LocalEmbeddingError('invalid document embedding timeout')
         result = self.request('embeddings', {'input': list(texts), 'side': side,
-                                           'titles': list(titles or [''] * len(texts)), 'dimensions': dim})
+                                           'titles': list(titles or [''] * len(texts)), 'dimensions': dim},
+                              timeout=timeout)
         rows = result['embeddings']
         if len(rows) != len(texts):
             raise LocalEmbeddingError('embedding response count mismatch')
