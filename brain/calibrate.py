@@ -505,7 +505,7 @@ def measure(db: sqlite3.Connection) -> dict:
 #       the measured decision, as before), and `search.fused` merges words, meaning and the whole-body passage by
 #       reciprocal rank — used by MCP `recall` only when the words are unsure. The hook and every measurement call
 #       recall as before; bumped because `search` changed.
-CODE_GENERATION = 34  # Carry each user's language policy through host context.
+CODE_GENERATION = 35  # Candidate chunk bounds follow the selected profile's actual document sizes.
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

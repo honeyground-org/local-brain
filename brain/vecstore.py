@@ -72,6 +72,14 @@ class SqliteVectors:
                           "WHERE v.model=? AND v.dim=? AND v.sha=d.sha", (model, dim)).fetchone()[0]
 
 
+def chunk_candidate_limit(db: sqlite3.Connection, model: str, dim: int, n_docs: int) -> int:
+    """Bound per-chunk retrieval from this profile's actual document sizes, never a fixed cap."""
+    rows = db.execute("SELECT COUNT(*) n FROM vectors v JOIN docs d ON d.id=v.doc_id "
+                      "WHERE v.model=? AND v.dim=? AND v.sha=d.sha GROUP BY v.doc_id", (model, dim))
+    sizes = [r[0] for r in rows]
+    return min(sum(sizes), max(0, int(n_docs)) * max(sizes, default=0))
+
+
 def make(c: dict):
     """The backend a choice names (§stores.backends) — the local copy when it names none that loads."""
     b = None if c.get("error") else stores.backends("vector").get(c.get("backend", ""))
