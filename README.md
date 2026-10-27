@@ -23,6 +23,24 @@ cd ~/tools/local-brain && ./install.sh --with-hook --with-guard
 
 ---
 
+## Updating an existing installation
+
+Update the checkout your installed launchers already use:
+
+```bash
+git pull --ff-only origin main
+brain engines
+brain status
+```
+
+Your memory files, private configuration and index stay outside the tracked source. Back up the Brain
+home before changing embedding profiles. Existing macOS/Linux MCP servers reload changed Python code
+before answering the next request; reconnect clients after changing language/engine configuration,
+and restart MCP clients on Windows. Hooks start a fresh process for each invocation.
+
+The repository also keeps an early static introduction page under [`landing/`](landing/README.md).
+Updating this README or installing the runtime does not publish or redeploy that page.
+
 ## Why the AI era needs a brain
 
 Models keep getting faster. What they cannot bring by themselves is **your context**: your decisions,
@@ -60,23 +78,37 @@ flowchart LR
 
 ## Personal memory and performance
 
-**Current local embedding design:** [EmbeddingGemma optimisation](docs/plans/embeddinggemma-optimisation.md).
-Brain will call a local `embeddinggemma-300m` service directly; subscription CLIs are not in the
-embedding path. The plan covers exact token budgeting, complete source coverage, per-chunk reuse,
-a resident model with query-priority scheduling, measured dimension/precision choices, graph context
-and reversible per-user adaptation. The [reference runtime and adapter](runtime/embeddinggemma/README.md)
-now implement token-safe planning, cached incremental ingestion and a resident query-priority service.
-Contract checks pass with a fake encoder. An actual pinned-model offline CPU smoke check also passed:
-Korean/English 768-dimensional outputs, exact prompt parity and full-source token planning.
-A full-corpus diagnostic and repeated runtime measurements have completed: source coverage passed,
-while the initial component comparison did not establish retrieval parity. A three-arm host study
-now compares native memory, the preserved old index and the integrated current Brain. Development
-continues on the current Brain, including backend integration and request-local reuse; the initial
-model swap is not its final assessment. The optional runtime remains experimental;
-independent chronological validation and complete accelerator-memory accounting remain pending.
-Automatic tuning/promotion remains planned. Existing Gemini selections remain unchanged. The
-subscription workflow below concerns memory authoring only.
+Brain supports **Google's `embeddinggemma-300m` running locally**, alongside explicitly selected
+remote providers. Brain calls the local service directly; Claude/Codex CLIs author memories and do
+not generate embedding vectors. The Python core uses the standard library; the optional local model
+runs in its own Python environment.
 
+The local path includes exact-token chunk planning, complete body-span coverage, incremental chunk
+reuse, a resident model with query priority, separate vector spaces and request-local search reuse.
+The selected Qdrant/Neo4j integrations continue to serve vector and graph retrieval. Existing notes
+and old model vectors are preserved when preparing a new profile.
+
+See [runtime setup](runtime/embeddinggemma/README.md) for the pinned model, dependencies, loopback
+service and manifest. Once the service is running and its manifest is available in the Brain home:
+
+```bash
+brain engines --set embed=embeddinggemma --model google/embeddinggemma-300m --base-url http://127.0.0.1:18081/v1
+brain vec build
+brain vec calibrate
+brain engines
+```
+
+Start the service automatically with your OS service manager if you want semantic retrieval after a
+restart. Keep its model, manifest and cache outside the repository. Changing an existing embedding
+provider is an explicit user choice; installing/updating Brain does not silently switch everyone.
+A local service failure never triggers a paid-provider fallback.
+
+**What has been checked:** model prompt parity, complete source-span planning, incremental reuse,
+backend retrieval and repeated latency diagnostics. These checks do not establish superiority over
+native Claude/Codex memory. The first three-arm host study exposed out-of-scope searches and needs a
+clean rerun before its quality figures can support a comparison. Independent chronological validation,
+full accelerator-memory accounting and automatic profile tuning/promotion remain unfinished.
+See the [optimisation plan](docs/plans/embeddinggemma-optimisation.md) for the remaining scope.
 
 The objective is a memory system that adapts to **your** vocabulary, documents and work as you use it.
 The method ships with the program; learned policies and observations stay in your own brain home.
