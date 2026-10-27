@@ -473,6 +473,13 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
     #    The only case filtered out is ★an alias identical to its target★ (that adds nothing).
     declared = [(a, t) for a, t in _declared_pairs(scan) if a != t]
 
+    try:
+        search_aliases = json.loads(meta.get("search_aliases", "[]"))
+        if not isinstance(search_aliases, list):
+            search_aliases = []
+        search_aliases = [a.strip() for a in search_aliases if isinstance(a, str) and a.strip()]
+    except ValueError:
+        search_aliases = []
     aliases = set()
     # The name without its kind prefix (`feedback_x` → `x`) is not added here: which prefixes are
     # kinds is a fact about ★the whole corpus★, so it is derived after indexing (§_build_kind_aliases).
@@ -485,6 +492,7 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
             aliases.add(variant)
     return {
         "name": name, "aliases": sorted(aliases), "declared": declared,
+        "search_aliases": search_aliases,
         "triggers": _triggers_of(meta),
         "path": path, "source": source,
         "evidence_date": evidence_date(raw, meta),
@@ -554,9 +562,20 @@ def _match(name: str, pattern: str) -> bool:
 
 # ---------------------------------------------------------------- DB
 
-def connect() -> sqlite3.Connection:
+def connect(readonly: bool = False, initialize: bool = True, timeout: float = 15.0) -> sqlite3.Connection:
+    if readonly:
+        from pathlib import Path
+        db = sqlite3.connect(Path(db_path()).resolve().as_uri() + "?mode=ro", uri=True, timeout=0.05)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA query_only=ON")
+        return db
+    if not initialize:
+        from pathlib import Path
+        db = sqlite3.connect(Path(db_path()).resolve().as_uri() + "?mode=rw", uri=True, timeout=timeout)
+        db.row_factory = sqlite3.Row
+        return db
     os.makedirs(brain_home(), exist_ok=True)
-    db = sqlite3.connect(db_path(), timeout=15.0)
+    db = sqlite3.connect(db_path(), timeout=timeout)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA synchronous=NORMAL")
@@ -960,11 +979,14 @@ def _touch(db: sqlite3.Connection, doc_id: Optional[int] = None, terms=()) -> No
 
 
 def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0) -> int:
+    from brain import stores
+    stores.invalidate(db)
     fields = [
         (doc["name"].replace("_", " "), _W_NAME),
         (doc["title"], _W_TITLE),
         (doc["description"], _W_DESC),
         (doc["body"], _W_BODY),
+        (" ".join(doc.get("search_aliases", [])), _W_BODY),
     ]
     if _W_HISTORY > 0:
         hist = " ".join(history_of(doc["path"]))
@@ -1363,6 +1385,9 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
         # A vanished file vanishes from the index too (so no orphaned evidence remains).
         gone = [(p, pid) for p, (pid, _, _, _) in existing.items() if p not in seen_paths]
         removed = [pid for _, pid in gone]
+        if gone:
+            from brain import stores
+            stores.invalidate(db)
         for path, doc_id in gone:
             _touch(db, doc_id)
             db.execute("DELETE FROM postings WHERE doc_id=?", (doc_id,))

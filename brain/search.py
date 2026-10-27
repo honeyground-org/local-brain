@@ -945,7 +945,11 @@ def evidence(db: sqlite3.Connection, query: str, row, chunk_no: Optional[int] = 
     width = width or rerank.EXCERPT
     body = (row["body"] or "").strip()
     if chunk_no is not None:
-        spans = vectors.chunk_spans(body)
+        if vectors.PROVIDER == "embeddinggemma":
+            from brain import localembed
+            spans = localembed.spans(db, row["id"])
+        else:
+            spans = vectors.chunk_spans(body)
         if not 0 <= chunk_no < len(spans):
             return None
         lo, hi, empty = spans[chunk_no][0], spans[chunk_no][1], "centre"

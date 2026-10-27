@@ -8,7 +8,7 @@ backend).
 
 ★Exact by default★ — `GROUP BY doc_id` over the cosine distance of every chunk, the same question the local
 scan answers, so the answers are the same. `index = "hnsw"` adds pgvector's approximate index and asks it
-for `n_docs × MAX_CHUNKS_PER_DOC` nearest chunks first, for a corpus where a full scan is too slow.
+for nearest chunks using this profile's measured document sizes, for a corpus where a full scan is too slow.
 
 Measured on the author's notes (1,923 documents, 9,852 chunks, 2026-10-10), 40 questions: exact — every
 answer identical, score difference 0.0, ~29 ms (local scan ~190 ms); hnsw — 100% of the top 10 once its
@@ -106,13 +106,13 @@ class PgVectors:
 
     def search(self, db: sqlite3.Connection, q: Sequence[float], model: str, dim: int,
                n_docs: int) -> List[Tuple[int, float]]:
-        from brain import vectors
+        from brain import vecstore
         t, qv = self.table(model, dim), _vec(q)
         first = ""
         if self.index == "hnsw":
             # ⛔ the index returns at most `hnsw.ef_search` rows (40 by default) whatever LIMIT asks — measured
             #    2026-10-10: top-10 overlap 84.5% until the breadth was raised with the request
-            want = int(n_docs) * vectors.MAX_CHUNKS_PER_DOC
+            want = vecstore.chunk_candidate_limit(db, model, dim, n_docs)
             first = "SET hnsw.ef_search = %d; " % max(self.ef_search, min(1000, want))
             src = "(SELECT doc_id, vec <=> '%s' AS d FROM %s ORDER BY vec <=> '%s' LIMIT %d) AS near" % (qv, t, qv, want)
         else:

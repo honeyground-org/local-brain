@@ -49,6 +49,11 @@ _ROLE_ENV = {"embed": "EMBED", "judge": "JUDGE"}
 # ⛔ A default model is a convenience, not a recommendation — every one is overridable, and the
 #    display says when a model came from here rather than from the person.
 PROVIDERS: Dict[str, dict] = {
+    "embeddinggemma": {
+        "roles": ("embed",), "base": "http://127.0.0.1:18081/v1",
+        "key_env": "", "key_field": "",
+        "model": {"embed": "google/embeddinggemma-300m"},
+    },
     "gemini": {
         "roles": ("embed", "judge"),
         "base": "https://generativelanguage.googleapis.com/v1beta",
@@ -148,7 +153,7 @@ def api_key(c: dict) -> str:
     ⛔ Raises only when the engine needs one — a local OpenAI-compatible server does not.
     """
     p = PROVIDERS.get(c.get("provider", ""), {})
-    if c.get("provider") in ("stub", "none"):
+    if c.get("provider") in ("stub", "none", "embeddinggemma"):
         return ""
     k = os.environ.get(p.get("key_env") or "", "").strip()
     if not k:

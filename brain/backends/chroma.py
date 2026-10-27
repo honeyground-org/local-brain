@@ -3,9 +3,9 @@
 What it is sent: the vectors and `{doc_id, chunk_no}` — never text (all `vecstore.sync` hands any vector
 backend). One collection per (namespace, embedding model, dimension), cosine distance.
 
-Chroma answers per chunk and has no grouping, so a search asks for `n_docs × MAX_CHUNKS_PER_DOC` chunks
-and keeps each document's best one. That is enough: the best chunk of the n-th best document can be
-outranked only by chunks of the n−1 documents above it, at most 12 each.
+Chroma answers per chunk and has no grouping. The candidate count uses this profile's actual maximum
+chunks per current document, capped by its total chunks, and keeps each document's best one. Long
+documents have no fixed ingestion cap.
 
 Chroma's index is approximate (HNSW). Measured on the author's notes (1,923 documents, 9,852 chunks,
 2026-10-10): `ef_search` 200 kept the top 1 of all 40 questions but 97–98% of the top 10; ★1000 (the
@@ -98,10 +98,13 @@ class ChromaVectors:
 
     def search(self, db: sqlite3.Connection, q: Sequence[float], model: str, dim: int,
                n_docs: int) -> List[Tuple[int, float]]:
-        from brain import vectors
+        from brain import vecstore
+        want = vecstore.chunk_candidate_limit(db, model, dim, n_docs)
+        if not want:
+            return []
         cid = self._id(model, dim)
         r = self._call("POST", "/collections/%s/query" % cid, {
-            "query_embeddings": [[float(x) for x in q]], "n_results": int(n_docs) * vectors.MAX_CHUNKS_PER_DOC,
+            "query_embeddings": [[float(x) for x in q]], "n_results": want,
             "include": ["distances", "metadatas"]})
         best: Dict[int, float] = {}
         for meta, dist in zip((r.get("metadatas") or [[]])[0], (r.get("distances") or [[]])[0]):

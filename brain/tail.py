@@ -287,6 +287,8 @@ def _use(ev: tuple, rec: dict) -> None:
     kind = ev[0]
     if kind == "recall_call":
         u["calls"] = (u["calls"] + [ev[1]])[-SHOWN_KEEP:]
+        if len(ev) > 2:
+            u["recall_args"] = ev[2]
         return
     db = _db()
     if kind == "hook":
@@ -311,6 +313,12 @@ def _use(ev: tuple, rec: dict) -> None:
                               "rank": hit["names"].index(doc["name"]) + 1 if hit else None,
                               "shown": len(hit["names"]) if hit else None,
                               "turns_ago": u["turn"] - hit["turn"] if hit else None})
+        from brain import personal
+        request = u.get("recall_args") or {}
+        if not request.get("sources") and not request.get("kinds") and int(request.get("k") or 8) == 8:
+            personal.record(db, request.get("query") or u.get("query", ""), doc["path"],
+                            rec.get("session_id", ""), u["turn"], exposed=bool(hit),
+                            terms=request.get("terms") or [])
         with db:
             db.execute("INSERT INTO usage(path, opens) VALUES(?, 1) "
                        "ON CONFLICT(path) DO UPDATE SET opens=opens+1", (doc["path"],))
@@ -327,6 +335,8 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
         tail["user_says"] = (tail["user_says"] + [text[:USER_SAY_CHARS]])[-LIST_CAP:]
         u = rec.setdefault("use", {"turn": 0, "shown": [], "calls": [], "opened": []})
         u["turn"] += 1
+        u["query"] = text[:USER_SAY_CHARS]
+        u.pop("recall_args", None)
         return
     for ev in host.brain_events(line):
         try:
@@ -340,6 +350,11 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
             tail["_saved"] = True
             continue
         if kind == "path":
+            try:
+                from brain import personal
+                personal.edited(_db(), rec.get("session_id", ""), rec.get("use", {}).get("turn", 0))
+            except Exception:
+                pass
             fp = str(arg or "")
             kind = _classify(fp)
             if kind == "skip":

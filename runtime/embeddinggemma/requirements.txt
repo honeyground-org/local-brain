@@ -1,0 +1,4 @@
+# Optional model service only. Brain's core still has no runtime dependencies.
+sentence-transformers==6.2.0
+transformers==5.20.2
+torch==2.14.1

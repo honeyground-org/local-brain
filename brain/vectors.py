@@ -45,6 +45,8 @@ from brain import i18n
 
 import array
 import collections
+import contextlib
+import contextvars
 import json
 import math
 import operator
@@ -81,6 +83,9 @@ _QUERY_PREFIX = {"search": "task: question answering\n"}
 
 def model_tag() -> str:
     """The name of the vector space used for storing and lookup. A different model or prefix scheme is a different space."""
+    if PROVIDER == "embeddinggemma":
+        from brain import localembed
+        return localembed.tag()
     return MODEL + ("+" + TASK if TASK else "")
 # ★Dimension 768 · task prefix★ — measured A/B (2026-08-24, same pool of 215 documents):
 #     A 256, no prefix   : 1st 13/34 · top-3 21/34
@@ -132,6 +137,10 @@ MIN_RATIO_FALLBACK = 99.0   # the same meaning — the silent default for the re
 TOPN_FOR_MEAN = 40          # the relative rule's denominator: the mean of this query's top N cosines
 
 
+def calibration_key(key: str) -> str:
+    return key + "@" + model_tag() + ":" + str(DIM) if PROVIDER == "embeddinggemma" else key
+
+
 def _meta_float(db, key: str, env: str, fallback: float) -> float:
     v = os.environ.get(env, "").strip()
     if v:
@@ -139,7 +148,7 @@ def _meta_float(db, key: str, env: str, fallback: float) -> float:
     if db is not None:
         try:
             from brain import store
-            got = store.get_meta(db, key)
+            got = store.get_meta(db, calibration_key(key))
             if got:
                 return float(got)
         except Exception:                                # noqa: BLE001
@@ -167,7 +176,7 @@ def min_ratio(db=None) -> float:
     return _meta_float(db, "vec_min_ratio", "BRAIN_EMBED_MIN_RATIO", MIN_RATIO_FALLBACK)
 
 
-MAX_CHUNKS_PER_DOC = 12        # so a very long document does not swallow the corpus (one is 38,000 characters)
+# Document coverage has no prefix cap; ingestion is bounded by batch and quota instead.
 
 
 def endpoint_host() -> str:
@@ -291,6 +300,9 @@ def embed(texts: Sequence[str], model: str = "", dim: int = 0,
     """
     if not texts:
         return []
+    if PROVIDER == "embeddinggemma":
+        from brain import localembed
+        return localembed.client().embed(texts, dim or DIM, side=side)
     from . import privacy
     texts, _hidden = privacy.scrub_all(texts)      # ★right before the remote★ — the stub path included
     model, dim = model or MODEL, dim or DIM
@@ -425,7 +437,7 @@ def chunks(text: str, head: str = "") -> List[str]:
         return []
     out, i = [], 0
     step = max(200, CHUNK_CHARS - CHUNK_OVERLAP)
-    while i < len(text) and len(out) < MAX_CHUNKS_PER_DOC:
+    while i < len(text):
         piece = text[i:i + CHUNK_CHARS]
         out.append((head + "\n" + piece).strip() if not out and head else piece)
         i += step
@@ -439,7 +451,7 @@ def chunk_spans(text: str) -> List[Tuple[int, int]]:
     out: List[Tuple[int, int]] = []
     i = 0
     step = max(200, CHUNK_CHARS - CHUNK_OVERLAP)
-    while i < len(text) and len(out) < MAX_CHUNKS_PER_DOC:
+    while i < len(text):
         out.append((i, min(len(text), i + CHUNK_CHARS)))
         i += step
     return out
@@ -474,7 +486,12 @@ def best_chunks(db: sqlite3.Connection, query: str, doc_ids: Sequence[int]) -> D
         doc = docs.get(did)
         if doc is None or any(sha != doc["sha"] for _, sha, _ in rows):
             continue
-        if sorted(n for n, _, _ in rows) != list(range(len(chunk_spans(doc["body"] or "")))):
+        if PROVIDER == "embeddinggemma":
+            from brain import localembed
+            spans = localembed.spans(db, did)
+        else:
+            spans = chunk_spans(doc["body"] or "")
+        if sorted(n for n, _, _ in rows) != list(range(len(spans))):
             continue                                     # cut with other settings than today's
         best = None
         for n, _, blob in sorted(rows, key=lambda x: x[0]):
@@ -489,10 +506,24 @@ def best_chunks(db: sqlite3.Connection, query: str, doc_ids: Sequence[int]) -> D
 
 
 def ensure_table(db: sqlite3.Connection) -> None:
-    db.execute("CREATE TABLE IF NOT EXISTS vectors("
-               " doc_id INTEGER NOT NULL, chunk_no INTEGER NOT NULL,"
-               " sha TEXT NOT NULL, model TEXT NOT NULL, dim INTEGER NOT NULL,"
-               " vec BLOB NOT NULL, PRIMARY KEY(doc_id, chunk_no))")
+    """Preserve independently selected model spaces; migrate legacy keys atomically."""
+    definition = (" doc_id INTEGER NOT NULL, chunk_no INTEGER NOT NULL,"
+                  " sha TEXT NOT NULL, model TEXT NOT NULL, dim INTEGER NOT NULL,"
+                  " vec BLOB NOT NULL, PRIMARY KEY(doc_id, chunk_no, model, dim)")
+    db.execute("CREATE TABLE IF NOT EXISTS vectors(" + definition + ")")
+    keys = [r[1] for r in sorted(db.execute("PRAGMA table_info(vectors)"), key=lambda r: r[5]) if r[5]]
+    if keys == ["doc_id", "chunk_no"]:
+        db.execute("SAVEPOINT vector_spaces")
+        try:
+            db.execute("CREATE TABLE vectors_upgrade(" + definition + ")")
+            db.execute("INSERT INTO vectors_upgrade SELECT doc_id,chunk_no,sha,model,dim,vec FROM vectors")
+            db.execute("DROP TABLE vectors")
+            db.execute("ALTER TABLE vectors_upgrade RENAME TO vectors")
+            db.execute("RELEASE vector_spaces")
+        except Exception:
+            db.execute("ROLLBACK TO vector_spaces")
+            db.execute("RELEASE vector_spaces")
+            raise
     db.execute("CREATE INDEX IF NOT EXISTS idx_vec_doc ON vectors(doc_id)")
 
 
@@ -513,23 +544,35 @@ def no_embed_sources() -> List[str]:
 
 
 def stale_docs(db: sqlite3.Connection) -> List[sqlite3.Row]:
-    """Documents with no vector or ★whose content changed★. The sha is checked too, so incremental is free."""
+    """Missing, stale or incomplete documents, including a previously capped suffix."""
     ensure_table(db)
-    skip = no_embed_sources()
-    sql = ("SELECT d.id, d.name, d.source, d.title, d.description, d.body, d.sha "
-           "FROM docs d LEFT JOIN vectors v ON v.doc_id=d.id AND v.chunk_no=0 "
-           "WHERE (v.doc_id IS NULL OR v.sha<>d.sha OR v.model<>? OR v.dim<>?)")
-    args: List = [model_tag(), DIM]
-    if skip:
-        sql += " AND d.source NOT IN (%s)" % ",".join("?" * len(skip))
-        args.extend(skip)
-    return db.execute(sql, args).fetchall()
+    if PROVIDER == "embeddinggemma":
+        from brain import localembed
+        return localembed.stale(db)
+    skip = set(no_embed_sources())
+    held = {}
+    for r in db.execute("SELECT doc_id,chunk_no,sha,model,dim FROM vectors WHERE model=? AND dim=?", (model_tag(), DIM)):
+        held.setdefault(r[0], []).append(tuple(r[1:]))
+    todo = []
+    for row in db.execute("SELECT id,name,source,title,description,body,sha FROM docs"):
+        if row["source"] in skip:
+            continue
+        expected = len(chunk_spans(row["body"] or ""))
+        have = held.get(row["id"], [])
+        good = {n for n, sha, model, dim in have
+                if sha == row["sha"] and model == model_tag() and dim == DIM}
+        if good != set(range(expected)) or len(have) != expected:
+            todo.append(row)
+    return todo
 
 
 def build(db: sqlite3.Connection, limit_docs: int = 0,
           progress: bool = False, only_ids: Optional[Sequence[int]] = None) -> dict:
     """Embed and store only the changed documents. Returns: statistics."""
     ensure_table(db)
+    if PROVIDER == "embeddinggemma":
+        from brain import localembed
+        return localembed.build(db, limit_docs=limit_docs, progress=progress, only_ids=only_ids)
     todo = stale_docs(db)
     # ★Memory files first★ — every gold answer in the evaluation is a memory, so this order lets quality
     #   be measured before the whole corpus is done. The total is unchanged (only the order is).
@@ -575,9 +618,13 @@ def build(db: sqlite3.Connection, limit_docs: int = 0,
         if vecs is None:
             raise EmbedError(429, "429", "the limit keeps hitting")
         n_calls += 1
+        if len(vecs) != len(pend) or any(len(v) != DIM for v in vecs):
+            raise EmbedError(0, "shape", "embedding batch shape does not match the selected model")
         rows = [(p[0], p[1], p[2], model_tag(), DIM, _unit(v).tobytes())
                 for p, v in zip(pend, vecs)]
         with db:
+            from brain import stores
+            stores.invalidate(db, ("vector",))
             db.executemany(
                 "INSERT OR REPLACE INTO vectors(doc_id,chunk_no,sha,model,dim,vec)"
                 " VALUES(?,?,?,?,?,?)", rows)
@@ -588,12 +635,23 @@ def build(db: sqlite3.Connection, limit_docs: int = 0,
         if hit_daily_flag[0]:
             break
         head = "%s — %s" % (row["title"] or row["name"], row["description"] or "")
-        cs = chunks(row["body"] or "", head=head.strip(" —"))
+        body = (row["body"] or "").strip()
+        cs = chunk_spans(body)
         if not cs:
             continue
         with db:
-            db.execute("DELETE FROM vectors WHERE doc_id=?", (row["id"],))
-        for i, c in enumerate(cs):
+            removed = db.execute("DELETE FROM vectors WHERE doc_id=? AND model=? AND dim=? AND (sha<>? OR chunk_no>=?)",
+                                 (row["id"], model_tag(), DIM, row["sha"], len(cs)))
+            if removed.rowcount:
+                from brain import stores
+                stores.invalidate(db, ("vector",))
+        held = {r[0] for r in db.execute("SELECT chunk_no FROM vectors WHERE doc_id=? AND model=? AND dim=?", (row["id"], model_tag(), DIM))}
+        for i, (lo, hi) in enumerate(cs):
+            if i in held:
+                continue  # completed batches survive a quota wall or a process restart
+            c = body[lo:hi]
+            if i == 0 and head.strip(" —"):
+                c = head.strip(" —") + "\n" + c
             pend.append((row["id"], i, row["sha"], c))
             if len(pend) >= BATCH:
                 try:
@@ -607,10 +665,11 @@ def build(db: sqlite3.Connection, limit_docs: int = 0,
             print("  " + i18n.t("vectors.progress", done=n_docs, total=len(todo), chunks=n_chunks,
                                 sec="%.0f" % el, rate="%.0f" % (n_chunks / max(1e-9, el / 60.0)),
                                 waited="%.0f" % waited), flush=True)
-    try:
-        flush()
-    except DailyQuotaReached:
-        hit_daily_flag[0] = True
+    if not hit_daily_flag[0]:
+        try:
+            flush()
+        except DailyQuotaReached:
+            hit_daily_flag[0] = True
     el = time.time() - t0
     left = len(stale_docs(db))
     # a chosen vector store gets what was just embedded (§stores — nothing happens with the default)
@@ -634,6 +693,13 @@ def coverage(db: sqlite3.Connection) -> dict:
             "stale": len(stale_docs(db))}
 
 
+def query_tag() -> str:
+    if PROVIDER == "embeddinggemma":
+        from brain import localembed
+        return "embeddinggemma:" + localembed.client().space
+    return model_tag()
+
+
 def _qcache_get(db: sqlite3.Connection, query: str) -> Optional[array.array]:
     """Query-embedding cache — the same question is never sent twice.
 
@@ -642,12 +708,18 @@ def _qcache_get(db: sqlite3.Connection, query: str) -> Optional[array.array]:
     The cache key holds the model and dimension, so changing the model re-measures automatically.
     """
     import hashlib
+    try:
+        tag = query_tag()
+    except (OSError, ValueError, KeyError, RuntimeError):
+        # An absent/invalid local manifest disables this cache, not lexical recall.
+        # The semantic path reports the actual engine failure separately.
+        return None
     db.execute("CREATE TABLE IF NOT EXISTS vec_qcache("
                " qsha TEXT NOT NULL, model TEXT NOT NULL, dim INTEGER NOT NULL,"
                " vec BLOB NOT NULL, PRIMARY KEY(qsha, model, dim))")
     qsha = hashlib.sha1(query.encode("utf-8")).hexdigest()
     row = db.execute("SELECT vec FROM vec_qcache WHERE qsha=? AND model=? AND dim=?",
-                     (qsha, model_tag(), DIM)).fetchone()
+                     (qsha, tag, DIM)).fetchone()
     if row is None:
         return None
     v = array.array("f")
@@ -661,7 +733,7 @@ def _qcache_put(db: sqlite3.Connection, query: str, vec: array.array) -> None:
     try:
         with db:
             db.execute("INSERT OR REPLACE INTO vec_qcache(qsha,model,dim,vec) "
-                       "VALUES(?,?,?,?)", (qsha, model_tag(), DIM, vec.tobytes()))
+                       "VALUES(?,?,?,?)", (qsha, query_tag(), DIM, vec.tobytes()))
     except sqlite3.Error:
         pass                                             # a failed cache must not block search
 
@@ -674,6 +746,24 @@ def last_search() -> dict:
     backend that answered, by: remote|local, why: why not the chosen one, store_s}. For the per-request
     record (§observe); no text."""
     return dict(_LAST_SEARCH)
+
+
+_SEARCH_SESSION = contextvars.ContextVar("brain_vector_search_session", default=None)
+
+
+@contextlib.contextmanager
+def search_session():
+    """Reuse identical vector-store work inside one request, never across requests."""
+    token = _SEARCH_SESSION.set({})
+    try:
+        yield
+    finally:
+        _SEARCH_SESSION.reset(token)
+
+
+def _search_generation(db):
+    # data_version observes other connections; total_changes observes this connection.
+    return db.execute("PRAGMA data_version").fetchone()[0], db.total_changes
 
 
 def search(db: sqlite3.Connection, query: str, k: int = 5,
@@ -704,8 +794,17 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
     n = max(k, TOPN_FOR_MEAN)
     local = vecstore.SqliteVectors()
     c = stores.choice("vector")
+    session = _SEARCH_SESSION.get()
+    generation = _search_generation(db) if session is not None else None
+    key = ((id(db), model_tag(), DIM, q.tobytes(), json.dumps(c, sort_keys=True))
+           if session is not None else None)
+    held = session.get(key) if session is not None else None
     t1 = time.time()
-    if c["backend"] == "sqlite" or c.get("error"):
+    reused = bool(held and held["generation"] == generation and held["width"] >= n)
+    if reused:
+        order = held["order"][:n]
+        _LAST_SEARCH.update(held["provenance"])
+    elif c["backend"] == "sqlite" or c.get("error"):
         order = local.search(db, q, model_tag(), DIM, n)
         _LAST_SEARCH.update(store="sqlite", by="local", why="choice_error" if c.get("error") else None)
     else:
@@ -717,6 +816,10 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
         _LAST_SEARCH.update(store=c["backend"] if served.get("by") == "remote" else "sqlite",
                             by=served.get("by"), why=served.get("why"))
     _LAST_SEARCH["store_s"] = round(time.time() - t1, 3)
+    _LAST_SEARCH["result_cache_hit"] = reused
+    if session is not None and not reused and generation == _search_generation(db):
+        session[key] = {"generation": generation, "width": n, "order": list(order),
+                        "provenance": {key: _LAST_SEARCH.get(key) for key in ("store", "by", "why")}}
     if not order:
         return []
     head = [c for _, c in order[:TOPN_FOR_MEAN]]
@@ -754,9 +857,9 @@ def calibrate_cos(db: sqlite3.Connection, control: Sequence[str],
             top3 += 1
     if save:
         from brain import store
-        store.set_meta(db, "vec_min_ratio", str(thr))
-        store.set_meta(db, "vec_min_cos", str(round(noise_cos + 0.01, 4)))
-        store.set_meta(db, "vec_model", "%s/%s/%d" % (PROVIDER, model_tag(), DIM))
+        store.set_meta(db, calibration_key("vec_min_ratio"), str(thr))
+        store.set_meta(db, calibration_key("vec_min_cos"), str(round(noise_cos + 0.01, 4)))
+        store.set_meta(db, calibration_key("vec_model"), "%s/%s/%d" % (PROVIDER, model_tag(), DIM))
     return {"gate": "ratio", "min_ratio": thr,
             "noise_ratio_max": round(noise_ratio, 4),
             "noise_cos_max": round(noise_cos, 4),

@@ -12,14 +12,14 @@
       "impact": "high",
       "summary": "the threshold, the margin filter, the scorecard, the per-request records and their monitor",
       "paths": ["brain/calibrate.py", "brain/adaptive.py", "brain/evalinit.py", "brain/scorecard.py",
-                "brain/observe.py", "brain/monitor.py"],
+                "brain/observe.py", "brain/monitor.py", "brain/personal.py"],
       "owners": []
     },
     "retrieval": {
       "impact": "medium",
       "summary": "search, the text index, the language bridge, vectors, triggers, the recall hook",
       "paths": ["brain/search.py", "brain/textindex.py", "brain/translit.py", "brain/lexicon.py", "brain/langdata.py",
-                "brain/rerank.py", "brain/vectors.py", "brain/triggers.py", "brain/hook.py", "brain/judgegate.py"],
+                "brain/rerank.py", "brain/vectors.py", "brain/embedplan.py", "brain/localembed.py", "brain/triggers.py", "brain/hook.py", "brain/judgegate.py"],
       "owners": []
     },
     "storage": {
@@ -45,7 +45,7 @@
       "impact": "high",
       "summary": "installing, the hosts it wires into, the MCP server, corpus discovery",
       "paths": ["brain/install.py", "brain/hosts.py", "brain/server.py", "brain/portable.py", "brain/discover.py",
-                "install.sh", "install/", "bin/", "pyproject.toml", "SETUP-PROMPT.md", "config.example.json",
+                "runtime/embeddinggemma/", "install.sh", "install/", "bin/", "pyproject.toml", "SETUP-PROMPT.md", "config.example.json",
                 "brain/config.example.json", "brain/__init__.py", "brain/launch.py"],
       "owners": []
     },

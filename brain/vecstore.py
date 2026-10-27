@@ -61,7 +61,7 @@ class SqliteVectors:
         best: Dict[int, float] = {}
         for did, blob in db.execute(
                 "SELECT v.doc_id, v.vec FROM vectors v JOIN docs d ON d.id=v.doc_id "
-                "WHERE v.model=? AND v.dim=?", (model, dim)):
+                "WHERE v.model=? AND v.dim=? AND v.sha=d.sha", (model, dim)):
             sc = sum(map(operator.mul, q, _unpack(blob)))
             if sc > best.get(did, -2.0):
                 best[did] = sc
@@ -69,7 +69,15 @@ class SqliteVectors:
 
     def count(self, db: sqlite3.Connection, model: str, dim: int) -> int:
         return db.execute("SELECT COUNT(*) FROM vectors v JOIN docs d ON d.id=v.doc_id "
-                          "WHERE v.model=? AND v.dim=?", (model, dim)).fetchone()[0]
+                          "WHERE v.model=? AND v.dim=? AND v.sha=d.sha", (model, dim)).fetchone()[0]
+
+
+def chunk_candidate_limit(db: sqlite3.Connection, model: str, dim: int, n_docs: int) -> int:
+    """Bound per-chunk retrieval from this profile's actual document sizes, never a fixed cap."""
+    rows = db.execute("SELECT COUNT(*) n FROM vectors v JOIN docs d ON d.id=v.doc_id "
+                      "WHERE v.model=? AND v.dim=? AND v.sha=d.sha GROUP BY v.doc_id", (model, dim))
+    sizes = [r[0] for r in rows]
+    return min(sum(sizes), max(0, int(n_docs)) * max(sizes, default=0))
 
 
 def make(c: dict):
@@ -88,7 +96,7 @@ def sync(db: sqlite3.Connection, backend, full: bool = False, progress: bool = F
     vectors.ensure_table(db)
     desired = {str(r[0]): "%s|%d" % (r[1], r[2]) for r in db.execute(
         "SELECT v.doc_id, MAX(v.sha), COUNT(*) FROM vectors v JOIN docs d ON d.id=v.doc_id "
-        "WHERE v.model=? AND v.dim=? GROUP BY v.doc_id", (model, dim))}
+        "WHERE v.model=? AND v.dim=? AND v.sha=d.sha GROUP BY v.doc_id", (model, dim))}
     stats = {"backend": backend.backend, "target": target, "docs": len(desired),
              "sent_docs": 0, "sent_chunks": 0, "deleted_docs": 0}
     if full:

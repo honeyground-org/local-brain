@@ -62,18 +62,19 @@ def resolve(host: str, port: int = 443, timeout: float = 5.0):
 
 
 class Watchdog:
-    """Fires `on_expire` once at the wall, then ends the process with exit 0.
+    """Fires `on_expire` once at the wall, then ends the process with the configured exit code (default 0).
 
     `claim()` is the one door to the output: the main thread calls it before writing its answer, the
     watchdog calls it before writing what was ready. Whoever gets there first writes; the other
     stays quiet — so the host never reads two answers glued together.
     """
 
-    def __init__(self, seconds: float, on_expire: Callable[[], None]):
+    def __init__(self, seconds: float, on_expire: Callable[[], None], exit_code: int = 0):
         self._lock = threading.Lock()
         self._claimed = False
         self.fired = False
         self._on_expire = on_expire
+        self._exit_code = exit_code
         self._timer = threading.Timer(max(0.0, seconds), self._fire)
         self._timer.daemon = True
 
@@ -95,6 +96,11 @@ class Watchdog:
         if not self.claim():
             return                                       # the main thread is already answering
         self.fired = True
+        # Diagnostic output/cleanup can itself block (for example a Windows log lock).
+        # Keep a separate one-second termination margin even if that callback never returns.
+        terminator = threading.Timer(1.0, lambda: os._exit(self._exit_code))
+        terminator.daemon = True
+        terminator.start()
         try:
             self._on_expire()
         except Exception:                                # noqa: BLE001
@@ -104,9 +110,9 @@ class Watchdog:
                 sys.stdout.flush()                       # ⛔ `os._exit` does not flush buffers
             except Exception:                            # noqa: BLE001
                 pass
-            os._exit(0)
+            os._exit(self._exit_code)
 
 
-def watchdog(seconds: float, on_expire: Callable[[], None]) -> Optional[Watchdog]:
+def watchdog(seconds: float, on_expire: Callable[[], None], exit_code: int = 0) -> Optional[Watchdog]:
     """Start a `Watchdog`. `seconds <= 0` means "already past the wall" — it fires at once."""
-    return Watchdog(seconds, on_expire).start()
+    return Watchdog(seconds, on_expire, exit_code=exit_code).start()

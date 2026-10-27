@@ -761,9 +761,9 @@ def bench(db, n_speed: int = 30) -> dict:
             # ⛔ ★Writing the brain's "automatic read volume" as 0 would be false★ — when the hook
             #    fires it attaches excerpts. The honest way is to ★actually build★ the injected text and measure it.
             try:
-                b_bytes += len(hook._format(keep))
+                b_bytes += len(hook._format(keep).encode("utf-8"))
             except Exception:                            # noqa: BLE001
-                b_bytes += sum(len((r.get("excerpt") or "")) for r in keep)
+                b_bytes += sum(len((r.get("excerpt") or "").encode("utf-8")) for r in keep)
             if any(_ei.gold_hit(gold, r["name"]) for r in keep):
                 b_fire_ok += 1
 
@@ -791,7 +791,8 @@ def bench(db, n_speed: int = 30) -> dict:
     g_ms = (_t.time() - t0) / max(1, len(sample)) * 1000
 
     N = float(len(A)) or 1.0
-    per_named = (len(index_text) / named) if named else 0.0
+    index_bytes = len(index_text.encode("utf-8"))
+    per_named = (index_bytes / named) if named else 0.0
 
     def per(v):                                          # a value that needs the labelled sample
         return v if A else None
@@ -803,23 +804,23 @@ def bench(db, n_speed: int = 30) -> dict:
     #    first column and the screen looks up `bench.<key>` and `unit.<u>`. ★Both in one row, not two copies.★
     rows = [
         ("Answer found (reading only 3)", "%", per(100 * b_top3 / N), per(100 * g_hit3 / N),
-         per(100 * c_hit / N), True, "matched for the same budget — grep has no ranking, so 3 at random",
+         None, True, "native answer accuracy requires a host run; index mentions are not answers",
          "answer", "pct"),
         ("Right thing surfaces unprompted", "%", per(100 * b_fire_ok / N), per(0.0),
-         per(100 * c_hit / N), True, "grep only works when called · the agent alone attaches the same thing regardless of query",
+         None, True, "native automatic recall requires a host run",
          "unprompted", "pct"),
-        ("Memories that can be reached", "items", float(n_mem), float(n_mem), float(named), True,
-         "the agent alone reaches ★only what is named in the index file★", "reachable", "items"),
-        ("Share that can be reached", "%", 100.0, 100.0, 100.0 * named / max(1, n_mem), True, "",
+        ("Memories that can be reached", "items", float(n_mem), float(n_mem), None, True,
+         "a native host can search files beyond its index; measure its actual reads", "reachable", "items"),
+        ("Share that can be reached", "%", 100.0, 100.0, None, True, "",
          "reach_pct", "pct"),
         ("★Storage density★ always-on index per memory", "bytes", 0.0, 0.0, per_named, False,
          "the brain grows the index by ★0 characters★ per new memory (files declare their triggers)",
          "density", "bytes"),
         ("Injected automatically (per firing)", "KB",
-         per((b_bytes / max(1, b_fired)) / 1024.0), None, len(index_text) / 1024.0, False,
+         per((b_bytes / max(1, b_fired)) / 1024.0), None, None, False,
          "the brain injects 2–3 excerpts ★only when it fires★ (ones matching the query) · the agent "
-         "alone loads the whole file ★every session★ · grep injects nothing (n/a)", "injected", "kb"),
-        ("Documents read per answer", "docs", per(3.0), per(float(g_med)), float(named), False,
+         "alone needs measured host context usage · grep injects nothing (n/a)", "injected", "kb"),
+        ("Documents read per answer", "docs", per(3.0), per(float(g_med)), None, False,
          "★the heart of efficiency★", "reads", "docs"),
         ("Latency per recall", "ms", per(b_ms), per(g_ms), None, False,
          "⛔ ★grep is faster★ (and that is not hidden) — in exchange it reads as much as the row "
@@ -827,6 +828,10 @@ def bench(db, n_speed: int = 30) -> dict:
          "latency", "ms"),
     ]
     return {"rows": rows, "n_queries": len(A), "n_mem": n_mem, "named": named, "no_sample": not A,
+            "native_index_gold_mentions": c_hit if A else None,
+            "native_index_bytes": index_bytes,
+            "native_quality_measured": False,
+            "scope": "retrieval diagnostic, not an end-to-end host benchmark",
             "grep_median": g_med,
             "db_mb": os.path.getsize(store.db_path()) / 1e6}
 

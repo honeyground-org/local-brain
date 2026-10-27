@@ -16,7 +16,10 @@ python3 .github/scripts/pr_report.py --local --body my-pr.md    # the report a r
 git push -u origin stores-retry-once               # then open the pull request
 ```
 
-Nothing to install: brain runs on the system `python3` (3.8 or newer) and its standard library.
+Nothing to install for the core: brain runs on the system `python3` (3.8 or newer) and its standard library.
+The optional [EmbeddingGemma service](runtime/embeddinggemma/README.md) runs separately in Python 3.11+
+with declared model dependencies. Only that service has a narrowly scoped import-policy exception;
+model libraries must never be imported by `brain/`.
 
 ## Before you start
 
