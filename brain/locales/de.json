@@ -768,5 +768,6 @@
  "obs.legendRecent": "○ Neue Belege",
  "obs.legendSignal": "◇ Problem / Lektion",
  "obs.legendOther": "● Andere Einträge",
- "obs.languageName": "Deutsch"
+ "obs.languageName": "Deutsch",
+ "obs.reviseLens": "Perspektive verfeinern"
 }

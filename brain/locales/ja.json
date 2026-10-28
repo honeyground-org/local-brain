@@ -768,5 +768,6 @@
  "obs.legendRecent": "○ 最近の根拠",
  "obs.legendSignal": "◇ 問題・教訓",
  "obs.legendOther": "● その他",
- "obs.languageName": "日本語"
+ "obs.languageName": "日本語",
+ "obs.reviseLens": "視点の修正を提案"
 }

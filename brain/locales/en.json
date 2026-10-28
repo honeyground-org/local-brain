@@ -770,5 +770,6 @@
  "obs.legendRecent": "○ Recent evidence",
  "obs.legendSignal": "◇ Problem / lesson",
  "obs.legendOther": "● Other record",
- "obs.languageName": "English"
+ "obs.languageName": "English",
+ "obs.reviseLens": "Refine this perspective"
 }

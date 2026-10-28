@@ -768,5 +768,6 @@
  "obs.legendRecent": "○ Preuves récentes",
  "obs.legendSignal": "◇ Problème / leçon",
  "obs.legendOther": "● Autres entrées",
- "obs.languageName": "Français"
+ "obs.languageName": "Français",
+ "obs.reviseLens": "Affiner cette perspective"
 }

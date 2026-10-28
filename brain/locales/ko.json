@@ -768,5 +768,6 @@
  "obs.legendRecent": "○ 최근 근거",
  "obs.legendSignal": "◇ 문제·교훈",
  "obs.legendOther": "● 기타 기록",
- "obs.languageName": "한국어"
+ "obs.languageName": "한국어",
+ "obs.reviseLens": "관점 수정 의견"
 }

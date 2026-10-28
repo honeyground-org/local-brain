@@ -268,7 +268,7 @@ def save_analysis(db, packet):
                          "ids": refs(insight.get("ids"))})
     import uuid
     revision = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid.uuid4().hex[:8]
-    record = {"revision": revision, "snapshot": packet["snapshot"], "question": text(packet["question"]),
+    record = {"revision": revision, "created_at": dt.datetime.now(dt.timezone.utc).isoformat(), "snapshot": packet["snapshot"], "question": text(packet["question"]),
               "lenses": cleaned, "insights": findings, "changes": text(packet.get("changes", "Initial analysis")),
               "authorship": "host-authored interpretation; evidence references validated, claims not independently verified"}
     referenced = {n for lens in cleaned for category in lens["categories"] for n in category["ids"]}
@@ -291,13 +291,15 @@ def record_feedback(value):
     if not analysis or value.get("revision") != analysis["revision"]:
         raise ValueError("analysis changed; refresh before giving feedback")
     index = value.get("index")
-    if type(index) is not int or not 0 <= index < len(analysis["insights"]):
-        raise ValueError("unknown insight")
+    target = value.get("target", "insight")
+    items = analysis.get("lenses" if target == "lens" else "insights", [])
+    if target not in ("lens", "insight") or type(index) is not int or not 0 <= index < len(items):
+        raise ValueError("unknown feedback target")
     comment = value.get("comment", "")
     if not isinstance(comment, str) or len(comment) > 4000:
         raise ValueError("feedback text is too long")
     row = {"at": dt.datetime.now(dt.timezone.utc).isoformat(), "revision": analysis["revision"],
-           "index": index, "action": value["action"], "comment": comment}
+           "index": index, "target": target, "action": value["action"], "comment": comment}
     fd = os.open(str(analysis_home() / "feedback.jsonl"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False)+"\n")

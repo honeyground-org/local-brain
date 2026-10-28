@@ -768,5 +768,6 @@
  "obs.legendRecent": "○ Evidencia reciente",
  "obs.legendSignal": "◇ Problema / lección",
  "obs.legendOther": "● Otros registros",
- "obs.languageName": "Español"
+ "obs.languageName": "Español",
+ "obs.reviseLens": "Refinar perspectiva"
 }
