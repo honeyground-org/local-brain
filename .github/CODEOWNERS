@@ -72,6 +72,7 @@
 /brain/indexaudit.py @wangjacsi
 /brain/localembed.py @wangjacsi
 /config.example.json @wangjacsi
+/brain/observatory.py @wangjacsi
 /brain/dockerstores.py @wangjacsi
 /runtime/embeddinggemma/ @wangjacsi
 /brain/config.example.json @wangjacsi

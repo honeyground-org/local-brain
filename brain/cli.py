@@ -446,6 +446,9 @@ def main(argv=None) -> int:
     p.add_argument("-o", "--out", default="", help="output path")
     p.add_argument("--no-open", action="store_true")
     p.add_argument("--classic", action="store_true", help="render the classic dashboard fallback")
+    p.add_argument("--serve", action="store_true", help="serve the explorer on loopback with persistent feedback")
+    p.add_argument("--explore", action="store_true", help="explore local memory, activity and relationships in 3D")
+    p.add_argument("--days", type=int, default=30, help="activity window for --explore (1-3650 days)")
 
     sub.add_parser("help", help="★Show every command, grouped by purpose★")
 
@@ -513,6 +516,19 @@ def main(argv=None) -> int:
         print(_help_text())
         return 0
     args = ap.parse_args(argv)
+    if args.cmd == "dashboard" and args.explore:
+        if args.classic or not 1 <= args.days <= 3650:
+            ap.error("--explore requires 1-3650 days and cannot be combined with --classic")
+        from brain import observatory
+        if args.serve:
+            observatory.serve(days=args.days, open_browser=not args.no_open)
+            return 0
+        from contextlib import closing
+        with closing(store.connect(readonly=True)) as db:
+            print(observatory.write(db, args.out, open_browser=not args.no_open, days=args.days))
+        return 0
+    if args.cmd == "dashboard" and args.serve:
+        ap.error("--serve requires --explore")
     db = store.connect()
 
     if args.cmd == "index":

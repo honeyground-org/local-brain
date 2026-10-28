@@ -44,6 +44,69 @@ def visible(html: str) -> str:
     return re.sub(r"<[^>]+>", "\n", body)
 
 
+def verify_observatory():
+    import datetime
+    import json
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+    from brain import observatory
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    store._init(db)
+    for n in (1, 2, 3):
+        db.execute("INSERT INTO docs(id,name,path,source,kind,sha,evidence_date,description) VALUES(?,?,?,?,?,?,?,?)",
+                   (n, "note_%d" % n, "/notes/%d.md" % n, "memory", "project" if n == 1 else "lesson",
+                    str(n), "2026-01-02", "</script><script>bad()</script>" if n == 2 else "Evidence"))
+    db.execute("INSERT INTO links VALUES(2,'note_1')")
+    for day in ("2026-01-01", "2026-01-02"):
+        db.execute("INSERT INTO recalls(ts,query,hits,top) VALUES(?,?,?,?)",
+                   (day+"T12:00:00", "repeat", 1, '["note_2"]'))
+    db.commit()
+    before = list(db.iterdump())
+    original_home = observatory.analysis_home
+    with tempfile.TemporaryDirectory() as temp:
+        observatory.analysis_home = lambda: Path(temp)
+        try:
+            now = datetime.datetime(2026, 1, 3)
+            data = observatory.collect(db, days=7, now=now)
+            check("explorer counts recorded repeats and distinct days", data["repeated"][0]["count"] == 2 and data["repeated"][0]["days"] == 2)
+            check("explorer edges are explicit and directions preserved", data["edges"] == [(2, 1)])
+            check("explorer classification carries provenance", data["nodes"][1]["basis"] == "linked")
+            packet = {"snapshot": observatory.snapshot_id(db), "question": "Explore evidence", "lenses": [
+                {"title": "A new perspective", "why": "Observed connection", "categories": [{"label": "A group", "ids": [1, 2]}]}],
+                "insights": [{"kind": "hypothesis", "text": "A possibility", "ids": [2]}]}
+            saved = observatory.save_analysis(db, packet)
+            observatory.record_feedback({"revision": saved["revision"], "index": 0, "action": "revise", "comment": "Separate these categories"})
+            next_context = observatory.analysis_context(db, offset=0, limit=2)
+            check("host receives prior revision and correction on the next analysis", next_context["previous"]["revision"] == saved["revision"] and next_context["feedback"][0]["action"] == "revise")
+            check("host context is paginated without silently dropping the rest", next_context["total"] == 3 and next_context["next_offset"] == 2)
+            for label, changed in (("unknown evidence", dict(packet, lenses=[{"title": "Bad", "why": "Invalid", "categories": [{"label": "Unknown", "ids": [999]}]}])),
+                                   ("outdated snapshot", dict(packet, snapshot="obsolete"))):
+                rejected = False
+                try:
+                    observatory.save_analysis(db, changed)
+                except ValueError:
+                    rejected = True
+                check("control: reject " + label, rejected)
+            data = observatory.collect(db, days=7, now=now)
+            check("current cited analysis can be used", data["analysis_current"])
+            page = observatory.render(data)
+            check("embedded evidence cannot terminate its JSON script", "</script><script>bad()" not in page and "\\u003c/script" in page)
+            check("offline page blocks network calls", "connect-src 'none'" in page)
+            for lang in i18n.LANGS:
+                check("explorer ships translated controls for " + lang, '"'+lang+'"' in page and i18n.catalog(lang)["obs.title"] in page)
+            check("read and publish leave canonical DB untouched", before == list(db.iterdump()))
+            db.execute("UPDATE docs SET sha='changed' WHERE id=3")
+            check("unrelated changes preserve cited lenses", observatory.collect(db, now=now)["analysis_current"])
+            db.execute("UPDATE docs SET sha='changed' WHERE id=2")
+            check("control: changed cited evidence disables old lenses", not observatory.collect(db, now=now)["analysis_current"])
+            check("only valid published revisions exist", len(list(Path(temp).glob("analysis-*.json"))) == 1)
+        finally:
+            observatory.analysis_home = original_home
+            db.close()
+
+
 def main():
     print("=" * 72 + "\ndashboard — does everything come out in the chosen language\n" + "=" * 72)
     db = store.connect()
@@ -141,6 +204,7 @@ def main():
         i18n._lang = saved_lang
         i18n._cache.clear()
 
+    verify_observatory()
     print("=" * 72)
     print("❌ %d failure(s): %s" % (len(FAIL), ", ".join(FAIL)) if FAIL else "✅ all passed")
     return 1 if FAIL else 0

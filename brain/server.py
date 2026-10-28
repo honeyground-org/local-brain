@@ -53,6 +53,19 @@ _REMEMBER_DESC = (
 
 TOOLS: List[Dict[str, Any]] = [
     {
+        "name": "brain_analyse",
+        "description": "Read paginated evidence, earlier analysis and user feedback to discover NEW perspectives on the user's activity, repeated problems and memory. Use the current host to interpret; no separate AI API is invoked. Read every page for a whole-corpus claim, cite document ids, then publish an evolving view with brain_view.",
+        "inputSchema": {"type": "object", "properties": {
+            "days": {"type": "integer", "minimum": 1, "maximum": 3650},
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 1000}}},
+    },
+    {
+        "name": "brain_view",
+        "description": "Publish a cited, host-authored analysis as a new local Observatory revision; preserves original memories and earlier analyses. Supply snapshot from brain_analyse, question, changes, lenses [{title,why,categories:[{label,ids:[document ids]}]}], insights [{kind:observation|hypothesis|question,text,ids:[document ids]}]. Adapt perspectives to evidence and prior feedback, never a fixed taxonomy. References are validated; claims remain model interpretations.",
+        "inputSchema": {"type": "object", "properties": {"analysis": {"type": "object"}}, "required": ["analysis"]},
+    },
+    {
         "name": "recall",
         "description": _RECALL_DESC,
         "inputSchema": {
@@ -419,6 +432,16 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
         return _do_remember(db, args)
     if name == "neighbors":
         return json.dumps(search.neighbors(db, args["name"]), ensure_ascii=False, indent=2)
+    if name == "brain_analyse":
+        from brain import observatory
+        return json.dumps(observatory.analysis_context(db, days=int(args.get("days", 30)),
+                          offset=int(args.get("offset", 0)), limit=int(args.get("limit", 200))), ensure_ascii=False)
+    if name == "brain_view":
+        from brain import observatory
+        record = observatory.save_analysis(db, args.get("analysis"))
+        path = observatory.write(db, open_browser=False)
+        return json.dumps({"revision": record["revision"], "path": path,
+                           "live_command": "brain dashboard --explore --serve"}, ensure_ascii=False)
     if name == "brain_status":
         return json.dumps(health.status(db), ensure_ascii=False, indent=2)
     if name == "brain_suggest":

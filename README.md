@@ -338,6 +338,38 @@ question; on the author's own notes, synonyms lifted hits from 2 of 9 questions 
 
 ## Languages
 
+### Explore your memory and activity
+
+```bash
+brain dashboard --explore                     # offline 3D snapshot
+brain dashboard --explore --days 90            # choose the recorded activity window
+brain dashboard --explore --serve             # local live view with persistent feedback
+```
+
+The Observatory shows a rotatable relationship map, source/project sectors, recent evidence,
+recorded recall activity and recurring requests. Search or select a point to inspect the original
+source, its evidence date and explicit connections. A list and 2D view provide alternatives to 3D.
+The page works without a CDN, browser dependency, embedding call or external analytics service.
+`--serve` binds only to loopback on an automatically selected port; stop it with Ctrl-C.
+
+**Perspectives are not a fixed taxonomy.** Ask your current AI host to analyse your brain: the
+`brain_analyse` MCP tool supplies paginated evidence, earlier interpretations and feedback; the host
+uses `brain_view` to publish new, overlapping lenses, categories and follow-up questions with cited
+document IDs. Switching lenses rearranges the same memories. Nothing chooses another AI provider or
+calls a paid model automatically. This interpretation step requires the host; refreshing the browser
+alone does not run a language model. Reconnect your host once after updating to discover the new tools.
+
+Every interpretation is an immutable local revision under the brain home's `observatory/` directory.
+The live view saves useful/not-useful/correction feedback for the next host analysis. Source memories
+and retrieval rankings are not edited. Changed cited documents invalidate the old view's categories;
+an unrelated new document does not silently rewrite the analysis. A model's interpretation stays
+labelled as an observation, hypothesis or question, not an independently verified fact.
+
+Frequency means recorded recalls, not hours worked. Exact repeated queries are not automatically
+recurring incidents; lesson/feedback records do not prove an unresolved problem. Evidence dates and
+file modification dates remain separate. The screen describes recorded activity, not a complete
+account of someone's life. Static HTML contains private memory summaries: keep it local.
+
 ### Interface (dashboard, CLI status output)
 
 Six languages ship as JSON catalogs in `brain/locales/`:
