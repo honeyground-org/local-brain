@@ -346,9 +346,13 @@ brain dashboard --explore --days 90            # choose the recorded activity wi
 brain dashboard --explore --serve             # local live view with persistent feedback
 ```
 
-The Observatory shows a rotatable relationship map, source/project sectors, recent evidence,
-recorded recall activity and recurring requests. Search or select a point to inspect the original
-source, its evidence date and explicit connections. A list and 2D view provide alternatives to 3D.
+The Observatory opens with topic planets: rotate or zoom the scene, select a planet to explore
+its memory bubbles, then select a memory to inspect its source and explicit connections. The latest
+valid analysis supplies the initial perspective. Large maps show twelve leading topics and an
+expandable remainder; a selected topic shows up to eighty leading memories, with every matching
+record available in the list. Only the strongest explicit connections are drawn. Analysis details,
+recurring requests and source lists are collapsed until needed. A list and 2D view provide
+alternatives to 3D. Recent-evidence, recall-activity and problem-signal filters remain available.
 The page works without a CDN, browser dependency, embedding call or external analytics service.
 `--serve` binds only to loopback on an automatically selected port; stop it with Ctrl-C.
 
