@@ -62,7 +62,7 @@ flowchart LR
   C[Notes and wikis] --> I
   I --> T["As you type<br/>related memories attach to the prompt"]
   I --> R["Before a risky action<br/>your own guidance appears"]
-  I --> M["When the agent asks<br/>8 MCP tools"]
+  I --> M["When the agent asks<br/>10 MCP tools"]
 ```
 
 - **As you type.** A host hook reads each prompt and attaches only the memories that clear your
@@ -73,8 +73,8 @@ flowchart LR
   right before a push, a rebase or a migration. The rule matches the tool call; the *wording* lives in
   your memory file, so editing the memory changes what is said. No rules ship with brain: they are
   learned from your own tool history (`brain rules --discover`).
-- **When the agent asks.** Eight MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
-  `brain_suggest` · `brain_feedback` · `reindex` · `timeline`.
+- **When the agent asks.** Ten MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
+  `brain_suggest` · `brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view`.
 
 ## Personal memory and performance
 
@@ -245,7 +245,8 @@ you earned to another machine.
   green result is evidence, not luck.
 - **Private by default.** Word search never opens a socket. AI engines are opt-in, and secret-shaped
   values are masked before anything leaves (see [Privacy](#privacy)).
-- **Always current.** The MCP server picks up new code on disk by itself, so an update needs no restart.
+- **Runtime updates.** macOS/Linux MCP servers reload changed code before the next request. Reconnect
+  the client to discover new tools; Windows MCP clients also need a restart.
 - **Zero third-party dependencies.** Standard library only, on the system `python3` (3.8+). No pip
   install, no build step.
 
@@ -262,6 +263,8 @@ All commands work from any directory once installed (`brain <command>`).
 |---|---|
 | `brain status` | Health check — what to fix, separated from what to merely watch |
 | `brain dashboard` | Status + performance comparison as a local HTML page, opened in your browser |
+| `brain dashboard --explore` | Offline 3D topic planets and memory bubbles |
+| `brain dashboard --explore --serve` | Local Observatory with refresh and saved analysis feedback |
 | `brain recall <text> -t <synonyms>` | Recall, right in the terminal (pass synonyms with `-t`, see below) |
 | `brain recent` | Chronological view — the answer to "what was I doing?", which has no keyword |
 | `brain neighbors <name>` | Graph neighbours — widen from a hit to its related context |
@@ -336,14 +339,13 @@ question; on the author's own notes, synonyms lifted hits from 2 of 9 questions 
 
 ---
 
-## Languages
-
-### Explore your memory and activity
+## Brain Observatory: explore your memory and activity
 
 ```bash
 brain dashboard --explore                     # offline 3D snapshot
 brain dashboard --explore --days 90            # choose the recorded activity window
 brain dashboard --explore --serve             # local live view with persistent feedback
+brain dashboard --explore --no-open           # save a snapshot without opening a browser
 ```
 
 The Observatory opens with topic planets: rotate or zoom the scene, select a planet to explore
@@ -353,8 +355,13 @@ expandable remainder; a selected topic shows up to eighty leading memories, with
 record available in the list. Only the strongest explicit connections are drawn. Analysis details,
 recurring requests and source lists are collapsed until needed. A list and 2D view provide
 alternatives to 3D. Recent-evidence, recall-activity and problem-signal filters remain available.
-The page works without a CDN, browser dependency, embedding call or external analytics service.
-`--serve` binds only to loopback on an automatically selected port; stop it with Ctrl-C.
+The page works without a CDN, frontend build step, embedding call or external analytics service.
+`--serve` prints a loopback URL on an automatically selected port and opens it in your browser;
+stop it with Ctrl-C. Restart an already running Observatory after updating the runtime.
+The offline command saves `observatory.html` under your Brain home. `--days` controls the recorded
+activity window, not the age of memories included in the map.
+
+### Ask for a new perspective
 
 **Perspectives are not a fixed taxonomy.** Ask your current AI host to analyse your brain: the
 `brain_analyse` MCP tool supplies paginated evidence, earlier interpretations and feedback; the host
@@ -363,16 +370,42 @@ document IDs. Switching lenses rearranges the same memories. Nothing chooses ano
 calls a paid model automatically. This interpretation step requires the host; refreshing the browser
 alone does not run a language model. Reconnect your host once after updating to discover the new tools.
 
+For example, ask your connected agent:
+
+> Analyse my recent work and recurring problems. Discover useful perspectives beyond my existing
+> categories, cite the memories behind each grouping, distinguish observations from hypotheses,
+> and publish the result to the Brain Observatory. Suggest what to investigate next.
+
+Open the perspective selector to switch between saved lenses or source/project grouping. When no
+current analysis exists, the map uses source/project grouping. Only cited memories appear within an
+analysis lens; a partial analysis does not classify the entire corpus.
+
+| Action | What happens |
+|---|---|
+| Refresh the live view | Reads the current index and latest saved analysis; does not run AI |
+| Mark an insight useful, dismiss it or suggest a correction | Saves feedback for the next analysis |
+| Refine a perspective | Saves a category/perspective correction for the next analysis |
+| Ask the agent to analyse again | The host reviews evidence and feedback, then publishes a new revision |
+
+Static snapshots support exploration; saving feedback requires `--serve`. Source/project grouping
+comes from recorded paths and explicit links, while host-authored lenses are interpretations.
+
+### Evidence and preservation
+
 Every interpretation is an immutable local revision under the brain home's `observatory/` directory.
 The live view saves useful/not-useful/correction feedback for the next host analysis. Source memories
-and retrieval rankings are not edited. Changed cited documents invalidate the old view's categories;
-an unrelated new document does not silently rewrite the analysis. A model's interpretation stays
-labelled as an observation, hypothesis or question, not an independently verified fact.
+and retrieval rankings are not edited. Changed or removed cited documents disable the old analysis
+lenses and insights; ask the agent to analyse again using current evidence. An unrelated new document
+does not invalidate the existing analysis, but it is not automatically classified into its lenses.
+A model's interpretation stays labelled as an observation, hypothesis or question, not an
+independently verified fact.
 
 Frequency means recorded recalls, not hours worked. Exact repeated queries are not automatically
 recurring incidents; lesson/feedback records do not prove an unresolved problem. Evidence dates and
 file modification dates remain separate. The screen describes recorded activity, not a complete
 account of someone's life. Static HTML contains private memory summaries: keep it local.
+
+## Languages
 
 ### Interface (dashboard, CLI status output)
 
