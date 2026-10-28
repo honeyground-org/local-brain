@@ -52,7 +52,7 @@
     "dashboard": {
       "impact": "medium",
       "summary": "the pages brain renders",
-      "paths": ["brain/dashboard.py", "brain/dashstyle.py", "brain/dashview.py", "brain/graphview.py", "brain/templates/"],
+      "paths": ["brain/dashboard.py", "brain/dashstyle.py", "brain/dashview.py", "brain/graphview.py", "brain/observatory.py", "brain/templates/"],
       "owners": []
     },
     "cli": {
