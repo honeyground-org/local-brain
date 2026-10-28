@@ -771,5 +771,7 @@
  "obs.legendSignal": "◇ Problem / lesson",
  "obs.legendOther": "● Other record",
  "obs.languageName": "English",
- "obs.reviseLens": "Refine this perspective"
+ "obs.reviseLens": "Refine this perspective",
+ "obs.otherSectors": "Other topics",
+ "obs.shownBubbles": "Visible bubbles"
 }

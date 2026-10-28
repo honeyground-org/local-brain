@@ -769,5 +769,7 @@
  "obs.legendSignal": "◇ Problem / Lektion",
  "obs.legendOther": "● Andere Einträge",
  "obs.languageName": "Deutsch",
- "obs.reviseLens": "Perspektive verfeinern"
+ "obs.reviseLens": "Perspektive verfeinern",
+ "obs.otherSectors": "Weitere Themen",
+ "obs.shownBubbles": "Sichtbare Blasen"
 }

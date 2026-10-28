@@ -769,5 +769,7 @@
  "obs.legendSignal": "◇ Problema / lección",
  "obs.legendOther": "● Otros registros",
  "obs.languageName": "Español",
- "obs.reviseLens": "Refinar perspectiva"
+ "obs.reviseLens": "Refinar perspectiva",
+ "obs.otherSectors": "Otros temas",
+ "obs.shownBubbles": "Burbujas visibles"
 }

@@ -769,5 +769,7 @@
  "obs.legendSignal": "◇ 문제·교훈",
  "obs.legendOther": "● 기타 기록",
  "obs.languageName": "한국어",
- "obs.reviseLens": "관점 수정 의견"
+ "obs.reviseLens": "관점 수정 의견",
+ "obs.otherSectors": "다른 주제",
+ "obs.shownBubbles": "표시 버블"
 }

@@ -769,5 +769,7 @@
  "obs.legendSignal": "◇ Problème / leçon",
  "obs.legendOther": "● Autres entrées",
  "obs.languageName": "Français",
- "obs.reviseLens": "Affiner cette perspective"
+ "obs.reviseLens": "Affiner cette perspective",
+ "obs.otherSectors": "Autres sujets",
+ "obs.shownBubbles": "Bulles visibles"
 }

@@ -769,5 +769,7 @@
  "obs.legendSignal": "◇ 問題・教訓",
  "obs.legendOther": "● その他",
  "obs.languageName": "日本語",
- "obs.reviseLens": "視点の修正を提案"
+ "obs.reviseLens": "視点の修正を提案",
+ "obs.otherSectors": "その他のテーマ",
+ "obs.shownBubbles": "表示バブル"
 }
