@@ -76,8 +76,11 @@ def main() -> int:
     finally:
         store.os.walk = real_walk
 
-    want = [os.path.relpath(os.path.join(d, f), mem) for d, ds, fs in
-            ((d, sorted(ds), sorted(fs)) for d, ds, fs in real_walk(mem)) for f in fs]
+    # os.walk only changes traversal order when its directory list is mutated.
+    want = []
+    for d, ds, fs in real_walk(mem):
+        ds.sort()
+        want.extend(os.path.relpath(os.path.join(d, f), mem) for f in sorted(fs))
     print("① the walk")
     check("folders and files come in sorted order, whatever the filesystem's order", got == want, " · ".join(got))
     print("\n② a fresh index")
