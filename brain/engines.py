@@ -147,13 +147,21 @@ def _official(c: dict) -> bool:
     return (c.get("base_url") or "") == PROVIDERS.get(c.get("provider", ""), {}).get("base")
 
 
+def needs_key(c: dict) -> bool:
+    """Whether this engine's provider is declared with a key at all — ★the declaration decides★, not a list
+    of names. The local engine (embeddinggemma), `stub` and `none` declare no `key_env`/`key_field`, so the
+    screen must never say "no key" for them (it did, 2026-10-29, while the engine was embedding fine)."""
+    p = PROVIDERS.get(c.get("provider", ""), {})
+    return bool(p.get("key_env") or p.get("key_field"))
+
+
 def api_key(c: dict) -> str:
     """The key for this engine: the provider's variable → the secrets file. "" when none is needed.
 
     ⛔ Raises only when the engine needs one — a local OpenAI-compatible server does not.
     """
     p = PROVIDERS.get(c.get("provider", ""), {})
-    if c.get("provider") in ("stub", "none", "embeddinggemma"):
+    if not needs_key(c):
         return ""
     k = os.environ.get(p.get("key_env") or "", "").strip()
     if not k:
@@ -325,7 +333,7 @@ def describe() -> List[dict]:
     for role in ROLES:
         c = choice(role)
         try:
-            has_key = bool(api_key(c)) or c["provider"] in ("none", "stub") or not _official(c)
+            has_key = bool(api_key(c)) or not needs_key(c) or not _official(c)
         except Exception:                                # noqa: BLE001
             has_key = False
         rows.append(dict(c, role=role, ready=available(role), has_key=has_key,
