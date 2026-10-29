@@ -20,8 +20,9 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"      # 1.1: `brain_capabilities` and the orbit-1 contract (2026-10-29)
 PROTOCOL_FALLBACK = "2024-11-05"
+_PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
 # ⛔ ★Nothing in a tool description may be one person's★ (2026-10-06) — this text is sent to every
 #    agent on every machine. It used to quote the author's own measurement ("2 of 9 → 8 of 9") as a
@@ -154,6 +155,16 @@ TOOLS: List[Dict[str, Any]] = [
                            "signal": {"type": "string",
                                       "enum": ["useful", "wrong", "stale", "open"]}},
             "required": ["name", "signal"]},
+    },
+    {
+        "name": "brain_capabilities",
+        "description": ("What this brain supports, read live — contract `orbit-1`: server, protocol, code "
+                        "generation and schema versions; the embedding engine, its space and whether it is "
+                        "ready; the stores; the corpus; per-tool features (recall/remember formats, scope, "
+                        "idempotency, ack fields) derived from the tool declarations themselves; limits; and "
+                        "an explicit `unsupported` list. Call it once after connecting; a feature it does not "
+                        "name does not exist."),
+        "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "reindex",
@@ -452,6 +463,11 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
     if name == "reindex":
         return json.dumps(store.reindex(db, full=bool(args.get("full"))),
                           ensure_ascii=False)
+    if name == "brain_capabilities":
+        from brain import capabilities
+        return json.dumps(capabilities.describe(db, tools=tools_for(db), protocol=_PROTOCOL,
+                                                memory_dir=_memory_dir(), shown=SHOWN),
+                          ensure_ascii=False, indent=2)
     raise ValueError("unknown tool: %s" % name)
 
 
@@ -580,6 +596,8 @@ def serve() -> int:
             if method == "initialize":
                 from brain import i18n
                 pv = (req.get("params") or {}).get("protocolVersion") or PROTOCOL_FALLBACK
+                global _PROTOCOL
+                _PROTOCOL = pv
                 _result(mid, {"protocolVersion": pv,
                               "capabilities": {"tools": {"listChanged": False}},
                               "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},

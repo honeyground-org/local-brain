@@ -62,7 +62,7 @@ flowchart LR
   C[Notes and wikis] --> I
   I --> T["As you type<br/>related memories attach to the prompt"]
   I --> R["Before a risky action<br/>your own guidance appears"]
-  I --> M["When the agent asks<br/>10 MCP tools"]
+  I --> M["When the agent asks<br/>11 MCP tools"]
 ```
 
 - **As you type.** A host hook reads each prompt and attaches only the memories that clear your
@@ -73,8 +73,9 @@ flowchart LR
   right before a push, a rebase or a migration. The rule matches the tool call; the *wording* lives in
   your memory file, so editing the memory changes what is said. No rules ship with brain: they are
   learned from your own tool history (`brain rules --discover`).
-- **When the agent asks.** Ten MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
-  `brain_suggest` · `brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view`.
+- **When the agent asks.** Eleven MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
+  `brain_suggest` · `brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view` ·
+  `brain_capabilities` (what this brain supports, read live — a client checks it once after connecting).
 
 ## Personal memory and performance
 
@@ -471,7 +472,7 @@ claude mcp add brain --scope user -- "$(pwd)/bin/brain-mcp"
 ```
 
 Tools: `recall` · `remember` · `neighbors` · `brain_status` · `brain_suggest` ·
-`brain_feedback` · `reindex` · `timeline`
+`brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view` · `brain_capabilities`
 
 The MCP server and the CLI call the **same core functions**, so a fix lands in both at once.
 The server also picks up new code on disk by itself: after an update there is nothing to restart.

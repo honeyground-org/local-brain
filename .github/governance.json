@@ -1,90 +1,180 @@
 {
   "_about": "The one place that says who reviews what and how many approvals a change needs. CODEOWNERS is generated from it (python3 .github/scripts/pr_report.py --codeowners --write) and tests/verify_pr_report.py fails when the two differ. GOVERNANCE.md explains the roles and the process.",
-  "maintainers": ["wangjacsi"],
+  "maintainers": [
+    "wangjacsi"
+  ],
   "emeritus": [],
   "approvals": {
-    "low":    {"count": 1, "maintainers": 0},
-    "medium": {"count": 1, "maintainers": 0},
-    "high":   {"count": 2, "maintainers": 1}
+    "low": {
+      "count": 1,
+      "maintainers": 0
+    },
+    "medium": {
+      "count": 1,
+      "maintainers": 0
+    },
+    "high": {
+      "count": 2,
+      "maintainers": 1
+    }
   },
   "areas": {
     "calibration": {
       "impact": "high",
       "summary": "the threshold, the margin filter, the scorecard, the per-request records and their monitor",
-      "paths": ["brain/calibrate.py", "brain/adaptive.py", "brain/evalinit.py", "brain/scorecard.py",
-                "brain/observe.py", "brain/monitor.py", "brain/personal.py"],
+      "paths": [
+        "brain/calibrate.py",
+        "brain/adaptive.py",
+        "brain/evalinit.py",
+        "brain/scorecard.py",
+        "brain/observe.py",
+        "brain/monitor.py",
+        "brain/personal.py"
+      ],
       "owners": []
     },
     "retrieval": {
       "impact": "medium",
       "summary": "search, the text index, the language bridge, vectors, triggers, the recall hook",
-      "paths": ["brain/search.py", "brain/textindex.py", "brain/translit.py", "brain/lexicon.py", "brain/langdata.py",
-                "brain/rerank.py", "brain/vectors.py", "brain/embedplan.py", "brain/localembed.py", "brain/triggers.py", "brain/hook.py", "brain/judgegate.py"],
+      "paths": [
+        "brain/search.py",
+        "brain/textindex.py",
+        "brain/translit.py",
+        "brain/lexicon.py",
+        "brain/langdata.py",
+        "brain/rerank.py",
+        "brain/vectors.py",
+        "brain/embedplan.py",
+        "brain/localembed.py",
+        "brain/triggers.py",
+        "brain/hook.py",
+        "brain/judgegate.py"
+      ],
       "owners": []
     },
     "storage": {
       "impact": "high",
       "summary": "the SQLite index and the swappable vector and graph databases",
-      "paths": ["brain/store.py", "brain/stores.py", "brain/vecstore.py", "brain/graphstore.py", "brain/dockerstores.py", "brain/backends/",
-                "brain/deferred.py"],
+      "paths": [
+        "brain/store.py",
+        "brain/stores.py",
+        "brain/vecstore.py",
+        "brain/graphstore.py",
+        "brain/dockerstores.py",
+        "brain/backends/",
+        "brain/deferred.py"
+      ],
       "owners": []
     },
     "behaviour": {
       "impact": "high",
       "summary": "the behaviour layer: rules learned from tool history and when they fire",
-      "paths": ["brain/guard.py", "brain/ruledisc.py", "brain/tail.py"],
+      "paths": [
+        "brain/guard.py",
+        "brain/ruledisc.py",
+        "brain/tail.py"
+      ],
       "owners": []
     },
     "privacy": {
       "impact": "high",
       "summary": "what leaves the machine: AI engines, the proxy, scrubbing",
-      "paths": ["brain/privacy.py", "brain/engines.py", "brain/proxy.py"],
+      "paths": [
+        "brain/privacy.py",
+        "brain/engines.py",
+        "brain/proxy.py"
+      ],
       "owners": []
     },
     "install": {
       "impact": "high",
       "summary": "installing, the hosts it wires into, the MCP server, corpus discovery",
-      "paths": ["brain/install.py", "brain/hosts.py", "brain/server.py", "brain/portable.py", "brain/discover.py",
-                "runtime/embeddinggemma/", "install.sh", "install/", "bin/", "pyproject.toml", "SETUP-PROMPT.md", "config.example.json",
-                "brain/config.example.json", "brain/__init__.py", "brain/launch.py"],
+      "paths": [
+        "brain/install.py",
+        "brain/hosts.py",
+        "brain/server.py",
+        "brain/capabilities.py",
+        "brain/portable.py",
+        "brain/discover.py",
+        "runtime/embeddinggemma/",
+        "install.sh",
+        "install/",
+        "bin/",
+        "pyproject.toml",
+        "SETUP-PROMPT.md",
+        "config.example.json",
+        "brain/config.example.json",
+        "brain/__init__.py",
+        "brain/launch.py"
+      ],
       "owners": []
     },
     "dashboard": {
       "impact": "medium",
       "summary": "the pages brain renders",
-      "paths": ["brain/dashboard.py", "brain/dashstyle.py", "brain/dashview.py", "brain/graphview.py", "brain/observatory.py", "brain/templates/"],
+      "paths": [
+        "brain/dashboard.py",
+        "brain/dashstyle.py",
+        "brain/dashview.py",
+        "brain/graphview.py",
+        "brain/observatory.py",
+        "brain/templates/"
+      ],
       "owners": []
     },
     "cli": {
       "impact": "medium",
       "summary": "the command line, status, timeline, background jobs",
-      "paths": ["brain/cli.py", "brain/health.py", "brain/timeline.py", "brain/jobs.py", "brain/scheduler.py",
-                "brain/deadline.py", "brain/indexaudit.py", "brain/i18n.py"],
+      "paths": [
+        "brain/cli.py",
+        "brain/health.py",
+        "brain/timeline.py",
+        "brain/jobs.py",
+        "brain/scheduler.py",
+        "brain/deadline.py",
+        "brain/indexaudit.py",
+        "brain/i18n.py"
+      ],
       "owners": []
     },
     "i18n": {
       "impact": "low",
       "summary": "translations of user-facing text",
-      "paths": ["brain/locales/"],
+      "paths": [
+        "brain/locales/"
+      ],
       "owners": []
     },
     "tests": {
       "impact": "medium",
       "summary": "the checks",
-      "paths": ["tests/"],
+      "paths": [
+        "tests/"
+      ],
       "owners": []
     },
     "docs": {
       "impact": "low",
       "summary": "documentation",
-      "paths": ["docs/", "README.md", "landing/"],
+      "paths": [
+        "docs/",
+        "README.md",
+        "landing/"
+      ],
       "owners": []
     },
     "governance": {
       "impact": "high",
       "summary": "how the project is run: CI, review rules, licence, conduct",
-      "paths": [".github/", "GOVERNANCE.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md", "LICENSE",
-                ".gitignore"],
+      "paths": [
+        ".github/",
+        "GOVERNANCE.md",
+        "CONTRIBUTING.md",
+        "CODE_OF_CONDUCT.md",
+        "SECURITY.md",
+        "LICENSE",
+        ".gitignore"
+      ],
       "owners": []
     }
   }
