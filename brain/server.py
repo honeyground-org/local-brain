@@ -392,7 +392,11 @@ def _do_remember_contract(db, args: dict, name: str) -> str:
             fh.write(rc.render(name, args, verified_at))
     if result != "conflict":
         try:
-            stats = store.reindex(db)
+            # ★Index the words, nothing more★ (2026-10-29) — the default pass also re-measures the hook threshold,
+            #   the vector gate and the history, 15–32 s measured on a 2,246-document copy, and a client with a
+            #   30 s timeout saw the file land but never the answer. Those re-measurements belong to the daily
+            #   jobs and to a human-run `brain index`, exactly as the hook already keeps them off its path.
+            stats = store.reindex(db, recalibrate=False)
         except Exception as exc:                         # noqa: BLE001 — stored but not indexed: say so; the retry catches up
             stats = {"error": str(exc)[:200]}
     return json.dumps(rc.ack(db, name=name, path=path, result=result, conflict=conflict, args=args,

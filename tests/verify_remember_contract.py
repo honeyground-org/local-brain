@@ -22,6 +22,8 @@ exercised here against the disk, and the legacy text behaviour is held unchanged
      with the error named; the retry is a `noop` whose `indexed_words` is true
   ⑧ arguments: a bad `expected_sha`, `observed_at`, a 129-char key, an empty body → `invalid_argument`
      (control: the valid calls above passed)
+  ⑨ the save path indexes the words and re-measures nothing — no threshold, no vector gate
+     (control: a default index pass does re-measure)
 
 Seeds its own home; runs in a clean room.
 """
@@ -162,6 +164,23 @@ def main() -> int:
         check("%s → invalid_argument" % label, r.get("ok") is False and (r.get("error") or {}).get("code") == "invalid_argument", r)
     check("(control) none of the refused calls wrote a file",
           not any(os.path.exists(os.path.join(_MEM, n + ".md")) for n in ("x1", "x2", "x3", "x4")))
+
+    print("\n" + "=" * 72 + "\n⑨ the save path indexes the words and re-measures nothing\n" + "=" * 72)
+    # A client with a 30 s timeout saw the file land but never the answer (2026-10-29): the default index pass
+    # re-measured the hook threshold and the vector gate after every save (15–32 s on a 2,246-document copy).
+    from brain import calibrate as _cal, vectors as _vec
+    calls = {"threshold": 0, "gate": 0}
+    real_cal, real_gate = _cal.calibrate, _vec.recalibrate_if_free
+    _cal.calibrate = lambda db, *a, **k: (calls.__setitem__("threshold", calls["threshold"] + 1) or {"threshold": 9.0})  # noqa: E731
+    _vec.recalibrate_if_free = lambda db, *a, **k: (calls.__setitem__("gate", calls["gate"] + 1) or None)  # noqa: E731
+    try:
+        j = _j(db, name="orbit_quick", idempotency_key="k7", format="json", **base)
+        check("a contract save never re-measures the threshold or the gate",
+              j.get("result") == "new" and j.get("indexed_words") is True and calls == {"threshold": 0, "gate": 0}, calls)
+        store.reindex(db)
+        check("(control) a default index pass does re-measure", calls["threshold"] >= 1, calls)
+    finally:
+        _cal.calibrate, _vec.recalibrate_if_free = real_cal, real_gate
 
     print("\n" + "=" * 72)
     if FAILS:
