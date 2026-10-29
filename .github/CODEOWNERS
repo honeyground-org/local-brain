@@ -78,3 +78,4 @@
 /brain/dockerstores.py @wangjacsi
 /runtime/embeddinggemma/ @wangjacsi
 /brain/config.example.json @wangjacsi
+/brain/remembercontract.py @wangjacsi

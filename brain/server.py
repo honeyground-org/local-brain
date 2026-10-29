@@ -111,6 +111,20 @@ TOOLS: List[Dict[str, Any]] = [
                           "description": "related memory names — stored as [[links]]"},
                 "search_aliases": {"type": "array", "items": {"type": "string"},
                                    "description": "optional alternate phrases for finding this memory; stored with the document, not as global synonyms"},
+                "idempotency_key": {"type": "string", "maxLength": 128,
+                                    "description": "orbit-1: the same key with the same content is a noop with the same answer; "
+                                                   "with other content it needs expected_sha (otherwise conflict: sha_mismatch)"},
+                "expected_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$",
+                                 "description": "orbit-1: the sha of the version you read — required to change an existing memory "
+                                                "(a memory written without a key is otherwise conflict: name_taken)"},
+                "project_id": {"type": "string", "maxLength": 128,
+                               "description": "orbit-1: an opaque project scope written to the frontmatter; omitted = unscoped"},
+                "source": {"type": "string", "maxLength": 512,
+                           "description": "orbit-1: where this memory came from (a task, a session, the evidence) — stored, not indexed"},
+                "observed_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                                "description": "orbit-1: the date the content was true (YYYY-MM-DD); default = today"},
+                "format": {"type": "string", "enum": ["text", "json"],
+                           "description": "json = the orbit-1 answer: result new/updated/noop/conflict, stored, indexed_words, embedded, served, sha"},
             },
             "required": ["name", "description", "type", "body"],
         },
@@ -325,6 +339,9 @@ def _do_remember(db, args: dict) -> str:
     name = re.sub(r"[^\w.-]", "_", args["name"]).strip("_")
     if not name:
         return "the name is empty."
+    from brain import remembercontract as rc
+    if rc.wants_contract(args):                          # ★orbit-1★ (2026-10-29): a save that can be retried
+        return _do_remember_contract(db, args, name)
     path = os.path.join(_memory_dir(), name + ".md")
     import unicodedata
     aliases = list(dict.fromkeys(unicodedata.normalize("NFKC", a).strip()
@@ -350,6 +367,33 @@ def _do_remember(db, args: dict) -> str:
     stats = store.reindex(db)
     return ("%s: %s\nindex: %s\npath: %s"
             % ("updated" if existed else "saved", name, json.dumps(stats, ensure_ascii=False), path))
+
+
+def _do_remember_contract(db, args: dict, name: str) -> str:
+    """★orbit-1★ — chosen by `idempotency_key` or `format: "json"` (§remembercontract). The legacy path
+    above is untouched: a person's `remember` still overwrites by name."""
+    import os
+    from brain import remembercontract as rc
+    t0 = time.time()
+    bad = rc.validate(args)
+    if bad:
+        return json.dumps(bad, ensure_ascii=False)
+    path = os.path.join(_memory_dir(), name + ".md")
+    cur = rc.current(path)
+    result, conflict = rc.decide(cur, args)
+    verified_at = (cur.get("verified_at") if result == "noop"
+                   else (args.get("observed_at") or time.strftime("%Y-%m-%d")))
+    stats: dict = {}
+    if result in ("new", "updated"):
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(rc.render(name, args, verified_at))
+    if result != "conflict":
+        try:
+            stats = store.reindex(db)
+        except Exception as exc:                         # noqa: BLE001 — stored but not indexed: say so; the retry catches up
+            stats = {"error": str(exc)[:200]}
+    return json.dumps(rc.ack(db, name=name, path=path, result=result, conflict=conflict, args=args,
+                             stats=stats, t0=t0, verified_at=verified_at, cur=cur), ensure_ascii=False)
 
 
 def _words_unsure(db, rows: List[dict]) -> bool:
