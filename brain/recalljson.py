@@ -33,6 +33,10 @@ def validate(args: dict) -> Optional[Dict[str, Any]]:
     fmt = args.get("format")
     if fmt not in (None, "text", "json"):
         return error("invalid_argument", "format must be \"text\" or \"json\"", {"format": fmt})
+    scope = args.get("scope")
+    if scope is not None and (not isinstance(scope, str) or not scope.strip() or len(scope) > REQUEST_ID_MAX):
+        return error("invalid_argument", "scope must be a non-empty string of at most %d characters" % REQUEST_ID_MAX,
+                     {"max": REQUEST_ID_MAX})
     rid = args.get("request_id")
     if fmt == "json" and rid is not None and (not isinstance(rid, str) or len(rid) > REQUEST_ID_MAX):
         return error("invalid_argument", "request_id must be a string of at most %d characters" % REQUEST_ID_MAX,

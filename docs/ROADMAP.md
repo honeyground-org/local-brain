@@ -42,6 +42,24 @@ A memory for coding agents that is **more efficient and performs better than the
   the question alone, as a caller does, the top 3 holds it for 53% and OR'd `grep` for 95% in a median
   of 644 files.
 
+**A contract for clients (`orbit-1`, 2026-10-29)**
+- A program that keeps a ledger — Cosmos Orbit first — asks `brain_capabilities` once after connecting
+  and trusts only what it names: versions, the engine and whether it is ready, the stores, the corpus,
+  and per-tool feature flags derived from the tool declarations themselves, with an explicit
+  `unsupported` list (server 1.1.0).
+- `recall(format="json")` answers the rows the text mode lists, as fields: `name` · `path` · `sha`, the
+  lane, `stale`, a bounded excerpt, `project_id` (null when a memory declared none), related rows apart,
+  and `meta.partial` with the reason when the meaning lane could not answer. `request_id` is echoed.
+- `remember` can be retried: `idempotency_key` + a payload hash make the same request a `noop` with the
+  same answer; `expected_sha` is the proof needed to change an existing memory; a memory written by a
+  person without a key is never overwritten without that proof (`name_taken`). The answer separates
+  `stored` · `indexed_words` · `embedded` · `served`, and names a partial index failure.
+- A memory may declare `project_id` in its frontmatter; `recall(scope=)` keeps that project's memories
+  and the unscoped ones, never another project's, across the word, graph and meaning lanes. Without a
+  scope nothing changes. Every piece is additive: without the new arguments, the text answers and the
+  overwrite-by-name behaviour are byte for byte what they were (`verify_capabilities` ·
+  `verify_recall_json` · `verify_remember_contract` · `verify_scope`).
+
 **Behaviour layer**
 - No rules ship; they are learned from your own tool history, and firing rates are measured with the same
   matcher that fires them.

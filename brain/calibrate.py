@@ -505,7 +505,10 @@ def measure(db: sqlite3.Connection) -> dict:
 #       the measured decision, as before), and `search.fused` merges words, meaning and the whole-body passage by
 #       reciprocal rank — used by MCP `recall` only when the words are unsure. The hook and every measurement call
 #       recall as before; bumped because `search` changed.
-CODE_GENERATION = 36  # Background document batches have a separate deadline from interactive queries.
+#   37 (2026-10-29)  `recall(scope=)` keeps a project's own memories and the unscoped ones (docs.project_id,
+#       declared in a memory's frontmatter, schema 5) across the word, graph and meaning lanes; without a scope
+#       nothing changes. Bumped because `store` and `search` changed.
+CODE_GENERATION = 37
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

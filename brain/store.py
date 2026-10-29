@@ -26,7 +26,7 @@ from brain import i18n, textindex
 
 # 4 = moved the usage key from rowid to path (2026-08-11). Always bump it —
 # an already-running old process reads this number and announces that it is stale.
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"   # 5 (2026-10-29): docs.project_id — a memory's declared scope (§search.recall scope=)
 
 # ★Index the change history★ (2026-08-18 · goal ③ history)
 #
@@ -497,6 +497,9 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
         "path": path, "source": source,
         "evidence_date": evidence_date(raw, meta),
         "kind": meta.get("type") or meta.get("node_type") or "",
+        # ★A memory's scope is declared in its own frontmatter★ (orbit-1 O4, 2026-10-29): an opaque id the
+        # writer chose — never derived from the path, never guessed. Empty = unscoped, visible to every scope.
+        "project_id": (meta.get("project_id") or "").strip()[:128],
         "title": title, "description": desc, "body": body, "raw": raw,
         "mtime": st.st_mtime, "size": st.st_size,
         "sha": hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest(),
@@ -712,6 +715,8 @@ def _migrate(db: sqlite3.Connection) -> None:
             db.execute("ALTER TABLE docs ADD COLUMN prior REAL NOT NULL DEFAULT 1.0")
         if "evidence_date" not in have:
             db.execute("ALTER TABLE docs ADD COLUMN evidence_date TEXT NOT NULL DEFAULT ''")
+        if "project_id" not in have:                    # 2026-10-29 — '' = unscoped (every memory before this day)
+            db.execute("ALTER TABLE docs ADD COLUMN project_id TEXT NOT NULL DEFAULT ''")
     # Move usage from a rowid key to a path key (see the §usage comment).
     ucols = {r["name"] for r in db.execute("PRAGMA table_info(usage)")}
     if ucols and "path" not in ucols:
@@ -1006,17 +1011,17 @@ def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0) -> int:
         # overwrite it sends self-improvement back to the start every time.
         db.execute(
             "UPDATE docs SET name=?,source=?,kind=?,title=?,description=?,body=?,"
-            " mtime=?,size=?,sha=?,doclen=?,prior=?,evidence_date=?,indexed_at=? WHERE id=?",
+            " mtime=?,size=?,sha=?,doclen=?,prior=?,evidence_date=?,indexed_at=?,project_id=? WHERE id=?",
             (doc["name"], doc["source"], doc["kind"], doc["title"], doc["description"],
              doc["body"], doc["mtime"], doc["size"], doc["sha"], doclen, prior,
-             doc.get("evidence_date", ""), now, doc_id))
+             doc.get("evidence_date", ""), now, doc.get("project_id", ""), doc_id))
     else:
         cursor = db.execute(
             "INSERT INTO docs(name,path,source,kind,title,description,body,mtime,size,"
-            " sha,doclen,prior,evidence_date,indexed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " sha,doclen,prior,evidence_date,indexed_at,project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (doc["name"], doc["path"], doc["source"], doc["kind"], doc["title"],
              doc["description"], doc["body"], doc["mtime"], doc["size"], doc["sha"],
-             doclen, prior, doc.get("evidence_date", ""), now))
+             doclen, prior, doc.get("evidence_date", ""), now, doc.get("project_id", "")))
         doc_id = int(cursor.lastrowid)
     db.executemany("INSERT INTO postings(term,doc_id,tf) VALUES(?,?,?)",
                    [(t, doc_id, v) for t, v in tf.items()])
