@@ -85,7 +85,9 @@ check("recall has no via_vector result", not mixed, str(mixed[:2]))
 
 print()
 print("② calibration — the threshold comes ★from calibration, not code★")
-saved = store.get_meta(db, "rerank_min_score") or store.get_meta(db, "vec_min_ratio")
+# ⛔ The gate and its model stamp are stored ★under the embedding profile's key★ (§vectors.calibration_key,
+#    2026-10-28) — read the bare key and a local engine always reads "gemini", red forever (seen 2026-10-29).
+saved = store.get_meta(db, "rerank_min_score") or store.get_meta(db, vectors.calibration_key("vec_min_ratio"))
 check("no threshold is hardcoded in the code",
       vectors.MIN_RATIO_FALLBACK >= 99.0 and rerank.MIN_SCORE_FALLBACK >= 99.0,
       "fallback ratio %.1f · judge %.1f = both silent"
@@ -94,14 +96,16 @@ check("nothing is added before calibration",
       calibrated or not search.semantic(db, PROBES[0], k=1),
       "stored value %s" % (saved or "none"))
 if calibrated:
-    stamp = store.get_meta(db, "vec_model") or ""
+    stamp = store.get_meta(db, vectors.calibration_key("vec_model")) or ""
     # ⛔ the stored tag is ★the space's name★ (model+prefix scheme) — comparing by MODEL alone is always wrong
     want = "%s/%s/%d" % (vectors.PROVIDER, vectors.model_tag(), vectors.DIM)
     check("the model the threshold was measured on matches the current model", stamp == want,
           "stored %s ↔ now %s" % (stamp or "none", want))
 
 # read the eval set first (③-0 uses the control-group sentences as probes)
-path = os.path.join(ROOT, "tests", "eval", "short.json")
+# ★the person's own sample lives where `BRAIN_EVAL_DIR` says★ (§evalinit.eval_dir) — a worktree or an
+#   installed copy has no tests/eval of its own, and until 2026-10-29 that empty sample divided by zero below.
+path = os.path.join(_ei.eval_dir(), "short.json")
 control, positives = [], []
 if os.path.exists(path):
     with open(path, encoding="utf-8") as fh:
@@ -170,6 +174,10 @@ if not calibrated or cov["embedded"] < cov["docs"] * 0.9:
     print("  ⏭ can't measure — loaded %.0f%% · %s" % (pct, "calibrated" if calibrated else "uncalibrated"))
     print("     ⛔ this state is never called 'passed.' Load and calibrate, then run it again.")
     notes.append("④ not measured (loaded %.0f%%)" % pct)
+elif not positives:
+    print("  ⏭ can't measure — no labelled sample at %s (build one with `brain eval-init`)" % path)
+    print("     ⛔ this state is never called 'passed.' A check that divides by an empty sample is a crash, not a verdict.")
+    notes.append("④ not measured (no labelled sample)")
 else:
     thr = calibrate.threshold(db)
     lex_hit = vec_hit = both = 0
