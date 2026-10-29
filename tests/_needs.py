@@ -111,6 +111,12 @@ def private_index() -> str:
     from brain import rerank
     os.environ.setdefault("BRAIN_LEDGER", rerank.ledger_path())
     live = store.db_path()
+    # ⛔ The local engine's identity file stays in the live home (2026-10-29) — a private copy without it
+    #    crashed `verify_vectors` under embeddinggemma ("No such file … brain-private-*/embeddinggemma.json").
+    #    The manifest is read-only (model · revision · space), so the copy measures with the live one.
+    manifest = os.path.join(store.brain_home(), "embeddinggemma.json")
+    if os.path.exists(manifest):
+        os.environ.setdefault("BRAIN_EMBED_MANIFEST", manifest)
     home = tempfile.mkdtemp(prefix="brain-private-")
     if os.path.exists(live):
         src, dst = sqlite3.connect(live), sqlite3.connect(os.path.join(home, "index.db"))
