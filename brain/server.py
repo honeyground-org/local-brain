@@ -92,6 +92,9 @@ TOOLS: List[Dict[str, Any]] = [
                                           "with name·path·sha, the lane, partial/fallback and latency"},
                 "request_id": {"type": "string", "maxLength": 128,
                                "description": "echoed back in json mode (at most 128 characters)"},
+                "scope": {"type": "string", "maxLength": 128,
+                          "description": "orbit-1: an opaque project_id — keeps that project's memories and the unscoped "
+                                         "ones, never another project's; unscoped rows carry project_id null"},
             },
             "required": ["query"],
         },
@@ -388,7 +391,8 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             if bad:
                 return json.dumps(bad, ensure_ascii=False)
         as_json = args.get("format") == "json"
-        rows = search.recall(db, q, k=k, extra_terms=terms, kinds=args.get("kinds"), sources=args.get("sources"), log=not _measure)
+        rows = search.recall(db, q, k=k, extra_terms=terms, kinds=args.get("kinds"), sources=args.get("sources"), log=not _measure,
+                             scope=args.get("scope") or None)
         hint = ""
         if not args.get("terms"):
             hint = ("\n\n⛔ hint: called with no `terms`. A memory is usually worded differently "
@@ -403,14 +407,15 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
         cached = vectors._qcache_get(db, q) is not None if unsure else None
         if unsure:
             wide = search.recall(db, q, k=search.FUSE_POOL, extra_terms=terms, kinds=args.get("kinds"),
-                                 sources=args.get("sources"), log=False, bridge=True)
+                                 sources=args.get("sources"), log=False, bridge=True, scope=args.get("scope") or None)
             bridged = search.last_bridged()
             if bridged:
                 unsure = _words_unsure(db, wide)
                 head = "— learned synonyms added: %s —\n\n" % ", ".join(bridged)
             if unsure and args.get("semantic_k") != 0:          # 0: meaning is never used
                 rows, _why = search.fused(db, q, wide, k, extra_terms=list(terms) + bridged,
-                                          kinds=args.get("kinds"), sources=args.get("sources"), width=SHOWN)
+                                          kinds=args.get("kinds"), sources=args.get("sources"), width=SHOWN,
+                                          scope=args.get("scope") or None)
                 reordered = True
                 if rows:
                     head += ("— the words were unsure: ordered by words, meaning and the passage that matched, "
@@ -431,7 +436,7 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             cost = "query embedding cached" if cached else "one embedding call"
             mrows, why = search.meaning(db, q, sk, exclude=[r["name"] for r in rows],
                                         kinds=args.get("kinds"), sources=args.get("sources"),
-                                        width=SHOWN)
+                                        width=SHOWN, scope=args.get("scope") or None)
             start = len([r for r in rows if not r.get("related")]) + 1
             # ⛔ Added unasked, a failure is recorded (§observe) and not shown — a person with no embedding
             #    engine chosen would read "unavailable" under every unsure answer.
@@ -456,7 +461,8 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             return json.dumps(recalljson.response(
                 db, query=q, terms=terms, k=k, rows=rows, mrows=mrows, why_none=why, asked_meaning=sk,
                 auto_meaning=auto, request_id=args.get("request_id"), unsure=was_unsure, bridged=bridged,
-                reordered=reordered, embed_cached=cached, t0=t0, shown=SHOWN), ensure_ascii=False)
+                reordered=reordered, embed_cached=cached, t0=t0, shown=SHOWN,
+                scope=args.get("scope") or None, scope_applied=bool(args.get("scope"))), ensure_ascii=False)
         return head + _fmt_recall(rows) + more + hint
     if name == "remember":
         return _do_remember(db, args)

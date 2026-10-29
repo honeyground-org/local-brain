@@ -19,6 +19,9 @@ visible to everyone.
      shown as related under A's scope, while A's own neighbour is
   ⑤ the meaning lane filters by the same rule (asked through `fused`, with no engine it stays silent
      and the words still order — never an exception)
+  ⑥ the MCP recall takes `scope`, says `scope.applied`, returns only A's or unscoped rows in JSON,
+     `brain_capabilities` reports `recall.scope: true` by itself, and a bad scope is refused
+     (control: without a scope the JSON says applied false and B is back)
 
 Seeds its own home; runs in a clean room.
 """
@@ -137,6 +140,22 @@ def main() -> int:
               ok and isinstance(why, str), (len(fused), why[:60]))
     except Exception as exc:                             # noqa: BLE001
         check("fused never raises without an engine", False, repr(exc)[:120])
+
+    print("\n" + "=" * 72 + "\n⑥ the MCP recall takes the scope and says so\n" + "=" * 72)
+    from brain import server
+    out = json.loads(server.call_tool(db, "recall", {"query": Q, "k": 8, "semantic_k": 0, "format": "json", "scope": "proj-A"}, _measure=True))
+    check("scope.applied is true and the project_id is echoed",
+          out.get("scope") == {"project_id": "proj-A", "applied": True}, out.get("scope"))
+    check("every JSON row is A's or unscoped (null), B absent",
+          all(r.get("project_id") in ("proj-A", None) for r in out.get("results", []))
+          and not any(r["name"].startswith("b_") for r in out.get("results", [])), [(r["name"], r.get("project_id")) for r in out.get("results", [])])
+    plain = json.loads(server.call_tool(db, "recall", {"query": Q, "k": 8, "semantic_k": 0, "format": "json"}, _measure=True))
+    check("(control) without a scope the JSON says applied false and B is back",
+          plain.get("scope", {}).get("applied") is False and any(r["name"].startswith("b_") for r in plain.get("results", [])), plain.get("scope"))
+    caps = json.loads(server.call_tool(db, "brain_capabilities", {}))
+    check("brain_capabilities now reports recall.scope true", caps["tools"]["recall"]["scope"] is True, caps["tools"]["recall"])
+    bad = json.loads(server.call_tool(db, "recall", {"query": Q, "k": 2, "format": "json", "scope": "s" * 129}, _measure=True))
+    check("a 129-character scope is refused", bad.get("ok") is False and (bad.get("error") or {}).get("code") == "invalid_argument", bad)
 
     print("\n" + "=" * 72)
     if FAILS:
