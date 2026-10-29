@@ -211,7 +211,8 @@ def query_weights(db: sqlite3.Connection, query: str) -> List[Tuple[str, float, 
 
 
 def _score_terms(db: sqlite3.Connection, pairs, n_docs: int, avg_len: float,
-                 kinds: Optional[Sequence[str]], sources: Optional[Sequence[str]]
+                 kinds: Optional[Sequence[str]], sources: Optional[Sequence[str]],
+                 scope: Optional[str] = None
                  ) -> Tuple[Dict[int, float], Dict[int, List[str]], Dict[str, float]]:
     """Accumulate scores per word — summing per gram automatically favours longer words."""
     df_cache = _df_table(db, pairs)
@@ -246,7 +247,7 @@ def _score_terms(db: sqlite3.Connection, pairs, n_docs: int, avg_len: float,
             doc_score[did] = doc_score.get(did, 0.0) + val
             doc_words.setdefault(did, []).append(word)
 
-    if kinds or sources:
+    if kinds or sources or scope:
         keep = set()
         q = "SELECT id FROM docs WHERE 1=1"
         args: List[str] = []
@@ -254,6 +255,10 @@ def _score_terms(db: sqlite3.Connection, pairs, n_docs: int, avg_len: float,
             q += " AND kind IN (%s)" % ",".join("?" * len(kinds)); args += list(kinds)
         if sources:
             q += " AND source IN (%s)" % ",".join("?" * len(sources)); args += list(sources)
+        if scope:
+            # ★A scope keeps its own memories and the unscoped ones★ (orbit-1 O4) — another project's
+            # scoped memories are out, a memory that declared nothing is in, flagged as unscoped by the caller.
+            q += " AND (project_id = ? OR project_id = '')"; args.append(scope)
         for row in db.execute(q, args):
             keep.add(row["id"])
         doc_score = {k: v for k, v in doc_score.items() if k in keep}
@@ -263,7 +268,7 @@ def _score_terms(db: sqlite3.Connection, pairs, n_docs: int, avg_len: float,
 
 def _hydrate(db: sqlite3.Connection, doc_id: int) -> Optional[sqlite3.Row]:
     return db.execute(
-        "SELECT id,name,path,source,kind,title,description,body,mtime,weight,evidence_date "
+        "SELECT id,name,path,source,kind,title,description,body,mtime,weight,evidence_date,project_id "
         "FROM docs WHERE id=?", (doc_id,)).fetchone()
 
 
@@ -378,7 +383,7 @@ def recall(db: sqlite3.Connection, query: str, k: int = 8,
            sources: Optional[Sequence[str]] = None, graph: bool = True,
            bridge_floor: Optional[float] = None,
            log: bool = True, drop_index_docs: bool = True,
-           bridge: Optional[bool] = None) -> List[dict]:
+           bridge: Optional[bool] = None, scope: Optional[str] = None) -> List[dict]:
     """`bridge` — the person's learned synonyms (§lexicon): None follows the measured decision (§lexicon.decide,
     made on the hook's firing and noise), True asks for them, False leaves them out."""
     _LAST_RECALL["bridged"] = []
@@ -424,7 +429,7 @@ def recall(db: sqlite3.Connection, query: str, k: int = 8,
     own_words = {w for w, _ in textindex.query_terms(query)}   # bridges and expansions removed
 
     doc_score, doc_words, word_idf = _score_terms(
-        db, pairs, n_docs, avg_len, kinds, sources)
+        db, pairs, n_docs, avg_len, kinds, sources, scope)
 
     # ⛔ ★Automatic query expansion (pseudo-relevance feedback) measured **worse**★ (2026-08-10)
     #   Borrowing rare words from the first-pass top documents and searching again: top-3 2 → **1**, top-8 3 → **2**.
@@ -580,6 +585,8 @@ def recall(db: sqlite3.Connection, query: str, k: int = 8,
                 row = _hydrate(db, did)
                 if row is None or row["name"] in shown:
                     continue
+                if scope and (row["project_id"] or "") not in (scope, ""):
+                    continue                           # a neighbour from another project's scope stays out
                 results.append(_present(row, 0.0, [], via, needles, db, q_mass,
                                         related=True))
                 shown.add(row["name"])
@@ -642,6 +649,7 @@ def _present(row: sqlite3.Row, score: float, matched: List[str],
         "evidence_date": ev,
         "evidence_age_days": ev_age,
         "stale": _is_stale(row["kind"], ev_age, age),
+        "project_id": ((row["project_id"] or "") if "project_id" in row.keys() else "") or None,
         "excerpt": _excerpt(row["body"], needles),
         # ★Return the change history with the result★ — this is where goal ③ (history) belongs.
         #
@@ -722,7 +730,8 @@ def semantic(db: sqlite3.Connection, query: str, k: int = 3,
 
 def meaning(db: sqlite3.Connection, query: str, k: int, exclude: Sequence[str] = (),
             kinds: Optional[Sequence[str]] = None, sources: Optional[Sequence[str]] = None,
-            width: int = 0) -> Tuple[List[dict], str]:
+            width: int = 0,
+            scope: Optional[str] = None) -> Tuple[List[dict], str]:
     """★The k memories closest in meaning that the caller does not already have★ — for a caller that
     asked for them by number (MCP `recall`'s `semantic_k`). Returns (rows, why-none).
 
@@ -756,6 +765,8 @@ def meaning(db: sqlite3.Connection, query: str, k: int, exclude: Sequence[str] =
             if kinds and row["kind"] not in kinds:
                 continue
             if sources and row["source"] not in sources:
+                continue
+            if scope and (row["project_id"] or "") not in (scope, ""):
                 continue
             rows.append((row, cos, ratio))
             if len(rows) == k:
@@ -840,12 +851,13 @@ def passage_worth(text: str, weights, width: int = FUSE_WIDTH) -> float:
 
 def fused(db: sqlite3.Connection, query: str, rows: List[dict], k: int,
           extra_terms: Sequence[str] = (), kinds: Optional[Sequence[str]] = None,
-          sources: Optional[Sequence[str]] = None, width: int = 0) -> Tuple[List[dict], str]:
+          sources: Optional[Sequence[str]] = None, width: int = 0,
+          scope: Optional[str] = None) -> Tuple[List[dict], str]:
     """Words (`rows`, best first), meaning and the whole-body passage merged by reciprocal rank — the top `k`
     as `recall` rows (a document only meaning found reads the passage of the chunk that matched, §meaning).
     Returns (rows, why meaning gave nothing) — without meaning the other two still order."""
     words = [r for r in rows if not r.get("related")][:FUSE_POOL]
-    mrows, why = meaning(db, query, FUSE_POOL, kinds=kinds, sources=sources, width=width)
+    mrows, why = meaning(db, query, FUSE_POOL, kinds=kinds, sources=sources, width=width, scope=scope)
     by_path: Dict[str, dict] = {}
     for r in mrows + words:                              # a document words found keeps its words row
         by_path[r["path"]] = r
