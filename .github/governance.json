@@ -44,7 +44,7 @@
     "install": {
       "impact": "high",
       "summary": "installing, the hosts it wires into, the MCP server, corpus discovery",
-      "paths": ["brain/install.py", "brain/hosts.py", "brain/server.py", "brain/capabilities.py", "brain/recalljson.py", "brain/portable.py", "brain/discover.py",
+      "paths": ["brain/install.py", "brain/hosts.py", "brain/server.py", "brain/capabilities.py", "brain/recalljson.py", "brain/remembercontract.py", "brain/portable.py", "brain/discover.py",
                 "runtime/embeddinggemma/", "install.sh", "install/", "bin/", "pyproject.toml", "SETUP-PROMPT.md", "config.example.json",
                 "brain/config.example.json", "brain/__init__.py", "brain/launch.py"],
       "owners": []
