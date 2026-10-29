@@ -465,8 +465,12 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
                           ensure_ascii=False)
     if name == "brain_capabilities":
         from brain import capabilities
+        try:
+            memory_dir = _memory_dir()
+        except Exception:                                # noqa: BLE001 — no config yet: the answer still comes, with no folder
+            memory_dir = ""
         return json.dumps(capabilities.describe(db, tools=tools_for(db), protocol=_PROTOCOL,
-                                                memory_dir=_memory_dir(), shown=SHOWN),
+                                                memory_dir=memory_dir, shown=SHOWN),
                           ensure_ascii=False, indent=2)
     raise ValueError("unknown tool: %s" % name)
 
