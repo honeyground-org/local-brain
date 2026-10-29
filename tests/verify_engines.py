@@ -295,6 +295,17 @@ r = child(SCREEN, {}, {"embed": {"provider": "openai", "base_url": "http://local
 check("a local server is shown as ★nothing leaves★",
       "nothing leaves" in (r.get("t") or "") and "localhost:11434" in (r.get("t") or ""),
       "")
+ROWS = """
+import json
+from brain import engines
+print(json.dumps({r["role"]: r["has_key"] for r in engines.describe()}))
+"""
+r = child(ROWS, {}, {"embed": {"provider": "embeddinggemma"}})
+check("an engine declared without a key (the local embeddinggemma) is never shown as ★missing one★",
+      r.get("embed") is True, r)
+r = child(ROWS, {}, {"embed": {"provider": "gemini"}})     # control: an official keyed provider, no key anywhere
+check("(control) an official provider whose key is absent is still shown as missing it",
+      r.get("embed") is False, r)
 SET = """
 import json
 from brain import engines, store
