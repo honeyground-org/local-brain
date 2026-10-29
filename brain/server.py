@@ -87,6 +87,11 @@ TOOLS: List[Dict[str, Any]] = [
                                               "does not order the list either. Words and "
                                               "meaning find different answers; this is more to read, and one "
                                               "embedding call unless the question was asked before."},
+                "format": {"type": "string", "enum": ["text", "json"],
+                           "description": "text (default) or json — the orbit-1 structured answer: the same rows "
+                                          "with name·path·sha, the lane, partial/fallback and latency"},
+                "request_id": {"type": "string", "maxLength": 128,
+                               "description": "echoed back in json mode (at most 128 characters)"},
             },
             "required": ["query"],
         },
@@ -375,6 +380,14 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
         t0 = time.time()
         q, k = args["query"], int(args.get("k") or 8)
         terms = args.get("terms") or []
+        # ★orbit-1 JSON mode★ (2026-10-29) — the same rows as the text, as fields; bad arguments are an
+        #   answer (an error envelope), never an exception. Without `format`, nothing below changes.
+        if args.get("format") is not None or args.get("request_id") is not None:
+            from brain import recalljson
+            bad = recalljson.validate(args)
+            if bad:
+                return json.dumps(bad, ensure_ascii=False)
+        as_json = args.get("format") == "json"
         rows = search.recall(db, q, k=k, extra_terms=terms, kinds=args.get("kinds"), sources=args.get("sources"), log=not _measure)
         hint = ""
         if not args.get("terms"):
@@ -438,6 +451,12 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
                          unsure=was_unsure, bridged=len(bridged), reordered=reordered)
         if _capture is not None:
             _capture.extend(rows)
+        if as_json:
+            from brain import recalljson
+            return json.dumps(recalljson.response(
+                db, query=q, terms=terms, k=k, rows=rows, mrows=mrows, why_none=why, asked_meaning=sk,
+                auto_meaning=auto, request_id=args.get("request_id"), unsure=was_unsure, bridged=bridged,
+                reordered=reordered, embed_cached=cached, t0=t0, shown=SHOWN), ensure_ascii=False)
         return head + _fmt_recall(rows) + more + hint
     if name == "remember":
         return _do_remember(db, args)

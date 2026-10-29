@@ -71,6 +71,7 @@
 /brain/graphstore.py @wangjacsi
 /brain/indexaudit.py @wangjacsi
 /brain/localembed.py @wangjacsi
+/brain/recalljson.py @wangjacsi
 /config.example.json @wangjacsi
 /brain/observatory.py @wangjacsi
 /brain/capabilities.py @wangjacsi
