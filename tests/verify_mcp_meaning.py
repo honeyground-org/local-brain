@@ -122,20 +122,20 @@ def main() -> int:
     engines.judge_text = lambda *a, **k: calls.append(1) or "[]"
     calibrate.threshold = lambda db, default=0.0: 0.0          # every word result clears it: the words are sure
     try:
-        plain = server.call_tool(db, "recall", {"query": Q, "k": 1, "terms": ["ledger"]})
-        zero = server.call_tool(db, "recall", {"query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 0})
-        two = server.call_tool(db, "recall", {"query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 2})
-        refs = server.call_tool(db, "recall", {"query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 1,
+        plain = server.call_tool(db, "recall", {"format": "text", "query": Q, "k": 1, "terms": ["ledger"]})
+        zero = server.call_tool(db, "recall", {"format": "text", "query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 0})
+        two = server.call_tool(db, "recall", {"format": "text", "query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 2})
+        refs = server.call_tool(db, "recall", {"format": "text", "query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 1,
                                                "kinds": ["reference"]})
-        missing_plain = server.call_tool(db, "recall", {"query": "a question never embedded", "k": 1,
+        missing_plain = server.call_tool(db, "recall", {"format": "text", "query": "a question never embedded", "k": 1,
                                                         "terms": ["ledger"]})
-        missing = server.call_tool(db, "recall", {"query": "a question never embedded", "k": 1,
+        missing = server.call_tool(db, "recall", {"format": "text", "query": "a question never embedded", "k": 1,
                                                   "terms": ["ledger"], "semantic_k": 2})
         sure_rows = len(observe.read("recall", [observe.day()])[0])
         calibrate.threshold = lambda db, default=0.0: 1e9          # nothing clears it: the words are unsure
-        unsure = server.call_tool(db, "recall", {"query": Q, "k": 1, "terms": ["ledger"]})
-        unsure_off = server.call_tool(db, "recall", {"query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 0})
-        unsure_fail = server.call_tool(db, "recall", {"query": "a question never embedded", "k": 1,
+        unsure = server.call_tool(db, "recall", {"format": "text", "query": Q, "k": 1, "terms": ["ledger"]})
+        unsure_off = server.call_tool(db, "recall", {"format": "text", "query": Q, "k": 1, "terms": ["ledger"], "semantic_k": 0})
+        unsure_fail = server.call_tool(db, "recall", {"format": "text", "query": "a question never embedded", "k": 1,
                                                       "terms": ["ledger"]})
     finally:
         engines.judge_text, calibrate.threshold = real_judge, real_threshold

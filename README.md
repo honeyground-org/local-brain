@@ -134,9 +134,13 @@ A value measured on one person's notes is not another person's optimum.
   indexes in the same transaction. Retrieval uses the local copy until sync succeeds. Stale local
   vectors whose content hash no longer matches the document are excluded from similarity search.
 
-### Automatic policy loop: experimental, not a quality claim
+### Automatic personalisation and policy selection
 
-A background policy experiment records independent document reads, separates reads following a brain
+Automatic personalisation is implemented: corpus calibration, learned vocabulary, feedback-based
+ranking and the background policy-selection loop are part of Brain. The advanced candidate policy
+serving described below remains opt-in; that is an activation and evidence boundary, not an absent feature.
+
+The background policy loop records independent document reads, separates reads following a brain
 exposure, and excludes turns that edit documents. It compares the existing ranking with reciprocal-rank
 fusion and a graph-expanded candidate pool using cached query vectors only. The graph supplies linked
 candidates; their own text and vector evidence determine ranking. Link counts are not relevance votes.
@@ -473,6 +477,42 @@ claude mcp add brain --scope user -- "$(pwd)/bin/brain-mcp"
 
 Tools: `recall` · `remember` · `neighbors` · `brain_status` · `brain_suggest` ·
 `brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view` · `brain_capabilities`
+
+### External client defaults (server 2.0)
+
+`recall` and `remember` now return JSON by default, using the existing `orbit-1` field names.
+For human-readable output, pass `format: "text"`. MCP 2025-06-18 and newer receive the JSON
+object in `structuredContent` as well as serialized JSON in `content`; older clients can parse
+the text block. Conflicts and invalid arguments set `isError: true` on the MCP response.
+
+```json
+{"name":"remember","arguments":{"name":"deployment_order","description":"Apply the migration before deploying","type":"lesson","body":"The new worker requires the migrated schema.","project_id":"project-a"}}
+```
+
+- Ordinary saves need no retry key. Brain derives one from the memory name and content. Repeating
+  the unchanged request is a `noop`; an explicit `idempotency_key` remains supported.
+- Updating an existing memory requires `expected_sha` from a prior save or JSON recall. Without
+  it, Brain returns `result: "conflict"`, `stored: false` and the current SHA. Read and reconcile
+  the current content before retrying an update. Human-authored files have the same protection.
+- `project_id`, `source` and `observed_at` work without any format/key combination. An update that
+  omits `project_id` preserves the existing project. Scope identifiers must be nonempty, single-line
+  values without surrounding whitespace or quotes. `recall(scope=...)` includes that project and
+  unscoped shared notes; this is retrieval filtering, not multi-user authorisation. Personalised
+  unfiltered ranking does not bypass this boundary.
+- `stored`, `indexed_words`, `embedded` and `served` describe separate stages. A saved file with
+  failed indexing reports `partial: true`, `retryable: true`; replay the same request to retry indexing.
+  A successful write does not start an embedding or judge call. `embedded: true` requires complete
+  current-model chunk coverage. Missing evidence is `null`.
+- Cooperating writers share a directory lock; file replacement is atomic. A stale update loses
+  with a conflict instead of overwriting another writer. Direct filesystem editors do not take that
+  lock, so they are not covered by a transactional multi-client guarantee.
+- Invalid inputs are rejected before search or writes. `k` is 1–100 and `semantic_k` is 0–100.
+  Read `brain_capabilities` for live defaults, limits and supported write protections.
+
+**Migration:** clients that parsed numbered text should request `format: "text"`. Clients that
+previously overwrote by name must read the current SHA and provide `expected_sha`; text format does
+not restore unsafe overwrites. Existing memories are not rewritten or migrated. Retry keys apply to
+the currently stored version, not a permanent history of every request ever made.
 
 The MCP server and the CLI call the **same core functions**, so a fix lands in both at once.
 The server also picks up new code on disk by itself: after an update there is nothing to restart.

@@ -11,7 +11,7 @@ together, and what is not known is null.
 
 ## What is held down
 
-  ① text mode is untouched — `format` omitted and `format: "text"` answer byte for byte the same
+  ① omitted format returns JSON; explicit text retains its presentation
   ② the JSON lists ★exactly the names the text numbers, in the same order★; related rows sit apart
      (control: the fixture must yield both an answer and a related row, or ② proves nothing)
   ③ every row carries a stable id — `name` · `path` · a 40-hex `sha` equal to the index's — a boolean
@@ -84,9 +84,10 @@ def _call(db, args):
 def main() -> int:
     db = _build()
     print("=" * 72 + "\n① text mode untouched\n" + "=" * 72)
-    text_a = _call(db, {"query": Q, "terms": T, "k": 2, "semantic_k": 0})
+    default = json.loads(_call(db, {"query": Q, "terms": T, "k": 2, "semantic_k": 0}))
+    text_a = _call(db, {"query": Q, "terms": T, "k": 2, "semantic_k": 0, "format": "text"})
     text_b = _call(db, {"query": Q, "terms": T, "k": 2, "semantic_k": 0, "format": "text"})
-    check("format omitted == format text, byte for byte", text_a == text_b and len(text_a) > 20, len(text_a))
+    check("default is JSON; explicit text is stable", default.get("ok") is True and isinstance(default.get("results"), list) and text_a == text_b, len(text_a))
 
     print("\n" + "=" * 72 + "\n② the JSON lists the text's rows\n" + "=" * 72)
     raw = _call(db, {"query": Q, "terms": T, "k": 2, "semantic_k": 0, "format": "json", "request_id": "orbit-test-1"})
@@ -141,8 +142,8 @@ def main() -> int:
     badfmt = json.loads(_call(db, {"query": Q, "k": 2, "format": "xml"}))
     check("an unknown format is refused with invalid_argument",
           badfmt.get("ok") is False and (badfmt.get("error") or {}).get("code") == "invalid_argument", badfmt)
-    plain = _call(db, {"query": Q, "k": 2, "semantic_k": 0, "request_id": "ignored-in-text-mode"})
-    check("request_id without format=json leaves the text answer as it is", plain == _call(db, {"query": Q, "k": 2, "semantic_k": 0}))
+    plain = _call(db, {"query": Q, "k": 2, "semantic_k": 0, "request_id": "ignored-in-text-mode", "format": "text"})
+    check("request_id without format=json leaves the text answer as it is", plain == _call(db, {"query": Q, "k": 2, "semantic_k": 0, "format": "text"}))
 
     print("\n" + "=" * 72)
     if FAILS:

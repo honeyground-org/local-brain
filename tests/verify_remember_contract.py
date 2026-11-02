@@ -6,11 +6,11 @@
 A client that keeps an outbox (Cosmos Orbit) retries a save after a timeout. If the second attempt
 created a second memory, or quietly replaced a memory a person wrote in between, the outbox would
 make the brain worse with every hiccup. The contract's six rows (§remembercontract.decide) are each
-exercised here against the disk, and the legacy text behaviour is held unchanged.
+exercised here against the disk, and default calls use the same protection.
 
 ## What is held down
 
-  ① legacy: without `idempotency_key`/`format`, remember still answers "saved/updated: name" and overwrites
+  ① defaults: JSON, generated retry key, and no unversioned overwrite
   ② new: a keyed save is `new`, `stored`, `indexed_words`, with a 40-hex `sha` equal to the file's, the
      contract fields in the frontmatter, and `verified_at` = `observed_at`
   ③ noop: the same key and payload again changes nothing on disk and answers the same (minus timing)
@@ -84,12 +84,15 @@ def main() -> int:
     db = _build()
     base = dict(description="harbour ledger rule", type="lesson", body="The ledger closes on friday.")
 
-    print("=" * 72 + "\n① legacy text mode untouched\n" + "=" * 72)
-    t1 = _rem(db, name="legacy_note", **base)
-    t2 = _rem(db, name="legacy_note", description="harbour ledger rule", type="lesson", body="Changed by a person.")
-    check("first save answers 'saved:', the second 'updated:', both name the path",
-          t1.startswith("saved: legacy_note") and t2.startswith("updated: legacy_note") and "path:" in t1, (t1[:40], t2[:40]))
-    check("legacy overwrites without asking", "Changed by a person." in _read("legacy_note"))
+    print("=" * 72 + "\n① protected defaults\n" + "=" * 72)
+    t1 = _j(db, name="default_note", **base)
+    t2 = _j(db, name="default_note", description="harbour ledger rule", type="lesson", body="Changed by a person.")
+    check("default save is structured; unversioned overwrite is refused",
+          t1.get("result") == "new" and t2.get("result") == "conflict" and t1.get("idempotency_key", "").startswith("auto:"))
+    check("original content is preserved", "Changed by a person." not in _read("default_note"))
+    # A direct human-authored file remains a separate control, without API-generated metadata.
+    with open(os.path.join(_MEM, "legacy_note.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: legacy_note\nmetadata:\n  type: lesson\n---\nChanged by a person.\n")
 
     print("\n" + "=" * 72 + "\n② new\n" + "=" * 72)
     a = _j(db, name="orbit_rule", idempotency_key="k1", project_id="proj-A", source="orbit task t1",

@@ -147,7 +147,7 @@ def main() -> int:
     try:
         # ── ③ words sure ─────────────────────────────────────────────────────
         calibrate.threshold = lambda db, default=0.0: 0.0
-        sure = server.call_tool(db, "recall", {"query": Q, "terms": ["books"], "k": 3})
+        sure = server.call_tool(db, "recall", {"format": "text", "query": Q, "terms": ["books"], "k": 3})
         words_only = server._fmt_recall(search.recall(db, Q, k=3, extra_terms=["books"], log=False, bridge=False))
         check("③ words sure → exactly the words' answer: no synonym, no reordering, nothing added",
               sure.split("\n\n⛔ hint")[0] == words_only, sure[:120])
@@ -156,7 +156,7 @@ def main() -> int:
         calibrate.threshold = lambda db, default=0.0: 0.01
         hook_view = search.recall(db, "accounts routine", k=3, log=False)
         hook_bridged = search.last_bridged()
-        syn = server.call_tool(db, "recall", {"query": "accounts routine", "terms": ["vault"], "k": 3})
+        syn = server.call_tool(db, "recall", {"format": "text", "query": "accounts routine", "terms": ["vault"], "k": 3})
         check("④ the default recall (the hook's) leaves learned synonyms out while the decision is off",
               not hook_bridged and not hook_view, "%s" % hook_bridged)
         check("④ unsure, then a synonym → the words' list with it named, not reordered, no meaning list",
@@ -165,7 +165,7 @@ def main() -> int:
 
         # ── ⑤ still unsure → two lanes, the better rank wins ─────────────────
         calibrate.threshold = lambda db, default=0.0: 1e9
-        un = server.call_tool(db, "recall", {"query": Q, "terms": ["books"], "k": 4})
+        un = server.call_tool(db, "recall", {"format": "text", "query": Q, "terms": ["books"], "k": 4})
         main_part, _, extra = un.partition("— close in meaning")
         shown, added = names_in(main_part), names_in(extra)
         words4 = [r["name"] for r in search.recall(db, Q, k=4, extra_terms=["books"], log=False) if not r.get("related")]
@@ -182,17 +182,17 @@ def main() -> int:
         check("⑤ on a tie of best ranks the words' first keeps first", shown[:1] == words4[:1], "%s" % shown[:1])
         check("⑤ meaning's own list adds only what is not shown", added and not set(added) & set(shown),
               "%s | %s" % (shown, added))
-        off = server.call_tool(db, "recall", {"query": Q, "terms": ["books"], "k": 3, "semantic_k": 0})
+        off = server.call_tool(db, "recall", {"format": "text", "query": Q, "terms": ["books"], "k": 3, "semantic_k": 0})
         check("⑤ `semantic_k: 0` keeps meaning out of both", "close in meaning" not in off
               and "ordered by words and meaning" not in off)
-        blind = server.call_tool(db, "recall", {"query": "ledger reconciliation never embedded", "k": 3})
+        blind = server.call_tool(db, "recall", {"format": "text", "query": "ledger reconciliation never embedded", "k": 3})
         check("⑤ no embedding engine → the words still order, and nothing says unavailable",
               "ordered by words and meaning" in blind and "unavailable" not in blind, blind[:120])
         # ★control★ — the words' own order in place of `union` cannot pass ⑤
         real_union = search.union
         search.union = lambda db, q, rows, k, **kw: ([r for r in rows if not r.get("related")][:k], "")
         try:
-            plain = server.call_tool(db, "recall", {"query": Q, "terms": ["books"], "k": 4})
+            plain = server.call_tool(db, "recall", {"format": "text", "query": Q, "terms": ["books"], "k": 4})
         finally:
             search.union = real_union
         check("⑤ ★control★ with the words' own order in place of `union`, the meaning-only document is gone",

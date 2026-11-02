@@ -30,15 +30,30 @@ def error(code: str, message: str, detail: Optional[dict] = None) -> Dict[str, A
 
 def validate(args: dict) -> Optional[Dict[str, Any]]:
     """None when the JSON-mode arguments are acceptable, else the error envelope to return."""
+    if not isinstance(args, dict):
+        return error("invalid_argument", "arguments must be an object")
+    query = args.get("query")
+    if not isinstance(query, str) or not query.strip() or len(query) > 24000:
+        return error("invalid_argument", "query must contain 1–24000 characters")
+    for field, default, minimum in (("k", 8, 1), ("semantic_k", 0, 0)):
+        value = args.get(field, default)
+        if type(value) is not int or not minimum <= value <= 100:
+            return error("invalid_argument", "%s must be an integer between %d and 100" % (field, minimum))
+    for field in ("terms", "sources", "kinds"):
+        values = args.get(field, [])
+        if (not isinstance(values, list) or len(values) > 100
+                or any(not isinstance(v, str) or not v.strip() or len(v) > 2000 for v in values)):
+            return error("invalid_argument", "%s must be an array of at most 100 nonempty strings" % field)
     fmt = args.get("format")
     if fmt not in (None, "text", "json"):
         return error("invalid_argument", "format must be \"text\" or \"json\"", {"format": fmt})
     scope = args.get("scope")
-    if scope is not None and (not isinstance(scope, str) or not scope.strip() or len(scope) > REQUEST_ID_MAX):
+    if "scope" in args and (not isinstance(scope, str) or not scope.strip() or len(scope) > REQUEST_ID_MAX
+                              or scope != scope.strip() or any(ord(c) < 32 for c in scope)):
         return error("invalid_argument", "scope must be a non-empty string of at most %d characters" % REQUEST_ID_MAX,
                      {"max": REQUEST_ID_MAX})
     rid = args.get("request_id")
-    if fmt == "json" and rid is not None and (not isinstance(rid, str) or len(rid) > REQUEST_ID_MAX):
+    if rid is not None and (not isinstance(rid, str) or len(rid) > REQUEST_ID_MAX):
         return error("invalid_argument", "request_id must be a string of at most %d characters" % REQUEST_ID_MAX,
                      {"max": REQUEST_ID_MAX})
     return None
@@ -136,6 +151,7 @@ def response(db: sqlite3.Connection, *, query: str, terms: Sequence[str], k: int
         index_at, gen = None, None
     return {
         "contract": CONTRACT,
+        "ok": True,
         "request_id": request_id,
         "query": query,
         "terms": list(terms or []),
