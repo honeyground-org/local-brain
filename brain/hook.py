@@ -233,8 +233,9 @@ def fallback(db, prompt: str, strict: bool = False, cache: bool = True,
        Its tail is not bounded here — the watchdog in `main()` is what bounds it.
 
     `observe` (§search.judge_observation) is told why the judge did or did not run — no vectors in the
-    space in use, a threshold not measured for this judge, or what the judge said. ⛔ It changes nothing
-    that is returned and asks nothing more.
+    space in use, no judge chosen, a threshold not measured for this judge, or what the judge said — and,
+    with no judge, what the judge-free stage decided (§search.agreed). ⛔ It changes nothing that is
+    returned and asks nothing more.
     """
     obs = observe if observe is not None else {}
     try:
@@ -251,18 +252,45 @@ def fallback(db, prompt: str, strict: bool = False, cache: bool = True,
         # Measurement forced this order: a cosine-ratio gate alone rescued 0 of 8 silent cases,
         # and adding the reranker put the right answer 1st in 3 of them, top-1 correct overall going 3→15.
         # The reason is scale — cosine measures "is this the same neighbourhood", the reranker measures "is this the answer".
-        from brain import rerank
+        from brain import engines, rerank
         if not has_vec:
             obs["outcome"] = "no_vectors"
         elif rerank.min_score(db) <= 10.0:
             return search.judged(db, prompt[:MAX_PROMPT_CHARS], strict=strict,
                                  cache=cache, observe=obs, deadline=deadline)[:1]
+        elif engines.choice("judge")["provider"] == "none":
+            # ★No judge chosen★ (2026-11-02) — the second stage is the judge-free one below. Its own count,
+            #   so a day with no judge is never read as "a threshold nobody measured". (A threshold forced
+            #   by `BRAIN_RERANK_MIN` still reaches the judge above — the checks stub one that way.)
+            obs["outcome"] = "no_judge"
         else:
             # ⛔ ★Where a person without a labelled sample stands today★ — no threshold was measured for
             #    this judge, so it is never asked. Recorded so that silence shows up as a count.
             obs["outcome"] = "uncalibrated"
-        if has_vec and vectors.min_ratio(db) < vectors.MIN_RATIO_FALLBACK:
-            return search.semantic(db, prompt[:MAX_PROMPT_CHARS], k=1)[:1]
+        if has_vec:
+            # ★The judge-free second stage★ (2026-11-02 · §search.agreed) — first a memory ★both lanes★ hold in
+            #   their top AGREE_N whose meaning ratio clears the gate set by the controls the lanes agreed on;
+            #   then, as before, meaning's top-1 behind the single-lane gate. Each gate is silent (99) until
+            #   `brain vec calibrate` or the daily ingest measures it on the person's own control group.
+            #   Measured on the author's 66 labelled prompts (words silent on 41) and 34 that need no memory:
+            #   agreement attached the answer for 2, the single-lane gate for 1, and neither fired on a control
+            #   — the lexical stage's own 2 stayed the only false fires. The judge-free decision is recorded
+            #   like the judge's (`decision` below · fired), so `brain monitor` counts the stage as finished.
+            floor = vectors.min_agree_ratio(db)
+            if floor < vectors.MIN_RATIO_FALLBACK:
+                rows = search.agreed(db, prompt[:MAX_PROMPT_CHARS], k=vectors.AGREE_N, min_ratio=floor)
+                obs["phase"], obs["gate"] = "agreement", "agreement"
+                obs["decision"] = "fired" if rows else "below"
+                if rows:
+                    return rows[:1]
+            if vectors.min_ratio(db) < vectors.MIN_RATIO_FALLBACK:
+                rows = search.semantic(db, prompt[:MAX_PROMPT_CHARS], k=1)[:1]
+                obs["phase"] = "ratio"
+                if rows:
+                    obs["gate"], obs["decision"] = "ratio", "fired"
+                    return rows
+                if obs.get("decision") is None:
+                    obs["decision"] = "below"
     except Exception as exc:                             # noqa: BLE001
         # ⛔ ★A swallowing catch kills the signal★ (measured 2026-08-25) — this `except` had just
         #    swallowed a NameError raised while writing this function itself, making it look like "the judge fell silent",

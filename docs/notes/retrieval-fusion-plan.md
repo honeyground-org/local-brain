@@ -134,3 +134,29 @@ its input order (min of the two ranks) 31 — so the bar for a judged arm is 31 
 - for the hook: p95 of a cold run within min(0.9 T, T − M), where T is the installation's hook limit and M
   the watchdog margin, fewer than 1% of runs cut, and a one-sided 95% upper bound of at most 5 points on
   the rise in false fires on a corrected no-memory set. If that cannot be shown, only MCP `recall` changes.
+
+**Result (2026-11-02, judge-free; the judge engine is now none on the author's machine).** On a fresh snapshot of
+the live index (2,300 documents, the local embedding engine), the same 66 questions, question alone / with the
+agent's terms, top 3 and lost · gained against the words alone: fused as deployed (words + meaning + passage by
+reciprocal rank) 22 / 36 (−6 +4 · −9 +4) — below the words (24 / 41); reciprocal rank of the two lanes 30 / 41;
+the better rank of the two lanes 35 / 44 (−1 +12 · −3 +6); the same only where the words are unsure 33 / 46
+(−1 +10 · −0 +5). A third lane lowered every arm: the passage (as above), the top candidates' graph neighbours
+29 / 40. On the live path, as `recall` builds its lanes (learned synonyms in, the vector store answering), the
+better rank with the passage as tie-break gave 33 / 45 against fused's 27 / 44 — one question lost (1st → 5th,
+its words rank moved by a learned synonym), 7 and 2 gained; top 8 37 / 52 against 32 / 50. Shipped as
+`search.union`, in the unsure branch only; `fused` stays for this experiment's arms. The judged arms A–D were
+never run (0 of 330 calls) and are closed with the judge.
+
+For the hook (the second stage, unattended): on the 41 of 66 labelled prompts the words leave silent and the 32
+of 34 controls, meaning's top-1 ratio overlaps between answers (1.11–1.61) and no-memory talk (1.08–1.40), so the
+single-lane gate the controls set (1.40) let 1 answer through. Asking both lanes to agree within their top 3 and
+gating the ratio against the agreeing controls (1.20 that day) attached 2 more answers and fired on none of the 34;
+agreement within the top 5 let 2 controls through, within the top 8 seven. Shipped as `search.agreed` behind
+`vectors.min_agree_ratio`, measured by `calibrate_cos` beside the single-lane gate; both stay silent until measured.
+The hook acceptance line above (p95 within the wall, under 1% cut, at most 5 points on the rise in false fires)
+is read on the person's own transcripts by `tests/measure_conversation_replay.py` — 34 controls alone cannot bound
+5 points.
+Replayed 2026-11-02 over the author's last 14 days (400 turns, `--calibrate`): in the 13 turns where the agent
+opened an indexed document the words and the two lanes both held it in the top 3 for 6 and in the top 8 for 10
+(the words were unsure on 2 of the 13); the judge-free second stage fired on 1 of the 387 turns that opened
+nothing, against the words' stage's 243 — a bound of about 1 point on the rise in false fires.

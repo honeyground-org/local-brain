@@ -134,6 +134,11 @@ TIMEOUT = float(os.environ.get("BRAIN_EMBED_TIMEOUT", "60") or 60)
 # ★add nothing★ (cosine cannot exceed 1). Not knowing the scale, it chooses silence.
 MIN_COS_FALLBACK = 1.01     # cosine cannot exceed 1 = ★add nothing★
 MIN_RATIO_FALLBACK = 99.0   # the same meaning — the silent default for the relative rule
+# ★How deep each lane is read when the two must agree★ (§search.agreed · the hook's judge-free second stage).
+# Measured 2026-11-02 on the author's 34 no-memory controls: at 3 the agreeing controls stay below the gate
+# the controls themselves set, at 5 two fire, at 8 seven. A structural depth, like MAX_ITEMS — the gate
+# value itself is never written here (§min_agree_ratio).
+AGREE_N = 3
 TOPN_FOR_MEAN = 40          # the relative rule's denominator: the mean of this query's top N cosines
 
 
@@ -174,6 +179,13 @@ def min_ratio(db=None) -> float:
     Measured (right answers ranked 1st that survive under the same control group): absolute 4 · gap 7 · z 8 · ★ratio 13★.
     """
     return _meta_float(db, "vec_min_ratio", "BRAIN_EMBED_MIN_RATIO", MIN_RATIO_FALLBACK)
+
+
+def min_agree_ratio(db=None) -> float:
+    """The ratio gate for a memory ★both lanes agree on★ (§search.agreed) — set from the controls whose
+    meaning top-AGREE_N candidate the words' top-AGREE_N also hold (§calibrate_cos). Silent (99) until measured:
+    a memory the lanes agree on is still not attached on an unknown scale."""
+    return _meta_float(db, "vec_agree_min_ratio", "BRAIN_EMBED_MIN_AGREE_RATIO", MIN_RATIO_FALLBACK)
 
 
 # Document coverage has no prefix cap; ingestion is bounded by batch and quota instead.
@@ -836,15 +848,25 @@ def calibrate_cos(db: sqlite3.Connection, control: Sequence[str],
     positives  (question, gold memory name) → how many survive above that threshold
     ⛔ The absolute cosine is reported too, but ★the gate is the ratio★.
     """
+    from brain import search as _search
     ctrl = []
+    agree_noise = 0.0
+    agreeing = 0
     for q in control:
         hits = search(db, q, k=1)
         ctrl.append((hits[0][2] if hits else 0.0, hits[0][1] if hits else 0.0))
+        # ★the second gate★ — the ratio of a control's candidate that ★both lanes★ hold in their top AGREE_N
+        #   (§search.agreed). Measured apart from the single-lane maximum: on 2026-11-02 the lanes agreed on
+        #   2 of 32 silent controls (ratios up to 1.19) while the single-lane maximum sat at 1.40.
+        for r in _search.agreed(db, q, k=AGREE_N, min_ratio=0.0):
+            agreeing += 1
+            agree_noise = max(agree_noise, float(r.get("ratio") or 0.0))
     noise_ratio = max((r for r, _ in ctrl), default=0.0)
     noise_cos = max((c for _, c in ctrl), default=0.0)
     thr = round(noise_ratio + margin, 4)
+    thr_agree = round(agree_noise + margin, 4)
 
-    top1 = top3 = 0
+    top1 = top3 = agree_hits = 0
     for q, gold in positives:
         hits = search(db, q, k=3)
         rows = []
@@ -855,9 +877,13 @@ def calibrate_cos(db: sqlite3.Connection, control: Sequence[str],
             top1 += 1
         if any(_ei.gold_hit(gold, n) and rt >= thr for n, _, rt in rows):
             top3 += 1
+        got = _search.agreed(db, q, k=AGREE_N, min_ratio=thr_agree)
+        if got and _ei.gold_hit(gold, got[0]["name"]):
+            agree_hits += 1
     if save:
         from brain import store
         store.set_meta(db, calibration_key("vec_min_ratio"), str(thr))
+        store.set_meta(db, calibration_key("vec_agree_min_ratio"), str(thr_agree))
         store.set_meta(db, calibration_key("vec_min_cos"), str(round(noise_cos + 0.01, 4)))
         store.set_meta(db, calibration_key("vec_model"), "%s/%s/%d" % (PROVIDER, model_tag(), DIM))
     return {"gate": "ratio", "min_ratio": thr,
@@ -865,6 +891,8 @@ def calibrate_cos(db: sqlite3.Connection, control: Sequence[str],
             "noise_cos_max": round(noise_cos, 4),
             "positives_top1": top1, "positives_top3": top3,
             "positives_n": len(positives), "control_n": len(control),
+            "agree_gate": {"min_ratio": thr_agree, "depth": AGREE_N, "controls_agreeing": agreeing,
+                           "noise_ratio_max": round(agree_noise, 4), "positives_attached": agree_hits},
             "model": model_tag(), "dim": DIM}
 
 

@@ -130,6 +130,19 @@ A memory for coding agents that is **more efficient and performs better than the
   meaning misses and meaning 15 that words miss. MCP `recall` uses words only, the hook uses meaning only
   when words fall silent, and the judge reads a document's head while the passage that matched is often
   further in. Plan and the experiment fixed before it runs: [`notes/retrieval-fusion-plan.md`](notes/retrieval-fusion-plan.md).
+- They meet without a judge (2026-11-02, the local embedding engine answering, every number judge-free). Where
+  the words are unsure, an agent's `recall` now orders ★the two lanes by the better rank★, the passage
+  breaking ties (`search.union`): on the live path the top 3 went 27 → 33 of 66 on the question alone and
+  44 → 45 with the agent's terms (one question lost, 1st → 5th; 7 and 2 gained), the top 8 32 → 37 and
+  50 → 52. The three-ranking merge it replaces had fallen below the words alone on a fresh snapshot (24 → 22,
+  41 → 36); a graph lane lowered every arm it joined (−5, −7) and as candidate expansion reached one answer
+  in 66 — so the graph stays the related-context slot and the neighbours tool. The hook's second stage no
+  longer needs a judge: a memory ★both lanes hold in their top 3★, behind a ratio gate the ★agreeing★ controls
+  set (`search.agreed`, `vectors.calibrate_cos`), attached the answer for 2 more of 66 labelled prompts and
+  fired on none of the 34 that need no memory (the single-lane gate the controls set at 1.40 had passed 1
+  of 41 silent prompts; the answers' and the controls' top-1 ratios overlap, 1.11–1.61 against 1.08–1.40).
+  Second axis: `tests/measure_conversation_replay.py` replays the person's own transcripts — the prompt, then
+  the indexed documents the agent opened in that turn.
 - The judge's threshold cannot re-measure itself: 4 of the 34 hand-labelled "no memory needed" prompts
   (labelled 2026-08-12, when only lexical search existed) are answered by real memories, and the judge
   gives them 10. The noise floor then sits at the top of the scale, so calibration refuses to ship

@@ -21,7 +21,7 @@ This builds a corpus whose vectors it writes itself (no network, no budget) and 
      threshold finds nothing to attach: then a few are added, said to be added for that reason; where the words
      are sure, the answer is the word results alone and no embedding is asked for; `semantic_k: 0` turns it off;
      a failure while unasked is recorded, not shown; the record tells an added list from an asked one.
-     Unsure, the list itself is also ordered by words, meaning and the passage (§search.fused ·
+     Unsure, the list itself is also ordered by words and meaning together, the better rank first (§search.union ·
      tests/verify_recall_unsure_order.py), so meaning's own list adds only what is not shown there
 
 ⛔ Control: the meaning list's top item is one the words do not find at all — so ② would be red on code that
@@ -155,7 +155,7 @@ def main() -> int:
           and section.find("quarry_note") < section.find("deep_note"), "%s" % listed)
     check("② at most k, and none already shown above", len(listed) == 2 and "books_rule" not in listed,
           "%s" % listed)
-    # the kinds filter leaves the words nothing, so they are unsure and meaning orders the list (§search.fused)
+    # the kinds filter leaves the words nothing, so they are unsure and meaning orders the list (§search.union)
     check("② the kinds filter applies — and asks again when the filter eats the pool",
           "copper_note" in refs and not any(n in refs for n in NOTES if n != "copper_note"),
           refs.strip()[:160])
@@ -187,13 +187,13 @@ def main() -> int:
           and all(r.get("meaning") is None for r in rec[:2]), "%s" % [(r.get("auto"), r.get("meaning")) for r in rec[:2]])
     main, _, usec = unsure.partition("— close in meaning")
     added = [n for n in NOTES if "%s  [" % n in usec]
-    check("⑥ words unsure, unasked: the list says it is ordered by words, meaning and the passage together",
-          "ordered by words, meaning" in main and "books_rule" in main, main[:160])
+    check("⑥ words unsure, unasked: the list says it is ordered by words and meaning together",
+          "ordered by words and meaning" in main and "books_rule" in main, main[:160])
     check("⑥ then meaning's own list: none shown above, at most %d, saying why it came" % server.AUTO_MEANING,
           "quarry_note" in added and 0 < len(added) <= server.AUTO_MEANING
           and not any("%s  [" % n in main for n in added) and "the words were unsure" in usec, "%s" % added)
     check("⑥ `semantic_k: 0` keeps meaning out — no list, and it does not order the list either",
-          "close in meaning" not in unsure_off and "ordered by words, meaning" not in unsure_off)
+          "close in meaning" not in unsure_off and "ordered by words and meaning" not in unsure_off)
     check("⑥ a failure while unasked is not shown — the word results alone",
           "unavailable" not in unsure_fail and "close in meaning" not in unsure_fail)
     tail_rows = rec[sure_rows:]

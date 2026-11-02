@@ -19,11 +19,19 @@ This builds a corpus whose vectors it writes itself (no network) and holds down:
   ③ words sure → `recall` answers exactly as the words do: no synonym asked for, no reordering, nothing embedded
   ④ words unsure and a learned synonym makes them sure → the words' list with the synonyms named, no reordering;
      ★the default `recall` (the hook's) still leaves the synonyms out★ while the measured decision is off
-  ⑤ still unsure → the list says it is ordered by the three together, and meaning's own list adds only what is
-     not shown; `semantic_k: 0` keeps meaning out of both; without an embedding engine the other two still order
+  ⑤ still unsure → ★two lanes, the better rank wins★ (§search.union · 2026-11-02): the list says it is ordered by
+     words and meaning together; a document only meaning found is in it; a document both lanes hold rises above a
+     words-only one below it; the words' first keeps first on a tie; meaning's own list adds only what is not
+     shown; `semantic_k: 0` keeps meaning out of both; without an embedding engine the words still order
   ⑥ the record says unsure · how many synonyms · reordered — counts only, no words
 
-⛔ Control: with `search.fused` replaced by the words' own order, ② and ⑤ turn red — the check sees the reordering.
+Why `union` and not `fused` in ⑤ (measured 2026-11-02, judge-free, the author's 66 labelled questions): the
+three-ranking merge fell below the words alone (question alone 24 → 22, with terms 41 → 36) once the local
+embedding engine answered; the better rank of the two lanes, applied only where the words are unsure, took them
+to 33 and 46 with one question lost. `fused` stays for ② and the measurement scripts.
+
+⛔ Control: with `search.fused` replaced by the words' own order ② turns red, and with `search.union` replaced
+   by the words' own order ⑤ turns red — the check sees both reorderings.
 """
 from __future__ import annotations
 
@@ -155,34 +163,54 @@ def main() -> int:
               "learned synonyms added: ledger" in syn and "ordered by words, meaning" not in syn
               and "close in meaning" not in syn and "only_ledger" in syn, syn[:200])
 
-        # ── ⑤ still unsure ───────────────────────────────────────────────────
+        # ── ⑤ still unsure → two lanes, the better rank wins ─────────────────
         calibrate.threshold = lambda db, default=0.0: 1e9
-        un = server.call_tool(db, "recall", {"query": Q, "terms": ["books"], "k": 3})
+        un = server.call_tool(db, "recall", {"query": Q, "terms": ["books"], "k": 4})
         main_part, _, extra = un.partition("— close in meaning")
         shown, added = names_in(main_part), names_in(extra)
-        check("⑤ still unsure → the list says it is ordered by the three together, the long report first",
-              "ordered by words, meaning" in main_part and shown[:1] == ["long_report"], "%s" % shown)
+        words4 = [r["name"] for r in search.recall(db, Q, k=4, extra_terms=["books"], log=False) if not r.get("related")]
+        uni, _ = search.union(db, Q, search.recall(db, Q, k=search.FUSE_POOL, extra_terms=["books"], log=False), 4,
+                              extra_terms=["books"])
+        check("⑤ still unsure → the list says it is ordered by words and meaning together, in `union`'s order",
+              "ordered by words and meaning" in main_part and shown == [r["name"] for r in uni], "%s" % shown)
+        check("⑤ a document only meaning found is in the list (tally_rule has no question word)",
+              "tally_rule" in shown and "tally_rule" not in words4, "%s" % shown)
+        check("⑤ a document both lanes hold (long_report: words 2nd, meaning 2nd) rises above a words-only one below it",
+              "long_report" in shown and "only_ledger" in words4
+              and (shown.index("long_report") < shown.index("only_ledger") if "only_ledger" in shown else True)
+              and shown.index("long_report") <= words4.index("long_report"), "%s ← words %s" % (shown, words4))
+        check("⑤ on a tie of best ranks the words' first keeps first", shown[:1] == words4[:1], "%s" % shown[:1])
         check("⑤ meaning's own list adds only what is not shown", added and not set(added) & set(shown),
               "%s | %s" % (shown, added))
         off = server.call_tool(db, "recall", {"query": Q, "terms": ["books"], "k": 3, "semantic_k": 0})
         check("⑤ `semantic_k: 0` keeps meaning out of both", "close in meaning" not in off
-              and "ordered by words, meaning" not in off)
+              and "ordered by words and meaning" not in off)
         blind = server.call_tool(db, "recall", {"query": "ledger reconciliation never embedded", "k": 3})
-        check("⑤ no embedding engine → words and the passage still order, and nothing says unavailable",
-              "ordered by words, meaning" in blind and "unavailable" not in blind, blind[:120])
+        check("⑤ no embedding engine → the words still order, and nothing says unavailable",
+              "ordered by words and meaning" in blind and "unavailable" not in blind, blind[:120])
+        # ★control★ — the words' own order in place of `union` cannot pass ⑤
+        real_union = search.union
+        search.union = lambda db, q, rows, k, **kw: ([r for r in rows if not r.get("related")][:k], "")
+        try:
+            plain = server.call_tool(db, "recall", {"query": Q, "terms": ["books"], "k": 4})
+        finally:
+            search.union = real_union
+        check("⑤ ★control★ with the words' own order in place of `union`, the meaning-only document is gone",
+              "tally_rule" not in names_in(plain.partition("— close in meaning")[0]))
     finally:
         calibrate.threshold = real
 
     # ── ⑥ the record ─────────────────────────────────────────────────────────
     rec, _ = observe.read("recall", [observe.day()])
     got = [(r.get("unsure"), r.get("bridged"), r.get("reordered")) for r in rec]
-    check("⑥ the record: sure · synonym · reordered · meaning kept out · blind — counts only",
-          got == [(False, 0, False), (True, 1, False), (True, 0, True), (True, 0, False), (True, 0, True)], "%s" % got)
+    check("⑥ the record: sure · synonym · reordered · meaning kept out · blind · control — counts only",
+          got == [(False, 0, False), (True, 1, False), (True, 0, True), (True, 0, False), (True, 0, True),
+                  (True, 0, True)], "%s" % got)
     from brain import monitor
     ms = monitor.summarise(monitor.rows([observe.day()]))
-    check("⑥ `brain monitor` counts them: 5 calls · unsure 4 · a synonym added 1 · reordered 2",
-          tuple(ms["recall"][k] for k in ("calls", "unsure", "bridged", "reordered")) == (5, 4, 1, 2)
-          and "4" in monitor.render(ms, {}, "test"), "%s" % ms["recall"])
+    check("⑥ `brain monitor` counts them: 6 calls · unsure 5 · a synonym added 1 · reordered 3",
+          tuple(ms["recall"][k] for k in ("calls", "unsure", "bridged", "reordered")) == (6, 5, 1, 3)
+          and "5" in monitor.render(ms, {}, "test"), "%s" % ms["recall"])
     raw = open(observe.path("recall"), encoding="utf-8").read()
     check("⑥ no word of the question or of a synonym in the record",
           not any(x in raw for x in ("ledger", "accounts", "vault")))
