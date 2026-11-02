@@ -215,12 +215,15 @@ def main() -> int:
           json.dumps(j)[:120])
 
     # ── ③ why it did not run ──────────────────────────────────────────────────
+    # ★a judge chosen but no threshold measured★ is `uncalibrated`; ★no judge chosen at all★ is `no_judge` (2026-11-02 —
+    #   the judge-free second stage runs then, §hook.fallback). This fixture chooses none, so the first needs a name.
     for shape, env, want in (("novec", None, "no_vectors"),
-                             ("uncalibrated", {"BRAIN_RERANK_MIN": None}, "uncalibrated"),
+                             ("uncalibrated", {"BRAIN_RERANK_MIN": None, "BRAIN_JUDGE_PROVIDER": "gemini"}, "uncalibrated"),
+                             ("uncalibrated", {"BRAIN_RERANK_MIN": None}, "no_judge"),
                              ("nocands", None, "no_candidates")):
         r = _run(shape, env)
         j = r["judge"] or {}
-        check("③ %-12s → %s, no call" % (shape, want),
+        check("③ %-12s → %s, no call" % (shape if want != "no_judge" else "no judge", want),
               j.get("outcome") == want and r["calls"] == 0, json.dumps(j)[:120])
     r = _run("lexical")
     check("③ words answered → the second stage never ran, and the record says none",

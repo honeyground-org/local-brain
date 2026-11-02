@@ -812,6 +812,10 @@ def last_bridged() -> List[str]:
 # ⛔ Not in the hook: there the order of what it attaches did not move (15 → 13–14 · 18 → 19), and synonyms
 #    deciding ★whether★ to attach took prompts that need no memory from 3 to 17 of 34 attached.
 # ⛔ Graph agreement (what the top candidates link to) was measured as a fourth ranking and lowered every arm.
+# ⛔ Re-measured 2026-11-02 with the local embedding engine, judge-free (§union): the passage lane now lowers
+#    the arm it joins (fused 22 / 36 against words 24 / 41), and ★the better rank of the two lanes★ wins
+#    (33 / 46 where the words are unsure, one question lost). `fused` stays for the measurement scripts and
+#    the scope check; an agent's `recall` orders by `union`.
 FUSE_POOL = 20        # how deep each ranking is read
 FUSE_K = 60           # the reciprocal-rank constant — the usual one, not tuned here
 FUSE_WIDTH = 1200     # the passage window — one embedded chunk's width (§vectors.CHUNK_CHARS)
@@ -877,6 +881,87 @@ def fused(db: sqlite3.Connection, query: str, rows: List[dict], k: int,
             score[p] = score.get(p, 0.0) + 1.0 / (FUSE_K + i + 1)
     order = sorted(pool, key=lambda p: (-score[p], base[p]))
     return [by_path[p] for p in order[:k]], why
+
+
+def union(db: sqlite3.Connection, query: str, rows: List[dict], k: int,
+          extra_terms: Sequence[str] = (), kinds: Optional[Sequence[str]] = None,
+          sources: Optional[Sequence[str]] = None, width: int = 0,
+          scope: Optional[str] = None) -> Tuple[List[dict], str]:
+    """Words and meaning as ★two lanes — the better rank wins★. Between equal best ranks the passage decides
+    (§passage_worth — how grep sees a document: the one window holding the most of the question), then the
+    sum of the two ranks, then the words' lane. The top `k` as `recall` rows (a document only meaning found
+    reads the passage of the chunk that matched, §meaning). Returns (rows, why meaning gave nothing) — without
+    meaning the words' order stands.
+
+    ★Why this and not `fused`★ (measured 2026-11-02 on the author's 66 labelled questions, judge-free; first on
+    a fresh snapshot with the local vector copy, then on the live path as an agent's `recall` builds its lanes —
+    learned synonyms in, the vector store answering; top 3, lost · gained against the words alone):
+        snapshot   fused (words + meaning + passage by reciprocal rank)  question alone 24 → 22 (−6 +4) · with terms 41 → 36 (−9 +4)
+                   reciprocal rank of the two lanes                      24 → 30 (−4 +10)              · 41 → 41 (−6 +6)
+                   the better rank wins                                  24 → 35 (−1 +12)              · 41 → 44 (−3 +6)
+                   the same, only where the words are unsure (§server)   24 → 33 (−1 +10)              · 41 → 46 (−0 +5)
+        live       fused, as deployed                                    24 → 27 (−1 +4)               · 41 → 43 (−0 +2)
+                   the better rank wins, unsure only                     24 → 31 (−0 +7)               · 41 → 43 (−0 +2)
+                   ★this★ — and the passage breaks the tie               24 → 32 (−0 +8)               · 41 → 44 (−0 +3)
+    Against the deployed `fused` this loses one question (1st → 5th; the learned synonyms moved its words
+    rank, and only the passage lane had held it) and gains 6 and 2. A third lane — the passage, or what the top
+    candidates link to — lowered every arm it joined as a lane; as a tie-break the passage adds one. The
+    meaning lane cost p50 0.22 s on the local copy, less with the vector store and a cached query embedding.
+    """
+    words = [r for r in rows if not r.get("related")][:FUSE_POOL]
+    mrows, why = meaning(db, query, FUSE_POOL, kinds=kinds, sources=sources, width=width, scope=scope)
+    by_path: Dict[str, dict] = {}
+    for r in mrows + words:                              # a document words found keeps its words row
+        by_path[r["path"]] = r
+    rank: Dict[str, List[int]] = {}
+    for i, r in enumerate(words):
+        rank.setdefault(r["path"], [FUSE_POOL, FUSE_POOL])[0] = i
+    for i, r in enumerate(mrows):
+        rank.setdefault(r["path"], [FUSE_POOL, FUSE_POOL])[1] = i
+    pool = list(rank)
+    weights = query_weights(db, " ".join([query] + list(extra_terms)))
+    worth: Dict[str, float] = {}
+    for p in pool:
+        d = db.execute("SELECT title, description, body FROM docs WHERE path=?", (p,)).fetchone()
+        worth[p] = passage_worth("\n".join(x or "" for x in (d["title"], d["description"], d["body"])), weights) if d else 0.0
+    base = {p: i for i, p in enumerate(pool)}
+    passage = {p: i for i, p in enumerate(sorted(pool, key=lambda p: (-worth[p], base[p])))}
+    order = sorted(pool, key=lambda p: (min(rank[p]), passage[p], rank[p][0] + rank[p][1], rank[p][0]))
+    return [by_path[p] for p in order[:k]], why
+
+
+def agreed(db: sqlite3.Connection, query: str, k: int, min_ratio: float,
+           words: Optional[Sequence[str]] = None) -> List[dict]:
+    """★The judge-free second stage★ — a memory both lanes put in their top `k` whose meaning ratio clears
+    `min_ratio`, best first (the better rank, then the sum of the two). Empty when the lanes disagree.
+
+    Why agreement and not meaning alone (measured 2026-11-02 on the author's 66 labelled prompts and 34 that
+    need no memory, the hook's own words rule left silent on 41 and 32 of them): meaning's top-1 ratio
+    overlaps between the two groups (answers 1.11–1.61, no-memory talk 1.08–1.40), so the single-lane gate
+    the controls set (1.40) let 1 answer through. Asking both lanes to agree within their top 3 and gating
+    the ratio against the ★agreeing★ controls (≈1.20 that day) rescued 2 with no new false fire; agreement
+    within the top 5 let 2 controls through, within the top 8 seven. `k` is §vectors.AGREE_N.
+
+    `words` — the words' top names when the caller already has them; otherwise the hook's own words lane
+    is asked (no learned synonyms: the measured decision keeps them out of the hook, §lexicon.decide).
+    Rows are `semantic()` rows (`via_vector`, `cosine`, `ratio`), so what reaches a person is the same shape
+    as before, and the record counts it under meaning (§hook._sources).
+    """
+    if words is None:
+        words = [r["name"] for r in recall(db, query, k=k, log=False, bridge=False) if not r.get("related")][:k]
+    else:
+        words = list(words)[:k]
+    if not words:
+        return []
+    mrows = semantic(db, query, k=k, min_cos=0.0)
+    out = []
+    for i, r in enumerate(mrows):
+        if r["name"] in words and r.get("ratio", 0.0) >= min_ratio:
+            j = words.index(r["name"])
+            r["why"] = "both lanes agree — words %d · meaning %d (ratio %.3f)" % (j + 1, i + 1, r.get("ratio", 0.0))
+            out.append((min(i, j), i + j, j, r))
+    out.sort(key=lambda t: t[:3])
+    return [t[3] for t in out]
 
 
 class JudgeUnavailable(RuntimeError):
@@ -979,10 +1064,12 @@ def judge_observation() -> dict:
        another thread while the main thread is still filling it in, and a dict that grows while it is
        being read raises. Values change; the set of keys never does.
 
-    outcome  pending · no_vectors · uncalibrated · vector_failed · no_candidates · failed · below · fired
-             · error · cut (still pending when the watchdog ended the run)
-    phase    where it is — vector (embedding and the store) · inputs · judge · done. A cut run says
-             where it was cut (2026-10-14: "cut" alone could not tell the judge from the embedding)
+    outcome  pending · no_vectors · no_judge (none chosen — the judge-free stage ran, §agreed) · uncalibrated
+             · vector_failed · no_candidates · failed · below · fired · error · cut (still pending when the
+             watchdog ended the run)
+    phase    where it is — vector (embedding and the store) · inputs · judge · done · agreement · ratio (the
+             judge-free gates). A cut run says where it was cut (2026-10-14: "cut" alone could not tell the
+             judge from the embedding)
     vector   how the vector search went (§vectors.last_search) — embedded or cached, which store answered
     sent · returned   whether the judge request went out and came back (§rerank.call_state)
     valid    whether a fresh answer scored every candidate once, within 0–10 (None: cached or none)

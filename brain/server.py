@@ -461,13 +461,15 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
                 unsure = _words_unsure(db, wide)
                 head = "— learned synonyms added: %s —\n\n" % ", ".join(bridged)
             if unsure and args.get("semantic_k") != 0:          # 0: meaning is never used
-                rows, _why = search.fused(db, q, wide, k, extra_terms=list(terms) + bridged,
+                # ★Two lanes, the better rank wins★ (2026-11-02 · §search.union) — measured against the
+                #   three-ranking merge it replaces: question alone 22 → 33 of 66, with terms 36 → 46, one lost.
+                rows, _why = search.union(db, q, wide, k, extra_terms=list(terms) + bridged,
                                           kinds=args.get("kinds"), sources=args.get("sources"), width=SHOWN,
                                           scope=args.get("scope") or None)
                 reordered = True
                 if rows:
-                    head += ("— the words were unsure: ordered by words, meaning and the passage that matched, "
-                             "together —\n\n")
+                    head += ("— the words were unsure: ordered by words and meaning together, "
+                             "the better rank first —\n\n")
             elif bridged:
                 rows = [r for r in wide if not r.get("related")][:k] + [r for r in wide if r.get("related")]
         more = ""
