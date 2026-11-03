@@ -226,7 +226,17 @@ def _spawn() -> None:
     else:
         kw["start_new_session"] = True
     from brain import launch                             # the installed brain, never a `brain/` in some folder
-    subprocess.Popen(launch.argv("brain.deferred"), **kw)
+    proc = subprocess.Popen(launch.argv("brain.deferred"), **kw)
+    # ★Hand the lease to the worker at once★ — the lease named the short-lived process that started it, and when
+    # that process exited before the worker took over, the next caller saw a dead owner and started a second
+    # worker (ten session starts at once produced two). Same token, the worker's PID.
+    try:
+        with _lease_guard() as held:
+            if held and _TOKEN and _owner().get("token") == _TOKEN:
+                with open(_lock_path(), "w", encoding="utf-8") as fh:
+                    json.dump({"pid": proc.pid, "at": time.time(), "token": _TOKEN}, fh)
+    except OSError:
+        pass
 
 
 def run(db) -> dict:
@@ -239,6 +249,22 @@ def run(db) -> dict:
     stats = store.reindex(db, recalibrate=False)        # anything changed since the hook; heals triggers
     out["changed"] = sum(int(stats.get(k) or 0) for k in ("added", "updated", "removed"))
     ok = not any(v == "error" for v in (stats.get("stores") or {}).values())
+    # ★Work that used to run on every session start runs here, once, when its event happened★ (§on_session_start)
+    if out["changed"]:
+        try:
+            from brain import vectors as _vec
+            got = _vec.recalibrate_if_free(db)           # the meaning gate's scale follows the corpus size
+            if got:
+                out["vec_min_ratio"] = got["min_ratio"]
+        except Exception:                                # noqa: BLE001
+            pass
+    if out["changed"] or "git" in todo:
+        try:
+            out["pointer_keys"] = store.save_git_pointers(db)
+            store.set_meta(db, GIT_KEY, json.dumps(git_fingerprint(store.git_repos())))
+            store.set_meta(db, GIT_REPOS_KEY, json.dumps(store.git_repos()))
+        except Exception:                                # noqa: BLE001
+            pass
     if "sync" in todo and not stats.get("stores"):
         pushed = stores.sync_if_chosen(db)
         out["stores"] = {r: ("error" if v.get("error") else "unchanged" if v.get("unchanged") else "sent")
@@ -259,6 +285,116 @@ def run(db) -> dict:
                 out["cleared"] = bool(changed) or not current
     out["secs"] = round(time.time() - t0, 3)
     observe.write("deferred", out)
+    return out
+
+
+GIT_KEY = "git_fingerprint"        # meta: {repo: mtime of its HEAD log} when the pointers were last built
+GIT_REPOS_KEY = "git_repo_paths"    # meta: the repositories found then — a session start never spawns git
+CHECK_LOCK = "session-check.lock"
+
+
+def git_fingerprint(repos) -> dict:
+    """When each repository last moved: the mtime of its HEAD log (every commit, checkout or pull writes it).
+    Stats only, no subprocess — cheap enough for every session start."""
+    out = {}
+    for repo in repos or []:
+        gitdir = os.path.join(repo, ".git")
+        try:
+            if os.path.isfile(gitdir):                   # a worktree: ".git" is a file naming the real gitdir
+                with open(gitdir, encoding="utf-8") as fh:
+                    line = fh.read().strip()
+                gitdir = line.split(":", 1)[1].strip() if line.startswith("gitdir:") else gitdir
+                if not os.path.isabs(gitdir):
+                    gitdir = os.path.join(repo, gitdir)
+            target = os.path.join(gitdir, "logs", "HEAD")
+            if not os.path.exists(target):
+                target = os.path.join(gitdir, "HEAD")
+            out[repo] = round(os.stat(target).st_mtime, 3)
+        except OSError:
+            out[repo] = None
+    return out
+
+
+@contextmanager
+def _check_guard():
+    """One session start checks at a time. When many sessions open together (a terminal multiplexer restoring
+    twenty panes), the first checks and starts the worker if needed; the rest have nothing to add and leave."""
+    from brain import store
+    path = os.path.join(store.brain_home(), CHECK_LOCK)
+    held = False
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    pid = int((fh.read() or "0").strip() or 0)
+            except (OSError, ValueError):
+                pid = 0
+            if _alive(pid):
+                break                                    # a live session start is checking right now
+            try:
+                os.unlink(path)                          # a crashed checker's file: take it over once
+            except OSError:
+                break
+            continue
+        except OSError:
+            break
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
+        held = True
+        break
+    try:
+        yield held
+    finally:
+        if held:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
+def on_session_start(db) -> dict:
+    """★Event-driven★: a session start indexes nothing by itself. It looks for the events that make work
+    necessary — a source file changed, work is pending, a repository moved, the ruler no longer fits the
+    corpus — and only then starts the single worker (§kick), which does that work once for everybody.
+
+    It replaced a full `brain index` per session start (scan, recalibration with 138 replayed recalls, git
+    history mapping, store sync, trigger healing). Measured on the author's machine (2026-11-03, 2,300
+    documents): about a minute of CPU each, and ten sessions opening at once queued for over ten minutes
+    behind the index lock even when no file had changed."""
+    from brain import store, observe
+    t0 = time.time()
+    out = {"reasons": [], "kicked": False}
+    with _check_guard() as held:
+        if not held:
+            out["skipped"] = "another session start is checking"
+        else:
+            if store.needs_reindex(db):
+                out["reasons"].append("files")
+            if pending(db).get("work"):
+                out["reasons"].append("pending")
+            try:
+                repos = json.loads(store.get_meta(db, GIT_REPOS_KEY, "") or "null")
+                saved = json.loads(store.get_meta(db, GIT_KEY, "") or "null")
+            except ValueError:
+                repos, saved = None, None
+            if repos is None or saved != git_fingerprint(repos):
+                out["reasons"].append("git")
+                mark(db, ["git"])
+            try:
+                from brain import calibrate
+                if not store.get_meta(db, calibrate._META_KEY, "") or calibrate._measured_on_another_corpus(db):
+                    out["reasons"].append("ruler")
+            except Exception:                            # noqa: BLE001
+                pass
+            if out["reasons"]:
+                out["kicked"] = kick(db, scan=True)
+    out["secs"] = round(time.time() - t0, 3)
+    try:
+        observe.write("session_start", out)
+    except Exception:                                    # noqa: BLE001
+        pass
     return out
 
 

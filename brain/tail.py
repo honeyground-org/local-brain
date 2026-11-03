@@ -551,6 +551,17 @@ def main_notice() -> int:
     """Called from the `SessionStart` hook — attaches context if there is something worth announcing."""
     import sys
     d = _stdin_payload()
+    # ★Event check first★ (§deferred.on_session_start) — never an index of its own. The packaged entry point
+    # and the shell launcher both arrive here, so every install behaves the same.
+    try:
+        from brain import deferred as _deferred, store as _st
+        _db = _st.connect()
+        try:
+            _deferred.on_session_start(_db)
+        finally:
+            _db.close()
+    except Exception:                                    # noqa: BLE001
+        pass
     recs = collect(d.get("session_id") or "")
     parts = [format_notice(recs)] if recs else []
     # A grown index hitting its limit is announced from the same spot — two output points would

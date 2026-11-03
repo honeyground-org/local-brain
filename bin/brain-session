@@ -1,9 +1,7 @@
 #!/bin/sh
-# SessionStart hook — ① incremental index (up through modified files) ② notify if the last session ended with nothing remembered.
-# A failure never blocks the session. ① keeps stdout empty; only ② goes out into the context.
+# SessionStart hook — ① look for the events that need indexing work and, only then, start the one shared worker
+# (§deferred.on_session_start: a session start never indexes by itself) ② notify if the last session ended with
+# nothing remembered. A failure never blocks the session. Only ② goes out into the context.
 DIR=$(cd "$(dirname "$0")/.." && pwd)
-PAYLOAD=$(cat)
-printf '%s' "$PAYLOAD" | python3 "$DIR/bin/_run.py" brain.cli index >/dev/null 2>&1 || true
-# ⛔ only the notice call takes the flags — `brain.cli index` parses argv with argparse and would reject them
-printf '%s' "$PAYLOAD" | python3 "$DIR/bin/_run.py" brain.tail notice "$@" 2>/dev/null || true
+python3 "$DIR/bin/_run.py" brain.tail notice "$@" 2>/dev/null || true
 exit 0
