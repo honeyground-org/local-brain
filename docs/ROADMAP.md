@@ -6,8 +6,9 @@ public (2026-10-07); only their conclusions are carried here.
 
 ## The goal
 
-A memory for coding agents that is **more efficient and performs better than the flat memory index plus
-`grep`**, and that keeps improving itself on each person's own notes.
+A shared memory for work and everyday life, accessible to agents, that finds relevant records and
+distinguishes current facts from proposals and superseded history. Retrieval must be measured against
+the flat memory index plus `grep`, and improve on each person's own notes.
 
 - **Done means measured.** A change is finished when it wins under the same conditions against what you
   had before — not when the code runs.
@@ -42,7 +43,18 @@ A memory for coding agents that is **more efficient and performs better than the
   the question alone, as a caller does, the top 3 holds it for 53% and OR'd `grep` for 95% in a median
   of 644 files.
 
-**A contract for clients (`orbit-1`, 2026-10-29)**
+**Current validity and history (2026-11-03)**
+- Domain-neutral topic/facet revisions connect current facts to explicit predecessors, dates, reasons
+  and evidence. Default retrieval resolves old matches to effective current state; history and
+  as-of lookup retain prior states. Proposals, future changes, retirement and conflicting claims
+  are distinguished. Untracked notes are not certified current. See README: Current facts and change history.
+- These are deterministic controls on recorded evidence, not automatic semantic contradiction detection
+  or proof of better general answer accuracy. Existing personal notes are not silently migrated.
+
+**Original client contract (`orbit-1`, 2026-10-29; historical defaults)**
+
+The original contract below describes its introduction. Server 2.0 made JSON and protected writes the
+defaults; server 2.1 adds validity and history. README and live `brain_capabilities` describe current use.
 - A program that keeps a ledger — Cosmos Orbit first — asks `brain_capabilities` once after connecting
   and trusts only what it names: versions, the engine and whether it is ready, the stores, the corpus,
   and per-tool feature flags derived from the tool declarations themselves, with an explicit
@@ -56,8 +68,8 @@ A memory for coding agents that is **more efficient and performs better than the
   `stored` · `indexed_words` · `embedded` · `served`, and names a partial index failure.
 - A memory may declare `project_id` in its frontmatter; `recall(scope=)` keeps that project's memories
   and the unscoped ones, never another project's, across the word, graph and meaning lanes. Without a
-  scope nothing changes. Every piece is additive: without the new arguments, the text answers and the
-  overwrite-by-name behaviour are byte for byte what they were (`verify_capabilities` ·
+  scope all project scopes are searchable. The original opt-in text/overwrite behavior was replaced
+  by safe JSON defaults in server 2.0 (`verify_capabilities` ·
   `verify_recall_json` · `verify_remember_contract` · `verify_scope`).
 
 **Behaviour layer**

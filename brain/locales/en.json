@@ -773,5 +773,6 @@
  "obs.languageName": "English",
  "obs.reviseLens": "Refine this perspective",
  "obs.otherSectors": "Other topics",
- "obs.shownBubbles": "Visible bubbles"
+ "obs.shownBubbles": "Visible bubbles",
+ "memory.validity": "Validity: {status} · current: {current} · previous: {previous} · change: {reason}"
 }

@@ -106,8 +106,14 @@ def _format(rows) -> str:
     # spec like `{cosine:.3f}` inside a catalog value would be invisible to the placeholder-
     # mismatch check (§i18n._PLACEHOLDER only matches a bare `{name}`), so it never gets caught
     # if a translation loses it.
+    rows = [r for r in rows if (r.get("lifecycle") or {}).get("status") not in ("disputed", "invalid")]
+    if not rows:
+        return ""
     lines = [i18n.t("hook.header")]
     for r in rows:
+        if r.get("lifecycle"):
+            from brain.lifecycle import format_line
+            lines.append(format_line(r))
         # ★Mark what was found by meaning as such★ — no word may have overlapped at all,
         # so the reader must know "why did this come" (otherwise it looks arbitrary).
         if r.get("via_vector"):

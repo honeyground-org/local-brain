@@ -771,5 +771,6 @@
  "obs.languageName": "日本語",
  "obs.reviseLens": "視点の修正を提案",
  "obs.otherSectors": "その他のテーマ",
- "obs.shownBubbles": "表示バブル"
+ "obs.shownBubbles": "表示バブル",
+ "memory.validity": "有効状態: {status} · 現在: {current} · 以前: {previous} · 変更: {reason}"
 }

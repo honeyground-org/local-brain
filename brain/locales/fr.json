@@ -771,5 +771,6 @@
  "obs.languageName": "Français",
  "obs.reviseLens": "Affiner cette perspective",
  "obs.otherSectors": "Autres sujets",
- "obs.shownBubbles": "Bulles visibles"
+ "obs.shownBubbles": "Bulles visibles",
+ "memory.validity": "Validité : {status} · actuel : {current} · précédent : {previous} · changement : {reason}"
 }

@@ -803,7 +803,11 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
     # ★Where the similarity search runs is the chosen vector store's★ (§stores · §vecstore) — the local
     # scan by default. Every backend returns the same thing: documents by their closest chunk, best first.
     from brain import stores, vecstore
-    n = max(k, TOPN_FOR_MEAN)
+    from brain import lifecycle
+    temporal = lifecycle.snapshot(db)
+    # Retired candidates must not consume the result slots. Fetch enough to refill.
+    tracked = sum(bool(d["meta"]) for d in temporal.docs.values())
+    n = max(k, TOPN_FOR_MEAN) + tracked
     local = vecstore.SqliteVectors()
     c = stores.choice("vector")
     session = _SEARCH_SESSION.get()
@@ -834,6 +838,11 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
                         "provenance": {key: _LAST_SEARCH.get(key) for key in ("store", "by", "why")}}
     if not order:
         return []
+    resolved = {}
+    for did, cos in order:
+        for target in temporal.resolve(did):
+            resolved[target] = max(cos, resolved.get(target, -1.0))
+    order = sorted(resolved.items(), key=lambda pair: -pair[1])
     head = [c for _, c in order[:TOPN_FOR_MEAN]]
     mean = (sum(head) / len(head)) or 1e-9
     return [(did, cos, cos / mean) for did, cos in order[:k]]

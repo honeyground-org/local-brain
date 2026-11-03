@@ -771,5 +771,6 @@
  "obs.languageName": "Deutsch",
  "obs.reviseLens": "Perspektive verfeinern",
  "obs.otherSectors": "Weitere Themen",
- "obs.shownBubbles": "Sichtbare Blasen"
+ "obs.shownBubbles": "Sichtbare Blasen",
+ "memory.validity": "Gültigkeit: {status} · aktuell: {current} · zuvor: {previous} · Änderung: {reason}"
 }

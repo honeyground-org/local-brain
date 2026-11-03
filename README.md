@@ -134,9 +134,13 @@ A value measured on one person's notes is not another person's optimum.
   indexes in the same transaction. Retrieval uses the local copy until sync succeeds. Stale local
   vectors whose content hash no longer matches the document are excluded from similarity search.
 
-### Automatic policy loop: experimental, not a quality claim
+### Automatic personalisation and policy selection
 
-A background policy experiment records independent document reads, separates reads following a brain
+Automatic personalisation is implemented: corpus calibration, learned vocabulary, feedback-based
+ranking and the background policy-selection loop are part of Brain. The advanced candidate policy
+serving described below remains opt-in; that is an activation and evidence boundary, not an absent feature.
+
+The background policy loop records independent document reads, separates reads following a brain
 exposure, and excludes turns that edit documents. It compares the existing ranking with reciprocal-rank
 fusion and a graph-expanded candidate pool using cached query vectors only. The graph supplies linked
 candidates; their own text and vector evidence determine ranking. Link counts are not relevance votes.
@@ -474,6 +478,42 @@ claude mcp add brain --scope user -- "$(pwd)/bin/brain-mcp"
 Tools: `recall` · `remember` · `neighbors` · `brain_status` · `brain_suggest` ·
 `brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view` · `brain_capabilities`
 
+### External client defaults (server 2.0)
+
+`recall` and `remember` now return JSON by default, using the existing `orbit-1` field names.
+For human-readable output, pass `format: "text"`. MCP 2025-06-18 and newer receive the JSON
+object in `structuredContent` as well as serialized JSON in `content`; older clients can parse
+the text block. Conflicts and invalid arguments set `isError: true` on the MCP response.
+
+```json
+{"name":"remember","arguments":{"name":"deployment_order","description":"Apply the migration before deploying","type":"lesson","body":"The new worker requires the migrated schema.","project_id":"project-a"}}
+```
+
+- Ordinary saves need no retry key. Brain derives one from the memory name and content. Repeating
+  the unchanged request is a `noop`; an explicit `idempotency_key` remains supported.
+- Updating an existing memory requires `expected_sha` from a prior save or JSON recall. Without
+  it, Brain returns `result: "conflict"`, `stored: false` and the current SHA. Read and reconcile
+  the current content before retrying an update. Human-authored files have the same protection.
+- `project_id`, `source` and `observed_at` work without any format/key combination. An update that
+  omits `project_id` preserves the existing project. Scope identifiers must be nonempty, single-line
+  values without surrounding whitespace or quotes. `recall(scope=...)` includes that project and
+  unscoped shared notes; this is retrieval filtering, not multi-user authorisation. Personalised
+  unfiltered ranking does not bypass this boundary.
+- `stored`, `indexed_words`, `embedded` and `served` describe separate stages. A saved file with
+  failed indexing reports `partial: true`, `retryable: true`; replay the same request to retry indexing.
+  A successful write does not start an embedding or judge call. `embedded: true` requires complete
+  current-model chunk coverage. Missing evidence is `null`.
+- Cooperating writers share a directory lock; file replacement is atomic. A stale update loses
+  with a conflict instead of overwriting another writer. Direct filesystem editors do not take that
+  lock, so they are not covered by a transactional multi-client guarantee.
+- Invalid inputs are rejected before search or writes. `k` is 1–100 and `semantic_k` is 0–100.
+  Read `brain_capabilities` for live defaults, limits and supported write protections.
+
+**Migration:** clients that parsed numbered text should request `format: "text"`. Clients that
+previously overwrote by name must read the current SHA and provide `expected_sha`; text format does
+not restore unsafe overwrites. Existing memories are not rewritten or migrated. Retry keys apply to
+the currently stored version, not a permanent history of every request ever made.
+
 The MCP server and the CLI call the **same core functions**, so a fix lands in both at once.
 The server also picks up new code on disk by itself: after an update there is nothing to restart.
 
@@ -769,3 +809,69 @@ proposal issue ──► pull request ──► automatic checks ──► PR re
 
 Apache License 2.0 — the full text is in [LICENSE](LICENSE). Use it, change it, ship it
 inside something commercial; keep the notice and say where it came from.
+
+### Current facts and change history
+
+Memory validity is domain-neutral: an address, preference, appointment, team arrangement or
+technical decision can change. A recent mention is not proof that an earlier fact has been replaced.
+Brain follows explicit revisions and effective dates, preserving the evidence for each change.
+
+Agents should keep one independently changing fact per record. Use a stable `topic` and `facet`
+within an exact `project_id` scope. A scope can represent a person or household as well as a project.
+Keep a future intention, a confirmed decision and the actual situation in distinct facets; for
+example `move_plan` and `current_address`. Do not automatically equate a decision with implementation.
+
+```json
+{
+  "name": "remember",
+  "arguments": {
+    "name": "mina_commute_november",
+    "description": "Mina now walks to work",
+    "type": "reference",
+    "body": "Mina walks to work after moving closer to the office.",
+    "project_id": "personal-mina",
+    "lifecycle": {
+      "topic": "mina",
+      "facet": "commute",
+      "status": "active",
+      "valid_from": "2026-11-01T09:00:00+09:00",
+      "supersedes": ["mina_commute_previous"],
+      "change_reason": "Moved closer to work",
+      "evidence": ["The user confirmed the move and new commute on November 1"]
+    }
+  }
+}
+```
+
+The predecessor must already exist with the same scope, topic and facet. Initial records omit
+`supersedes`. Replacements require an effective start, reason and evidence. Dates mean midnight UTC;
+use an ISO timestamp with timezone for changes within a day. `valid_to` is an exclusive end.
+
+- Default `recall` follows an old match to its effective replacement, including multi-step changes.
+  Words, meaning, graph hydration and declared triggers use the same validity resolver.
+- `recall(view="history")` retrieves historical content with its status. `recall(as_of=...)` resolves
+  explicit records effective at that time. This is effective-time history, not a reconstruction of
+  what the system knew before a later correction was recorded.
+- `memory_history(name=..., scope=...)` works with an old or current name. It returns current names,
+  revisions, dates, reasons, evidence and bounded textual diffs. Use `offset`/`limit` for pagination;
+  bodies and diffs report truncation and retain source paths and hashes. History covers indexed
+  records only, not every conversation that ever occurred.
+- `proposed` records do not replace facts. Future-effective replacements stay inactive until their
+  start. Multiple unlinked active records for one facet are conservatively marked `disputed`,
+  even when their wording might agree; no arbitrary newest-wins rule selects a winner. Disputed
+  results are labelled for explicit lookup and excluded from automatic hook output.
+- Retraction or archival uses a new named revision with `supersedes`, status `retracted` or
+  `archived`, a start date and evidence. It removes that chain from current answers without
+  resurrecting an older version. The files remain available through history; there is no automatic
+  permanent deletion. Explicit legacy retirement markers are also excluded from current answers.
+- Tracked revisions cannot be rewritten in place through `remember`; create a successor. Identical
+  retries are still noops. Untracked memories retain the existing SHA-protected update contract.
+- In file frontmatter, `lifecycle` is a single-line JSON object. Invalid metadata is excluded from
+  current results. Reindexing derives the state from files and requires no external model call.
+
+Existing notes are **untracked**, not automatically certified current. The feature does not infer
+semantic contradictions, split mixed old notes, or determine whether a cited source is trustworthy.
+The writing agent must identify the fact, confirm the change from the conversation or source, and
+record its relation. No existing personal notes are silently rewritten. Multiple dates in a legacy
+body no longer make the most recent date certify the whole document; use explicit `verified_at`
+for a verified evidence date and separate facts with different lifetimes.

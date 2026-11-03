@@ -52,20 +52,28 @@ def tool_flags(tools: List[dict]) -> Dict[str, Any]:
     return {
         "recall": {
             "formats": _formats(rc),
+            "default_format": (rc.get("format") or {}).get("default", "text"),
             "scope": "scope" in rc,
+            "lifecycle": "view" in rc,
+            "history_view": "view" in rc,
+            "as_of": "as_of" in rc,
             "request_id": "request_id" in rc,
             "k_default": 8,
-            "k_max": None,                       # no limit is enforced — reported as such, not invented
+            "k_max": (rc.get("k") or {}).get("maximum"),
             "semantic_k": "semantic_k" in rc,
             "lanes": list(RECALL_LANES),
             "budget_ms": "budget_ms" in rc,
         },
         "remember": {
             "formats": _formats(rm),
+            "default_format": (rm.get("format") or {}).get("default", "text"),
+            "safe_updates": (rm.get("expected_sha") or {}).get("x-required-for-update", False),
+            "automatic_idempotency": (rm.get("idempotency_key") or {}).get("x-generated-when-omitted", False),
             "idempotency_key": "idempotency_key" in rm,
             "expected_sha": "expected_sha" in rm,
             "project_id": "project_id" in rm,
             "source": "source" in rm,
+            "lifecycle": "lifecycle" in rm,
             "observed_at": "observed_at" in rm,
             "embed_now": "embed_now" in rm,
             "ack": (["stored", "indexed_words", "embedded", "served"] if "json" in _formats(rm) else []),
@@ -199,6 +207,7 @@ def describe(db: sqlite3.Connection, tools: List[dict], protocol: str, memory_di
     return {
         "contract": CONTRACT,
         "server": {"name": _srv.SERVER_NAME, "version": _srv.SERVER_VERSION, "protocol": protocol,
+                   "structured_content": protocol >= "2025-06-18",
                    "code_generation": calibrate.CODE_GENERATION,
                    "schema_version": store.SCHEMA_VERSION, "db_schema_version": db_schema,
                    "tokenizer_version": textindex.TOKENIZER_VERSION},

@@ -85,8 +85,8 @@ def main() -> int:
     db = _build()
     print("=" * 72 + "\n① the index carries the scope\n" + "=" * 72)
     cols = {r[1] for r in db.execute("PRAGMA table_info(docs)")}
-    check("docs has project_id and the schema version is 5",
-          "project_id" in cols and store.get_meta(db, "schema_version") == "5", (sorted(cols)[-3:], store.get_meta(db, "schema_version")))
+    check("docs has project_id and the schema version is 6",
+          "project_id" in cols and store.get_meta(db, "schema_version") == "6", (sorted(cols)[-3:], store.get_meta(db, "schema_version")))
     got = {r[0]: r[1] for r in db.execute("SELECT name, project_id FROM docs")}
     check("each memory's declared project_id is indexed, '' when none",
           all(got.get(n) == pid for n, (pid, _) in NOTES.items()), got)

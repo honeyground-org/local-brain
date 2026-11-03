@@ -267,6 +267,11 @@ def _score_terms(db: sqlite3.Connection, pairs, n_docs: int, avg_len: float,
 
 
 def _hydrate(db: sqlite3.Connection, doc_id: int) -> Optional[sqlite3.Row]:
+    from brain import lifecycle
+    resolved = lifecycle.snapshot(db).resolve(doc_id)
+    if not resolved:
+        return None
+    doc_id = resolved[0]
     return db.execute(
         "SELECT id,name,path,source,kind,title,description,body,mtime,weight,evidence_date,project_id "
         "FROM docs WHERE id=?", (doc_id,)).fetchone()
@@ -489,6 +494,8 @@ def recall(db: sqlite3.Connection, query: str, k: int = 8,
         if _top_word is not None and _top_word not in matched:
             doc_score[did] *= (1.0 - TOP_PENALTY)
 
+    from brain import lifecycle
+    doc_score, doc_words, revision_matches = lifecycle.remap_scores(db, doc_score, doc_words, kinds, sources)
     ranked = sorted(doc_score.items(), key=lambda kv: kv[1], reverse=True)
 
     # ★Identity re-rank★ — top candidates only (see the ID_BOOST comment above). Additive, not multiplicative:
@@ -546,6 +553,12 @@ def recall(db: sqlite3.Connection, query: str, k: int = 8,
             results.append(_present(row, score, sorted(set(doc_words[did])), None,
                                 needles, db, q_mass))
 
+
+    for result in results:
+        row_id = next((d for d in revision_matches if lifecycle.snapshot(db).docs[d]['path'] == result['path']), None)
+        if row_id is not None:
+            result['retrieved_via'] = revision_matches[row_id]
+            result['why'] = 'matched previous revision: ' + ', '.join(revision_matches[row_id]) + '; resolved to effective state'
 
     # ★The graph is not a search channel — it is a supporting slot that conveys relatedness★ (2026-08-20)
     #
@@ -614,6 +627,7 @@ def _present(row: sqlite3.Row, score: float, matched: List[str],
              via: Optional[str], needles: Sequence[str],
              db: Optional[sqlite3.Connection] = None,
              q_mass: float = 0.0, related: bool = False) -> dict:
+    from brain import lifecycle
     age = _age_days(row["mtime"])
     ev = row["evidence_date"] or ""
     ev_age = -1
@@ -646,6 +660,7 @@ def _present(row: sqlite3.Row, score: float, matched: List[str],
         "age_days": int(age),
         # ★Always return the evidence date with the result★ — not as a warning but as **material for judgement**.
         # However recent the file, if the evidence is six months old that number must not be quoted as current fact.
+        "lifecycle": lifecycle.snapshot(db).info(row["id"]) if db is not None else {},
         "evidence_date": ev,
         "evidence_age_days": ev_age,
         "stale": _is_stale(row["kind"], ev_age, age),

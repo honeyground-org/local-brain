@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "1.1.0"      # 1.1: `brain_capabilities` and the orbit-1 contract (2026-10-29)
+SERVER_VERSION = "2.1.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -49,7 +49,9 @@ _LANG_EN = {"en": "English", "ko": "Korean", "de": "German", "es": "Spanish",
 _REMEMBER_DESC = (
     "Writes a new memory to a file and indexes it immediately. Keep only what stays true later "
     "(never a point-in-time number or a one-off state). "
-    "Connect related memories with `links` — with no connection, one is unreachable when the words do not match."
+    "JSON is the default. Repeating an unchanged request is a noop; changing an existing memory requires "
+    "expected_sha from recall or a prior save. project_id is always persisted when supplied. "
+    "Connect related memories with links. format=text changes presentation, never overwrite protection."
 )
 
 TOOLS: List[Dict[str, Any]] = [
@@ -75,20 +77,20 @@ TOOLS: List[Dict[str, Any]] = [
                 "query": {"type": "string", "description": "the natural-language question, as-is"},
                 "terms": {"type": "array", "items": {"type": "string"},
                           "description": "5~10 synonyms, Latin spellings, related identifiers. Omit it and performance drops sharply."},
-                "k": {"type": "integer", "description": "number of results (default 8)"},
+                "k": {"type": "integer", "minimum": 1, "maximum": 100, "default": 8, "description": "number of results (default 8)"},
                 "sources": {"type": "array", "items": {"type": "string"},
                             "description": "narrow to memory | docs | wiki | guide"},
                 "kinds": {"type": "array", "items": {"type": "string"},
                           "description": "narrow to kinds of memory (the frontmatter `type`){kinds}"},
-                "semantic_k": {"type": "integer",
+                "semantic_k": {"type": "integer", "minimum": 0, "maximum": 100,
                                "description": "also return up to this many memories close in ★meaning★ that "
                                               "the words did not find, in a separate list. Omitted: a few are "
                                               "added only when the words are unsure; 0: never, and meaning "
                                               "does not order the list either. Words and "
                                               "meaning find different answers; this is more to read, and one "
                                               "embedding call unless the question was asked before."},
-                "format": {"type": "string", "enum": ["text", "json"],
-                           "description": "text (default) or json — the orbit-1 structured answer: the same rows "
+                "format": {"type": "string", "enum": ["text", "json"], "default": "json",
+                           "description": "json (default) or text — the orbit-1 structured answer: the same rows "
                                           "with name·path·sha, the lane, partial/fallback and latency"},
                 "request_id": {"type": "string", "maxLength": 128,
                                "description": "echoed back in json mode (at most 128 characters)"},
@@ -114,10 +116,10 @@ TOOLS: List[Dict[str, Any]] = [
                           "description": "related memory names — stored as [[links]]"},
                 "search_aliases": {"type": "array", "items": {"type": "string"},
                                    "description": "optional alternate phrases for finding this memory; stored with the document, not as global synonyms"},
-                "idempotency_key": {"type": "string", "maxLength": 128,
-                                    "description": "orbit-1: the same key with the same content is a noop with the same answer; "
+                "idempotency_key": {"type": "string", "maxLength": 128, "x-generated-when-omitted": True,
+                                    "description": "Optional; a stable content key is generated when omitted. The same key and unchanged content is a noop; "
                                                    "with other content it needs expected_sha (otherwise conflict: sha_mismatch)"},
-                "expected_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$",
+                "expected_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$", "x-required-for-update": True,
                                  "description": "orbit-1: the sha of the version you read — required to change an existing memory "
                                                 "(a memory written without a key is otherwise conflict: name_taken)"},
                 "project_id": {"type": "string", "maxLength": 128,
@@ -126,8 +128,8 @@ TOOLS: List[Dict[str, Any]] = [
                            "description": "orbit-1: where this memory came from (a task, a session, the evidence) — stored, not indexed"},
                 "observed_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                                 "description": "orbit-1: the date the content was true (YYYY-MM-DD); default = today"},
-                "format": {"type": "string", "enum": ["text", "json"],
-                           "description": "json = the orbit-1 answer: result new/updated/noop/conflict, stored, indexed_words, embedded, served, sha"},
+                "format": {"type": "string", "enum": ["text", "json"], "default": "json",
+                           "description": "json (default) = protected save ACK: new/updated/noop/conflict, stored, indexed_words, embedded, served, sha. text changes presentation only"},
             },
             "required": ["name", "description", "type", "body"],
         },
@@ -253,10 +255,34 @@ SHOWN = 280      # characters of a result's excerpt shown to the caller
 AUTO_MEANING = 3
 
 
+# Validity belongs to the memory, not to a development-specific document type.
+for _tool in TOOLS:
+    _properties = _tool["inputSchema"].get("properties", {})
+    if _tool["name"] == "recall":
+        _properties.update({"view": {"type": "string", "enum": ["current", "history"], "default": "current"},
+                            "as_of": {"type": "string", "description": "Effective date or ISO timestamp with timezone; omitted means now"}})
+    if _tool["name"] == "remember":
+        _properties["lifecycle"] = {"type": "object", "required": ["topic", "facet"],
+            "additionalProperties": False, "properties": {
+                "topic": {"type": "string"}, "facet": {"type": "string"},
+                "status": {"type": "string", "enum": ["active", "proposed", "disputed", "superseded", "retracted", "archived"]},
+                "valid_from": {"type": "string"}, "valid_to": {"type": "string"},
+                "supersedes": {"type": "array", "items": {"type": "string"}},
+                "superseded_by": {"type": "string"}, "change_reason": {"type": "string"},
+                "evidence": {"type": "array", "items": {"type": "string"}}}}
+        _tool["description"] += (" For changing facts, preferences, arrangements or decisions, use lifecycle topic/facet "
+            "and evidence. Keep one independently changing fact per memory. Separate plans from actual state with different facets. "
+            "Read the prior memory first; save confirmed changes under a new name with supersedes, valid_from and change_reason. "
+            "Never infer replacement from recency alone. Use proposed for tentative ideas; never silently turn them into facts.")
+TOOLS.append({"name": "memory_history", "description": "Read current state, previous revisions and change evidence for a memory, including everyday life and work. Old names also resolve to the current topic history.",
+              "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "scope": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "required": ["name"]}})
+
+
 def _fmt_recall(rows: List[dict]) -> str:
     if not rows:
         return ("No results. ⛔ Call again with synonyms in `terms` — "
                 "a memory is usually written in different words than the question.")
+    from brain import lifecycle
     out = []
     direct = [r for r in rows if not r.get("related")]
     rel = [r for r in rows if r.get("related")]
@@ -285,7 +311,7 @@ def _fmt_recall(rows: List[dict]) -> str:
                        "  · %s ← %s\n    %s" % (r["name"], r["via_graph"],
                                                 r["description"] or r["title"])
                        for r in rel))
-    return "\n\n".join(out)
+    return "\n\n".join(out) + "\n" + "\n".join(lifecycle.format_line(r) for r in rows if r.get("lifecycle"))
 
 
 def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int, auto: bool = False) -> str:
@@ -295,6 +321,7 @@ def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int, auto: b
                else "found by meaning, not by the words", cost))
     if not rows:
         return head + "\n  " + ("unavailable — %s" % why_none if why_none else "nothing more found")
+    from brain import lifecycle
     out = [head]
     for i, r in enumerate(rows, start):
         if r.get("evidence_age_days", -1) >= 0:
@@ -305,7 +332,7 @@ def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int, auto: b
         out.append("%d. %s  [%s/%s]\n   %s\n   why: %s · %s%s\n   %s\n   path: %s"
                    % (i, r["name"], r["source"], r["kind"] or "-", r["description"] or r["title"],
                       r["why"], age, flag, r["excerpt"][:SHOWN], r["path"]))
-    return "\n\n".join(out)
+    return "\n\n".join(out) + "\n" + "\n".join(lifecycle.format_line(r) for r in rows if r.get("lifecycle"))
 
 
 def _note_recall(args: dict, rows: List[dict], sk: int, mrows, why: str, cached, t0: float,
@@ -337,70 +364,65 @@ def _memory_dir() -> str:
 
 
 def _do_remember(db, args: dict) -> str:
-    import os
-    import re
-    name = re.sub(r"[^\w.-]", "_", args["name"]).strip("_")
-    if not name:
-        return "the name is empty."
+    """All callers use the same protected save path, regardless of presentation format."""
     from brain import remembercontract as rc
-    if rc.wants_contract(args):                          # ★orbit-1★ (2026-10-29): a save that can be retried
-        return _do_remember_contract(db, args, name)
-    path = os.path.join(_memory_dir(), name + ".md")
-    import unicodedata
-    aliases = list(dict.fromkeys(unicodedata.normalize("NFKC", a).strip()
-                                 for a in args.get("search_aliases", []) if isinstance(a, str) and a.strip()))
-    alias_line = "search_aliases: " + json.dumps(aliases, ensure_ascii=False) + "\n" if aliases else ""
-    links = args.get("links") or []
-    link_line = ("\n\nrelated: " + " · ".join("[[%s]]" % l for l in links)) if links else ""
-    # ★The evidence date is always written★ (added 2026-08-12)
-    # Skip it and that memory becomes **a memory with no known age** — no evidence date attaches to
-    # a recall result, and it drops out of the staleness diagnosis too (`health.stale`). Measured: of
-    # ⛔ **493 memories, 76 (15%)** had piled up that way. Writing a date in the body catches it,
-    # but skip it and the field is blank, and that hole grows with every save.
-    # The moment of saving is exactly "the moment this content was judged true", so today's date is right.
-    # An edit overwrites it with today again too — fixing something means confirming it again right then.
-    doc = ("---\nname: %s\ndescription: %s\nverified_at: %s\n"
-           "%smetadata:\n  node_type: memory\n  type: %s\n---\n\n%s%s\n"
-           % (name, args["description"].replace("\n", " "),
-              time.strftime("%Y-%m-%d"), alias_line, args["type"],
-              args["body"].rstrip(), link_line))
-    existed = os.path.exists(path)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(doc)
-    stats = store.reindex(db)
-    return ("%s: %s\nindex: %s\npath: %s"
-            % ("updated" if existed else "saved", name, json.dumps(stats, ensure_ascii=False), path))
-
-
-def _do_remember_contract(db, args: dict, name: str) -> str:
-    """★orbit-1★ — chosen by `idempotency_key` or `format: "json"` (§remembercontract). The legacy path
-    above is untouched: a person's `remember` still overwrites by name."""
-    import os
-    from brain import remembercontract as rc
+    import sqlite3
     t0 = time.time()
     bad = rc.validate(args)
     if bad:
         return json.dumps(bad, ensure_ascii=False)
-    path = os.path.join(_memory_dir(), name + ".md")
-    cur = rc.current(path)
-    result, conflict = rc.decide(cur, args)
-    verified_at = (cur.get("verified_at") if result == "noop"
-                   else (args.get("observed_at") or time.strftime("%Y-%m-%d")))
-    stats: dict = {}
-    if result in ("new", "updated"):
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(rc.render(name, args, verified_at))
-    if result != "conflict":
-        try:
-            # ★Index the words, nothing more★ (2026-10-29) — the default pass also re-measures the hook threshold,
-            #   the vector gate and the history, 15–32 s measured on a 2,246-document copy, and a client with a
-            #   30 s timeout saw the file land but never the answer. Those re-measurements belong to the daily
-            #   jobs and to a human-run `brain index`, exactly as the hook already keeps them off its path.
-            stats = store.reindex(db, recalibrate=False)
-        except Exception as exc:                         # noqa: BLE001 — stored but not indexed: say so; the retry catches up
-            stats = {"error": str(exc)[:200]}
-    return json.dumps(rc.ack(db, name=name, path=path, result=result, conflict=conflict, args=args,
-                             stats=stats, t0=t0, verified_at=verified_at, cur=cur), ensure_ascii=False)
+    args = dict(args)
+    name = args["name"]
+    directory = _memory_dir()
+    path = os.path.join(directory, name + ".md")
+    try:
+        os.makedirs(directory, exist_ok=True)
+        with rc.write_lock(directory):
+            if os.path.islink(path):
+                return json.dumps(rc.error("invalid_argument", "A memory write cannot replace a symbolic link"))
+            cur = rc.current(path)
+            if "project_id" not in args and cur.get("project_id"):
+                args["project_id"] = cur["project_id"]
+            from brain import lifecycle
+            issue = lifecycle.check_write(db, name, args, cur)
+            if issue:
+                return json.dumps(rc.error("invalid_argument", issue), ensure_ascii=False)
+            if cur.get("lifecycle") and (
+                    cur.get("body") != store.parse_frontmatter(rc.render(name, args, cur.get("verified_at") or ""))[1].strip()
+                    or cur.get("lifecycle") != args.get("lifecycle")
+                    or (cur.get("payload_sha") and cur["payload_sha"] != rc.payload_sha(args))):
+                return json.dumps(rc.error("revision_required", "Keep the old revision; create a new name with lifecycle.supersedes"))
+            args = rc.prepared(args)
+            result, conflict = rc.decide(cur, args)
+            verified_at = (cur.get("verified_at") if result == "noop"
+                           else (args.get("observed_at") or ("" if args.get("lifecycle") else time.strftime("%Y-%m-%d"))))
+            stats: dict = {}
+            if result in ("new", "updated"):
+                try:
+                    rc.atomic_write(path, rc.render(name, args, verified_at), cur.get("sha"))
+                except FileExistsError:
+                    cur = rc.current(path)
+                    result, conflict = "conflict", {"reason": "sha_mismatch", "current_sha": cur.get("sha")}
+            if result != "conflict":
+                try:
+                    # No embedding calls or calibration in a client's save/ACK round trip.
+                    stats = store.reindex(db, recalibrate=False)
+                except Exception as exc:                 # Stored but not indexed: a retry catches up.
+                    stats = {"error": str(exc)[:200]}
+            out = rc.ack(db, name=name, path=path, result=result, conflict=conflict, args=args,
+                         stats=stats, t0=t0, verified_at=verified_at, cur=cur)
+    except sqlite3.OperationalError as exc:
+        busy = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+        out = dict(rc.error("busy" if busy else "write_failed",
+                            "Another writer holds the memory directory; retry the same request" if busy else str(exc)[:200]),
+                   retryable=True)
+    except OSError as exc:
+        out = dict(rc.error("write_failed", str(exc)[:200]), retryable=True)
+    if args.get("format") == "text" and out.get("ok"):
+        return "%s: %s\nindex: %s\npath: %s\nsha: %s" % (
+            {"new": "saved", "updated": "updated", "noop": "unchanged"}[out["result"]],
+            name, json.dumps(out["index"], ensure_ascii=False), path, out["sha"])
+    return json.dumps(out, ensure_ascii=False)
 
 
 def _words_unsure(db, rows: List[dict]) -> bool:
@@ -417,7 +439,9 @@ def _words_unsure(db, rows: List[dict]) -> bool:
 def call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=None) -> str:
     if name == "recall":
         from brain import vectors
-        with vectors.search_session():
+        from brain import lifecycle
+        with vectors.search_session(), lifecycle.view(args.get("view", "current") if isinstance(args, dict) else "current",
+                                                       args.get("as_of") if isinstance(args, dict) else None):
             return _call_tool(db, name, args, _measure=_measure, _capture=_capture)
     return _call_tool(db, name, args, _measure=_measure, _capture=_capture)
 
@@ -429,16 +453,13 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             db, int(args.get("days") or 7), int(args.get("limit") or 25)))
     if name == "recall":
         t0 = time.time()
-        q, k = args["query"], int(args.get("k") or 8)
+        from brain import recalljson
+        bad = recalljson.validate(args)
+        if bad:
+            return json.dumps(bad, ensure_ascii=False)
+        q, k = args["query"], args.get("k", 8)
         terms = args.get("terms") or []
-        # ★orbit-1 JSON mode★ (2026-10-29) — the same rows as the text, as fields; bad arguments are an
-        #   answer (an error envelope), never an exception. Without `format`, nothing below changes.
-        if args.get("format") is not None or args.get("request_id") is not None:
-            from brain import recalljson
-            bad = recalljson.validate(args)
-            if bad:
-                return json.dumps(bad, ensure_ascii=False)
-        as_json = args.get("format") == "json"
+        as_json = args.get("format", "json") != "text"
         rows = search.recall(db, q, k=k, extra_terms=terms, kinds=args.get("kinds"), sources=args.get("sources"), log=not _measure,
                              scope=args.get("scope") or None)
         hint = ""
@@ -493,7 +514,7 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             if mrows or not auto:
                 more = "\n\n" + _fmt_meaning(mrows, why, cost, start, auto=auto)
         if not _measure:
-            if not args.get("kinds") and not args.get("sources") and k == 8 and args.get("semantic_k") != 0:
+            if not args.get("scope") and not args.get("kinds") and not args.get("sources") and k == 8 and args.get("semantic_k") != 0:
                 from brain import personal
                 rows = personal.apply(db, q, rows, k, terms=terms)
                 if mrows is not None:
@@ -516,6 +537,14 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
         return head + _fmt_recall(rows) + more + hint
     if name == "remember":
         return _do_remember(db, args)
+    if name == "memory_history":
+        from brain import lifecycle
+        if not isinstance(args, dict) or not isinstance(args.get("name"), str):
+            return json.dumps({"ok": False, "error": {"code": "invalid_argument", "message": "name is required"}})
+        offset, limit = args.get("offset", 0), args.get("limit", 25)
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
+            return json.dumps({"ok": False, "error": {"code": "invalid_argument", "message": "offset >= 0 and limit 1..100 required"}})
+        return json.dumps(lifecycle.history(db, args["name"], args.get("scope"), offset, limit), ensure_ascii=False)
     if name == "neighbors":
         return json.dumps(search.neighbors(db, args["name"]), ensure_ascii=False, indent=2)
     if name == "brain_analyse":
@@ -693,8 +722,24 @@ def serve() -> int:
                 params = req.get("params") or {}
                 if db is None:
                     db = store.connect()
-                text = call_tool(db, params.get("name"), params.get("arguments") or {})
-                _result(mid, {"content": [{"type": "text", "text": text}]})
+                tool_name, arguments = params.get("name"), params.get("arguments", {})
+                if tool_name in ("recall", "memory_history") and isinstance(arguments, dict):
+                    from brain import recalljson
+                    valid = tool_name != "recall" or recalljson.validate(arguments) is None
+                    if valid and store.needs_reindex(db):
+                        store.reindex(db, recalibrate=False)
+                text = call_tool(db, tool_name, arguments)
+                result = {"content": [{"type": "text", "text": text}]}
+                try:
+                    structured = json.loads(text)
+                except (ValueError, TypeError):
+                    structured = None
+                if isinstance(structured, dict):
+                    if _PROTOCOL >= "2025-06-18":
+                        result["structuredContent"] = structured
+                    if structured.get("ok") is False or structured.get("result") == "conflict":
+                        result["isError"] = True
+                _result(mid, result)
             elif mid is not None:
                 _error(mid, -32601, "method not found: %s" % method)
         except Exception as exc:                      # noqa: BLE001
