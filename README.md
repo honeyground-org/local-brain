@@ -460,9 +460,13 @@ for any language.
 
 - **Recall hook** — on every prompt; adds memories only when the score clears the
   calibrated threshold.
-- **Index refresh** — at session start and through a detached worker after prompt-hook responses.
-  A hand-edited memory becomes available after the worker indexes it; explicit MCP operations retain
-  their synchronous refresh path.
+- **Index refresh** — event-driven, through one detached worker. A session start indexes nothing by
+  itself: it checks for the events that need work (a source file changed, work is pending, a repository
+  moved, the ruler no longer fits the corpus) and only then starts the worker, which does that work once
+  for every open session. Twenty sessions opening together cost about a second of CPU in total when
+  nothing changed (previously each ran a full index and recalibration, about a minute of CPU apiece).
+  Prompt hooks hand the same worker whatever they left for later. A hand-edited memory becomes
+  available after the worker indexes it; explicit MCP operations retain their synchronous refresh path.
 - **Scheduled jobs** — semantic indexing and rule discovery, once a day.
   `brain status` reads their logs to show the last run. On macOS the installer uses `launchd`
   (`install/launchd.sh`), which also catches up on runs that were due while the machine slept.
