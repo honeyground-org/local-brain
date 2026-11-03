@@ -22,11 +22,11 @@ import sys
 import time
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from brain import i18n, textindex
+from brain import i18n, textindex, lifecycle
 
 # 4 = moved the usage key from rowid to path (2026-08-11). Always bump it —
 # an already-running old process reads this number and announces that it is stale.
-SCHEMA_VERSION = "5"   # 5 (2026-10-29): docs.project_id — a memory's declared scope (§search.recall scope=)
+SCHEMA_VERSION = "6"   # 6: lifecycle metadata; 5: project_id
 
 # ★Index the change history★ (2026-08-18 · goal ③ history)
 #
@@ -89,16 +89,18 @@ def evidence_date(text: str, meta: Dict[str, str]) -> str:
     exactly the incident this repository records as "a stale number misled a decision":
     a stale number quoted as present fact, and a decision went wrong because of it.
 
-    So the **most recent** date written in the body is taken as the evidence date
-    (measured: 360 of 434 memories carry a date, median 19 days old, 19 over 90 days).
+    A single unambiguous date can serve as a legacy fallback. Multiple dates do not
+    certify the whole document: a recent edit must not refresh an older claim.
     A `verified_at` in the frontmatter wins — a human stated that one explicitly.
     """
     explicit = (meta.get("verified_at") or "").strip()
     if _DATE.match(explicit):
         return explicit[:10]
+    if meta.get("lifecycle"):
+        return ""  # Effective dates and recording dates are not verification evidence.
     today = time.strftime("%Y-%m-%d")
     found = [d for d in _DATE.findall(text) if d <= today]
-    return max(found) if found else ""
+    return found[0] if len(set(found)) == 1 else ""
 
 
 # The old default — from when this was Claude Code only. ⛔ Never remove it (§brain_home).
@@ -496,6 +498,7 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
         "triggers": _triggers_of(meta),
         "path": path, "source": source,
         "evidence_date": evidence_date(raw, meta),
+        "lifecycle": json.dumps(lifecycle.from_meta(meta), ensure_ascii=False),
         "kind": meta.get("type") or meta.get("node_type") or "",
         # ★A memory's scope is declared in its own frontmatter★ (orbit-1 O4, 2026-10-29): an opaque id the
         # writer chose — never derived from the path, never guessed. Empty = unscoped, visible to every scope.
@@ -711,6 +714,8 @@ def _migrate(db: sqlite3.Connection) -> None:
     An earlier memory system was burnt in the same place (its own schema migration)."""
     have = {r["name"] for r in db.execute("PRAGMA table_info(docs)")}
     with db:
+        if "lifecycle" not in have:
+            db.execute("ALTER TABLE docs ADD COLUMN lifecycle TEXT NOT NULL DEFAULT ''")
         if "prior" not in have:
             db.execute("ALTER TABLE docs ADD COLUMN prior REAL NOT NULL DEFAULT 1.0")
         if "evidence_date" not in have:
@@ -1023,6 +1028,7 @@ def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0) -> int:
              doc["description"], doc["body"], doc["mtime"], doc["size"], doc["sha"],
              doclen, prior, doc.get("evidence_date", ""), now, doc.get("project_id", "")))
         doc_id = int(cursor.lastrowid)
+    db.execute("UPDATE docs SET lifecycle=? WHERE id=?", (doc.get("lifecycle", "{}"), doc_id))
     db.executemany("INSERT INTO postings(term,doc_id,tf) VALUES(?,?,?)",
                    [(t, doc_id, v) for t, v in tf.items()])
     db.executemany("INSERT OR IGNORE INTO links(src_id,dst_name) VALUES(?,?)",
@@ -1322,6 +1328,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # and brought broken links back from 0 to 31. Fixing the index effectively erased memories.
     # Now nothing is deleted — `_index_one` removes and reinserts its own rows per document, so
     # rowids survive, and only vanished files are cleaned up below.
+    full = full or bool(db.execute("SELECT 1 FROM docs WHERE lifecycle='' LIMIT 1").fetchone())
     existing = {r["path"]: (r["id"], r["mtime"], r["size"], r["sha"])
                 for r in db.execute("SELECT id,path,mtime,size,sha FROM docs")}
     # ★An incremental pass recounts only what it touched★ (§_TOUCHED) — a full pass or a first index recounts all.
@@ -1615,6 +1622,8 @@ def needs_reindex(db: sqlite3.Connection, cfg: Optional[dict] = None) -> bool:
     exclusion rules are respected (globbing `**/*.md` walks into node_modules and takes
     ★21 seconds★ — that was actually measured once, and gave the wrong answer).
     """
+    if db.execute("SELECT 1 FROM docs WHERE lifecycle='' LIMIT 1").fetchone():
+        return True
     last = get_meta(db, "last_index")
     if not last:
         return True

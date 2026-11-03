@@ -32,6 +32,14 @@ def validate(args: dict) -> Optional[Dict[str, Any]]:
     """None when the JSON-mode arguments are acceptable, else the error envelope to return."""
     if not isinstance(args, dict):
         return error("invalid_argument", "arguments must be an object")
+    if args.get("view", "current") not in ("current", "history"):
+        return error("invalid_argument", "view must be current or history")
+    if "as_of" in args:
+        from brain.lifecycle import instant
+        try:
+            instant(args["as_of"])
+        except (ValueError, TypeError):
+            return error("invalid_argument", "as_of must be a date or ISO timestamp with timezone")
     query = args.get("query")
     if not isinstance(query, str) or not query.strip() or len(query) > 24000:
         return error("invalid_argument", "query must contain 1–24000 characters")
@@ -106,10 +114,12 @@ def _row(r: dict, rank: Optional[int], via: str, shas: Dict[str, str], pids: Dic
         "sha": shas.get(r.get("path") or "", None),
         "score": r.get("score"),
         "why": r.get("why"),
+        "retrieved_via": r.get("retrieved_via", []),
         "evidence_date": ev,
         "evidence_age_days": (ev_age if (ev and isinstance(ev_age, int) and ev_age >= 0) else None),
         "file_age_days": r.get("age_days"),
         "stale": bool(r.get("stale")),
+        "lifecycle": r.get("lifecycle", {"status": "untracked", "current": None}),
         "excerpt": (r.get("excerpt") or "")[:shown],
         "excerpt_chars": shown,
         "via": via,

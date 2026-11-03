@@ -809,3 +809,69 @@ proposal issue ──► pull request ──► automatic checks ──► PR re
 
 Apache License 2.0 — the full text is in [LICENSE](LICENSE). Use it, change it, ship it
 inside something commercial; keep the notice and say where it came from.
+
+### Current facts and change history
+
+Memory validity is domain-neutral: an address, preference, appointment, team arrangement or
+technical decision can change. A recent mention is not proof that an earlier fact has been replaced.
+Brain follows explicit revisions and effective dates, preserving the evidence for each change.
+
+Agents should keep one independently changing fact per record. Use a stable `topic` and `facet`
+within an exact `project_id` scope. A scope can represent a person or household as well as a project.
+Keep a future intention, a confirmed decision and the actual situation in distinct facets; for
+example `move_plan` and `current_address`. Do not automatically equate a decision with implementation.
+
+```json
+{
+  "name": "remember",
+  "arguments": {
+    "name": "mina_commute_november",
+    "description": "Mina now walks to work",
+    "type": "reference",
+    "body": "Mina walks to work after moving closer to the office.",
+    "project_id": "personal-mina",
+    "lifecycle": {
+      "topic": "mina",
+      "facet": "commute",
+      "status": "active",
+      "valid_from": "2026-11-01T09:00:00+09:00",
+      "supersedes": ["mina_commute_previous"],
+      "change_reason": "Moved closer to work",
+      "evidence": ["The user confirmed the move and new commute on November 1"]
+    }
+  }
+}
+```
+
+The predecessor must already exist with the same scope, topic and facet. Initial records omit
+`supersedes`. Replacements require an effective start, reason and evidence. Dates mean midnight UTC;
+use an ISO timestamp with timezone for changes within a day. `valid_to` is an exclusive end.
+
+- Default `recall` follows an old match to its effective replacement, including multi-step changes.
+  Words, meaning, graph hydration and declared triggers use the same validity resolver.
+- `recall(view="history")` retrieves historical content with its status. `recall(as_of=...)` resolves
+  explicit records effective at that time. This is effective-time history, not a reconstruction of
+  what the system knew before a later correction was recorded.
+- `memory_history(name=..., scope=...)` works with an old or current name. It returns current names,
+  revisions, dates, reasons, evidence and bounded textual diffs. Use `offset`/`limit` for pagination;
+  bodies and diffs report truncation and retain source paths and hashes. History covers indexed
+  records only, not every conversation that ever occurred.
+- `proposed` records do not replace facts. Future-effective replacements stay inactive until their
+  start. Multiple unlinked active records for one facet are conservatively marked `disputed`,
+  even when their wording might agree; no arbitrary newest-wins rule selects a winner. Disputed
+  results are labelled for explicit lookup and excluded from automatic hook output.
+- Retraction or archival uses a new named revision with `supersedes`, status `retracted` or
+  `archived`, a start date and evidence. It removes that chain from current answers without
+  resurrecting an older version. The files remain available through history; there is no automatic
+  permanent deletion. Explicit legacy retirement markers are also excluded from current answers.
+- Tracked revisions cannot be rewritten in place through `remember`; create a successor. Identical
+  retries are still noops. Untracked memories retain the existing SHA-protected update contract.
+- In file frontmatter, `lifecycle` is a single-line JSON object. Invalid metadata is excluded from
+  current results. Reindexing derives the state from files and requires no external model call.
+
+Existing notes are **untracked**, not automatically certified current. The feature does not infer
+semantic contradictions, split mixed old notes, or determine whether a cited source is trustworthy.
+The writing agent must identify the fact, confirm the change from the conversation or source, and
+record its relation. No existing personal notes are silently rewritten. Multiple dates in a legacy
+body no longer make the most recent date certify the whole document; use explicit `verified_at`
+for a verified evidence date and separate facts with different lifetimes.

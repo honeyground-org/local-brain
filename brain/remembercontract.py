@@ -25,7 +25,7 @@ KEY_MAX = 128
 PROJECT_MAX = 128
 SOURCE_MAX = 512
 # The fields a retry is compared on — the date of saving is not one of them (a retry tomorrow is the same request).
-PAYLOAD_FIELDS = ("description", "type", "body", "links", "search_aliases", "project_id", "source", "observed_at")
+PAYLOAD_FIELDS = ("description", "type", "body", "links", "search_aliases", "project_id", "source", "observed_at", "lifecycle")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -80,6 +80,11 @@ def validate(args: dict) -> Optional[Dict[str, Any]]:
         if (not isinstance(values, list) or len(values) > 100
                 or any(not isinstance(v, str) or not v.strip() or len(v) > 2000 for v in values)):
             return error("invalid_argument", "%s must be an array of at most 100 nonempty strings" % field)
+    if "lifecycle" in args:
+        from brain import lifecycle
+        issue = lifecycle.validate(args["lifecycle"])
+        if issue:
+            return error("invalid_argument", issue)
     return None
 
 
@@ -135,6 +140,8 @@ def aliases(args: dict) -> List[str]:
 def payload_sha(args: dict) -> str:
     """What a retry is compared on — canonical JSON of the content fields, never the date of saving."""
     body = {f: args.get(f) for f in PAYLOAD_FIELDS}
+    if not args.get("lifecycle"):
+        body.pop("lifecycle", None)  # Preserve retry hashes written before lifecycle support.
     body["search_aliases"] = aliases(args)
     body["links"] = [l for l in (args.get("links") or []) if isinstance(l, str)]
     raw = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -161,7 +168,10 @@ def current(path: str) -> Dict[str, Any]:
             raw = fh.read()
     except FileNotFoundError:
         return out
-    meta, _ = store.parse_frontmatter(raw)
+    meta, body = store.parse_frontmatter(raw)
+    from brain import lifecycle
+    out["lifecycle"] = lifecycle.from_meta(meta)
+    out["body"] = body.strip()
     out.update({"exists": True, "name": os.path.basename(path)[:-3],
                 "sha": hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest(),
                 "idempotency_key": (meta.get("idempotency_key") or "").strip() or None,
@@ -207,6 +217,8 @@ def render(name: str, args: dict, verified_at: str) -> str:
     """The file — the legacy shape with the contract's fields added in the frontmatter."""
     lines = ["---", "name: %s" % name, "description: %s" % args["description"].replace("\n", " "),
              "verified_at: %s" % verified_at]
+    if args.get("lifecycle"):
+        lines.append("lifecycle: " + json.dumps(args["lifecycle"], ensure_ascii=False, sort_keys=True))
     if args.get("idempotency_key"):
         lines.append("idempotency_key: %s" % args["idempotency_key"])
         lines.append("payload_sha: %s" % payload_sha(args))
@@ -285,6 +297,7 @@ def ack(db: sqlite3.Connection, *, name: str, path: str, result: str, conflict: 
         "served": _served(db) if stored else "n/a",
         "index": idx,
         "conflict": conflict,
+        "lifecycle": args.get("lifecycle") or cur.get("lifecycle") or None,
         "project_id": (args.get("project_id") or None) if result != "conflict" else cur.get("project_id"),
         "idempotency_key": key,
         "payload_sha": (payload_sha(args) if result != "conflict" else cur.get("payload_sha")),

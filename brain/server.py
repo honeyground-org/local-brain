@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.0.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.1.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -255,10 +255,34 @@ SHOWN = 280      # characters of a result's excerpt shown to the caller
 AUTO_MEANING = 3
 
 
+# Validity belongs to the memory, not to a development-specific document type.
+for _tool in TOOLS:
+    _properties = _tool["inputSchema"].get("properties", {})
+    if _tool["name"] == "recall":
+        _properties.update({"view": {"type": "string", "enum": ["current", "history"], "default": "current"},
+                            "as_of": {"type": "string", "description": "Effective date or ISO timestamp with timezone; omitted means now"}})
+    if _tool["name"] == "remember":
+        _properties["lifecycle"] = {"type": "object", "required": ["topic", "facet"],
+            "additionalProperties": False, "properties": {
+                "topic": {"type": "string"}, "facet": {"type": "string"},
+                "status": {"type": "string", "enum": ["active", "proposed", "disputed", "superseded", "retracted", "archived"]},
+                "valid_from": {"type": "string"}, "valid_to": {"type": "string"},
+                "supersedes": {"type": "array", "items": {"type": "string"}},
+                "superseded_by": {"type": "string"}, "change_reason": {"type": "string"},
+                "evidence": {"type": "array", "items": {"type": "string"}}}}
+        _tool["description"] += (" For changing facts, preferences, arrangements or decisions, use lifecycle topic/facet "
+            "and evidence. Keep one independently changing fact per memory. Separate plans from actual state with different facets. "
+            "Read the prior memory first; save confirmed changes under a new name with supersedes, valid_from and change_reason. "
+            "Never infer replacement from recency alone. Use proposed for tentative ideas; never silently turn them into facts.")
+TOOLS.append({"name": "memory_history", "description": "Read current state, previous revisions and change evidence for a memory, including everyday life and work. Old names also resolve to the current topic history.",
+              "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "scope": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "required": ["name"]}})
+
+
 def _fmt_recall(rows: List[dict]) -> str:
     if not rows:
         return ("No results. ⛔ Call again with synonyms in `terms` — "
                 "a memory is usually written in different words than the question.")
+    from brain import lifecycle
     out = []
     direct = [r for r in rows if not r.get("related")]
     rel = [r for r in rows if r.get("related")]
@@ -287,7 +311,7 @@ def _fmt_recall(rows: List[dict]) -> str:
                        "  · %s ← %s\n    %s" % (r["name"], r["via_graph"],
                                                 r["description"] or r["title"])
                        for r in rel))
-    return "\n\n".join(out)
+    return "\n\n".join(out) + "\n" + "\n".join(lifecycle.format_line(r) for r in rows if r.get("lifecycle"))
 
 
 def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int, auto: bool = False) -> str:
@@ -297,6 +321,7 @@ def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int, auto: b
                else "found by meaning, not by the words", cost))
     if not rows:
         return head + "\n  " + ("unavailable — %s" % why_none if why_none else "nothing more found")
+    from brain import lifecycle
     out = [head]
     for i, r in enumerate(rows, start):
         if r.get("evidence_age_days", -1) >= 0:
@@ -307,7 +332,7 @@ def _fmt_meaning(rows: List[dict], why_none: str, cost: str, start: int, auto: b
         out.append("%d. %s  [%s/%s]\n   %s\n   why: %s · %s%s\n   %s\n   path: %s"
                    % (i, r["name"], r["source"], r["kind"] or "-", r["description"] or r["title"],
                       r["why"], age, flag, r["excerpt"][:SHOWN], r["path"]))
-    return "\n\n".join(out)
+    return "\n\n".join(out) + "\n" + "\n".join(lifecycle.format_line(r) for r in rows if r.get("lifecycle"))
 
 
 def _note_recall(args: dict, rows: List[dict], sk: int, mrows, why: str, cached, t0: float,
@@ -358,10 +383,19 @@ def _do_remember(db, args: dict) -> str:
             cur = rc.current(path)
             if "project_id" not in args and cur.get("project_id"):
                 args["project_id"] = cur["project_id"]
+            from brain import lifecycle
+            issue = lifecycle.check_write(db, name, args, cur)
+            if issue:
+                return json.dumps(rc.error("invalid_argument", issue), ensure_ascii=False)
+            if cur.get("lifecycle") and (
+                    cur.get("body") != store.parse_frontmatter(rc.render(name, args, cur.get("verified_at") or ""))[1].strip()
+                    or cur.get("lifecycle") != args.get("lifecycle")
+                    or (cur.get("payload_sha") and cur["payload_sha"] != rc.payload_sha(args))):
+                return json.dumps(rc.error("revision_required", "Keep the old revision; create a new name with lifecycle.supersedes"))
             args = rc.prepared(args)
             result, conflict = rc.decide(cur, args)
             verified_at = (cur.get("verified_at") if result == "noop"
-                           else (args.get("observed_at") or time.strftime("%Y-%m-%d")))
+                           else (args.get("observed_at") or ("" if args.get("lifecycle") else time.strftime("%Y-%m-%d"))))
             stats: dict = {}
             if result in ("new", "updated"):
                 try:
@@ -405,7 +439,9 @@ def _words_unsure(db, rows: List[dict]) -> bool:
 def call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=None) -> str:
     if name == "recall":
         from brain import vectors
-        with vectors.search_session():
+        from brain import lifecycle
+        with vectors.search_session(), lifecycle.view(args.get("view", "current") if isinstance(args, dict) else "current",
+                                                       args.get("as_of") if isinstance(args, dict) else None):
             return _call_tool(db, name, args, _measure=_measure, _capture=_capture)
     return _call_tool(db, name, args, _measure=_measure, _capture=_capture)
 
@@ -501,6 +537,14 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
         return head + _fmt_recall(rows) + more + hint
     if name == "remember":
         return _do_remember(db, args)
+    if name == "memory_history":
+        from brain import lifecycle
+        if not isinstance(args, dict) or not isinstance(args.get("name"), str):
+            return json.dumps({"ok": False, "error": {"code": "invalid_argument", "message": "name is required"}})
+        offset, limit = args.get("offset", 0), args.get("limit", 25)
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
+            return json.dumps({"ok": False, "error": {"code": "invalid_argument", "message": "offset >= 0 and limit 1..100 required"}})
+        return json.dumps(lifecycle.history(db, args["name"], args.get("scope"), offset, limit), ensure_ascii=False)
     if name == "neighbors":
         return json.dumps(search.neighbors(db, args["name"]), ensure_ascii=False, indent=2)
     if name == "brain_analyse":
@@ -678,7 +722,13 @@ def serve() -> int:
                 params = req.get("params") or {}
                 if db is None:
                     db = store.connect()
-                text = call_tool(db, params.get("name"), params.get("arguments", {}))
+                tool_name, arguments = params.get("name"), params.get("arguments", {})
+                if tool_name in ("recall", "memory_history") and isinstance(arguments, dict):
+                    from brain import recalljson
+                    valid = tool_name != "recall" or recalljson.validate(arguments) is None
+                    if valid and store.needs_reindex(db):
+                        store.reindex(db, recalibrate=False)
+                text = call_tool(db, tool_name, arguments)
                 result = {"content": [{"type": "text", "text": text}]}
                 try:
                     structured = json.loads(text)

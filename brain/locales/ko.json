@@ -771,5 +771,6 @@
  "obs.languageName": "한국어",
  "obs.reviseLens": "관점 수정 의견",
  "obs.otherSectors": "다른 주제",
- "obs.shownBubbles": "표시 버블"
+ "obs.shownBubbles": "표시 버블",
+ "memory.validity": "유효 상태: {status} · 현재: {current} · 이전: {previous} · 변경: {reason}"
 }
