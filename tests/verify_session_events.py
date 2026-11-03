@@ -218,8 +218,10 @@ def main() -> int:
 
     # ── ⑥ the real hook script ─────────────────────────────────────────────────
     hook = os.path.join(ROOT, "bin", "brain-session")
+    # Windows has no POSIX shell: it runs the same module the packaged entry point runs (§install.entry_command)
+    argv = ([hook] if os.name != "nt" else [sys.executable, os.path.join(ROOT, "bin", "_run.py"), "brain.tail", "notice"])
     t0 = time.time()
-    r = subprocess.run([hook, "--host", "claude-code"], input=json.dumps({"session_id": "s", "source": "startup"}),
+    r = subprocess.run(argv + ["--host", "claude-code"], input=json.dumps({"session_id": "s", "source": "startup"}),
                        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
     took = time.time() - t0
     with open(hook, encoding="utf-8") as fh:
