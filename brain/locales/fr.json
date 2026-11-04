@@ -115,6 +115,7 @@
  "cli.help.cmd.eval_init": "Tirer un ensemble d'évaluation de ce corpus",
  "cli.help.cmd.export": "Ce que vous avez gagné, dans un seul fichier (la calibration est volontairement exclue)",
  "cli.help.cmd.feedback": "Ce rappel était-il utile ou faux — cela change le classement futur",
+ "cli.help.cmd.evolve": "Auto-évolution — les erreurs répétées deviennent des correctifs contrôlés ; désactivée tant qu'un mainteneur ne l'active pas",
  "cli.help.cmd.i18n_check": "Catalogues de traduction — ⛔clés manquantes, incohérences de paramètre (non comptées, elles pourrissent)",
  "cli.help.cmd.import_": "Fusionner — ⛔ simulation par défaut ; `--apply` pour appliquer réellement",
  "cli.help.cmd.index": "Indexer (incrémental). `--full` reconstruit tout",

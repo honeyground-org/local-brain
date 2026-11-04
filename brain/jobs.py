@@ -162,6 +162,11 @@ def _run(env_key: str, name: str, body) -> int:
         except Exception as exc:                         # noqa: BLE001
             fh.write("⛔ stopped — %s: %s\n" % (type(exc).__name__, str(exc)[:200]))
             failed = True
+            try:                                         # a signal for self-evolution (§evolve.record_error)
+                from brain import evolve
+                evolve.record_error("jobs." + name, exc)
+            except Exception:                            # noqa: BLE001
+                pass
         # ★The day's summary of words and meaning★ (§monitor) — written by whichever daily job runs first;
         #   idempotent, no model call, and never what decides this job's own success.
         try:

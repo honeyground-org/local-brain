@@ -23,4 +23,26 @@ if len(sys.argv) < 2 or not sys.argv[1].startswith("brain."):
     sys.stderr.write("usage: python3 bin/_run.py brain.<module> [args…]\n")
     sys.exit(2)
 module = sys.argv.pop(1)
-runpy.run_module(module, run_name="__main__", alter_sys=True)
+
+
+def _record(error):
+    """A signal for self-evolution (§brain.evolve.record_error): the class and brain frames, never the message."""
+    try:
+        from brain import evolve
+        evolve.record_error(module, error)
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
+try:
+    runpy.run_module(module, run_name="__main__", alter_sys=True)
+except SystemExit as stop:
+    # A module that swallows a failure and exits 0 - the hook's contract, never block the host - raises its exit
+    # inside the handler, so the swallowed error is the exit's context. Recording it here keeps the measured
+    # modules (calibrate.RULER_MODULES) untouched.
+    if stop.code in (0, None) and isinstance(stop.__context__, Exception):
+        _record(stop.__context__)
+    raise
+except Exception as exc:                                 # noqa: BLE001
+    _record(exc)
+    raise

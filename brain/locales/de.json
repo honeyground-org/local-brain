@@ -115,6 +115,7 @@
  "cli.help.cmd.eval_init": "Ein Auswertungsset aus diesem Korpus ziehen",
  "cli.help.cmd.export": "Was du dir erarbeitet hast, in einer Datei (Kalibrierung bewusst ausgeschlossen)",
  "cli.help.cmd.feedback": "War dieser Abruf nützlich oder falsch — es beeinflusst die künftige Rangfolge",
+ "cli.help.cmd.evolve": "Selbstentwicklung — wiederholte Fehler werden zu geprüften Korrekturen; aus, bis ein Maintainer sie einschaltet",
  "cli.help.cmd.i18n_check": "Übersetzungs-Kataloge — ⛔fehlende Schlüssel, Platzhalter-Abweichungen (ungezählt verfallen sie)",
  "cli.help.cmd.import_": "Zusammenführen — ⛔ standardmäßig ein Probelauf; `--apply` zum Übernehmen",
  "cli.help.cmd.index": "Indexieren (inkrementell). `--full` baut alles neu",
