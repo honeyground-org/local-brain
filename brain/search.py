@@ -588,7 +588,8 @@ def recall(db: sqlite3.Connection, query: str, k: int = 8,
             shown = {r["name"] for r in results}
             seeds = picked_ids[:SEED_HITS]
             cand = sorted(_neighbors(db, seeds).items(),
-                          key=lambda kv: -doc_score.get(kv[0], 0.0))
+                          key=lambda kv: (-(min(1.0, (_hydrate(db, kv[0]) or {"weight": 1.0})["weight"])),
+                                          -doc_score.get(kv[0], 0.0)))
             added = 0
             for did, via in cand:
                 if added >= MAX_RELATED:
@@ -656,6 +657,9 @@ def _present(row: sqlite3.Row, score: float, matched: List[str],
         # information through connected data. It is not the whole of a conversation or a memory."*
         # Whoever consumes this (hook, MCP, a person) must be able to tell an answer from a side branch.
         "related": bool(related),
+        "feedback": {"weight": row["weight"], "priority_factor": min(1.0, max(0.0, row["weight"])),
+                     "demoted": row["weight"] < 1.0,
+                     "meaning": "retrieval preference, not factual validity"},
         "why": ("link: one hop from %s" % via) if via else ("words: " + ", ".join(matched[:6])),
         "age_days": int(age),
         # ★Always return the evidence date with the result★ — not as a warning but as **material for judgement**.
@@ -894,7 +898,7 @@ def fused(db: sqlite3.Connection, query: str, rows: List[dict], k: int,
     for lst in lists:
         for i, p in enumerate(lst):
             score[p] = score.get(p, 0.0) + 1.0 / (FUSE_K + i + 1)
-    order = sorted(pool, key=lambda p: (-score[p], base[p]))
+    order = sorted(pool, key=lambda p: (-score[p] * by_path[p].get("feedback", {}).get("priority_factor", 1.0), base[p]))
     return [by_path[p] for p in order[:k]], why
 
 
@@ -941,7 +945,10 @@ def union(db: sqlite3.Connection, query: str, rows: List[dict], k: int,
         worth[p] = passage_worth("\n".join(x or "" for x in (d["title"], d["description"], d["body"])), weights) if d else 0.0
     base = {p: i for i, p in enumerate(pool)}
     passage = {p: i for i, p in enumerate(sorted(pool, key=lambda p: (-worth[p], base[p])))}
-    order = sorted(pool, key=lambda p: (min(rank[p]), passage[p], rank[p][0] + rank[p][1], rank[p][0]))
+    def priority(path):
+        factor = by_path[path].get("feedback", {}).get("priority_factor", 1.0)
+        return (min(rank[path]) + 1) / factor if factor else float("inf")
+    order = sorted(pool, key=lambda p: (priority(p), passage[p], rank[p][0] + rank[p][1], rank[p][0]))
     return [by_path[p] for p in order[:k]], why
 
 

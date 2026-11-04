@@ -53,6 +53,28 @@ every session.
 | **Performance boost** | Better context, better output. The agent sees what you already learned before it acts. |
 | **Compounding know-how** | Every session adds to it. What you learn grows instead of evaporating. |
 
+## Meet Cosmos Orbit: carry the work through to completion
+
+**Give your agent memory with Brain, and keep the work moving with
+[Cosmos Orbit](https://github.com/honeyground-org/cosmos-orbit).**
+
+Orbit is an open-source local companion for **Claude Code and Codex CLI**. It keeps the original
+goal, your corrections and completion evidence together as work continues across sessions.
+
+- **Keep the goal in view.** Carry the request, corrections and next steps through compaction and
+  session handoffs.
+- **Check the result.** Run completion checks and an independent review before marking work verified.
+- **Pick up unfinished work.** Use a durable task ledger and checkpoints to support recovery and
+  continue from the recorded state.
+
+Together, Brain supplies relevant knowledge from earlier work, while Orbit tracks what the current
+task still needs to finish. Orbit's optional Brain integration retrieves attributed context and can
+queue memories for retry-safe saving. Either product also works independently.
+
+**[Explore Cosmos Orbit →](https://github.com/honeyground-org/cosmos-orbit)** ·
+[Try the interactive preview](https://honeyground-org.github.io/cosmos-orbit/) ·
+[Installation and getting started](https://github.com/honeyground-org/cosmos-orbit#attach-orbit-to-the-session-you-already-use)
+
 ## How it works: one local index, three moments
 
 ```mermaid
@@ -62,7 +84,7 @@ flowchart LR
   C[Notes and wikis] --> I
   I --> T["As you type<br/>related memories attach to the prompt"]
   I --> R["Before a risky action<br/>your own guidance appears"]
-  I --> M["When the agent asks<br/>11 MCP tools"]
+  I --> M["When the agent asks<br/>12 MCP tools"]
 ```
 
 - **As you type.** A host hook reads each prompt and attaches only the memories that clear your
@@ -73,9 +95,9 @@ flowchart LR
   right before a push, a rebase or a migration. The rule matches the tool call; the *wording* lives in
   your memory file, so editing the memory changes what is said. No rules ship with brain: they are
   learned from your own tool history (`brain rules --discover`).
-- **When the agent asks.** Eleven MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
+- **When the agent asks.** Twelve MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
   `brain_suggest` · `brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view` ·
-  `brain_capabilities` (what this brain supports, read live — a client checks it once after connecting).
+  `memory_history` · `brain_capabilities` (what this brain supports, read live — a client checks it once after connecting).
 
 ## Personal memory and performance
 
@@ -512,6 +534,14 @@ the text block. Conflicts and invalid arguments set `isError: true` on the MCP r
   lock, so they are not covered by a transactional multi-client guarantee.
 - Invalid inputs are rejected before search or writes. `k` is 1–100 and `semantic_k` is 0–100.
   Read `brain_capabilities` for live defaults, limits and supported write protections.
+- With a selected local embedding engine, indexed changes queue a background embedding pass.
+  Saves start the existing worker without waiting for inference. Completed chunks survive interruption;
+  failures stay pending for the next worker trigger (a prompt/session or scheduled catch-up).
+  Remote embedding providers retain their explicit/scheduled build path.
+- `brain_status.embedding` and `brain_capabilities.embed.freshness` report current-content coverage
+  (`current_docs`, `pending_docs`, `current`) separately from serving-database sync. An available engine
+  or an in-sync Qdrant does not mean every changed document has been embedded.
+
 
 **Migration:** clients that parsed numbered text should request `format: "text"`. Clients that
 previously overwrote by name must read the current SHA and provide `expected_sha`; text format does
@@ -766,7 +796,7 @@ Two things can leave, and only through an engine you chose (`brain engines`):
 | turns it on | choosing an engine — `--embed` / `--judge` at install, or `brain engines --set`. Its key comes from the provider's variable or `secrets.json` (0600) |
 | what then goes out | **embed**: chunks of **every source, by default** — your personal memory included (`embed: true` is the default and no corpus is special-cased). **judge**: the question and short excerpts of up to 20 candidate notes |
 | what does **not** go out | anything a source or a document marked `embed: false`; and everything, always, while no engine is chosen. A local OpenAI-compatible server (`--base-url http://localhost…`) keeps both on the machine |
-| who sends it | `brain vec build` and the daily `brain-vec-daily` job (embed); recall when word search is silent, `brain score --full` and the daily `brain-rules-daily` job (judge) |
+| who sends it | `brain vec build`, the daily `brain-vec-daily` job, and the background worker for selected local engines (embed); recall when word search is silent, `brain score --full` and the daily `brain-rules-daily` job (judge) |
 
 **A key that is merely present is never used.** `GEMINI_API_KEY`,
 `OPENAI_API_KEY` and especially `ANTHROPIC_API_KEY` are often another tool's —
@@ -879,3 +909,30 @@ The writing agent must identify the fact, confirm the change from the conversati
 record its relation. No existing personal notes are silently rewritten. Multiple dates in a legacy
 body no longer make the most recent date certify the whole document; use explicit `verified_at`
 for a verified evidence date and separate facts with different lifetimes.
+
+
+### Changed memories: current facts and observed history
+
+`memory_history` returns explicit replacement chains and `document_history`: bodies observed when
+indexing the same file, with diffs, SHA values and observation times. The shared offset/limit pages
+both lists; top-level `has_more` stays true while either has another page, and `revision_has_more`
+reports the lifecycle list alone. These private snapshots live in
+`document-history/` under the Brain home and survive rebuilding the search index. Observation time is
+not the time a fact became valid. A baseline recovered from the old index has an unknown observation
+time; unobserved conversations and edits cannot be reconstructed. Archived bodies are not additional
+search candidates, and removing a source from the index does not expose its archived bodies via search.
+
+To correct an untracked memory in its entirety, create a new lifecycle revision with `supersedes` and
+`legacy_whole_record_sha: {"previous_name": "exact SHA returned when read"}`, plus effective time,
+reason and evidence. The predecessor must still have that exact file version in the same scope.
+Use this only for a whole-record replacement: a partial correction must not retire a mixed-topic note.
+The original remains unchanged and accessible through history; before the correction its validity is
+still unknown. No automatic bulk migration certifies old notes as current.
+
+Negative retrieval feedback now reduces semantic priority and hook gate strength, as well as word
+ranking. Merged lanes retain that penalty in their final rank priority (after the lane rankings), and graph
+context carries the same feedback annotation. Fusion uses ungated meaning results; it does not also
+apply the hook gate.
+Raw cosine remains raw similarity; the returned semantic ratio includes the feedback factor. This
+is retrieval preference, not a factual retraction or permission to delete the memory. Explicit lifecycle
+revisions determine factual validity. Ambiguous memory names reject feedback without modifying any row.

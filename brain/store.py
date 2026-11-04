@@ -991,6 +991,9 @@ def _touch(db: sqlite3.Connection, doc_id: Optional[int] = None, terms=()) -> No
 def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0) -> int:
     from brain import stores
     stores.invalidate(db)
+    from brain import revisions
+    before = db.execute("SELECT * FROM docs WHERE path=?", (doc["path"],)).fetchone()
+    revisions.preserve(before, doc)
     fields = [
         (doc["name"].replace("_", " "), _W_NAME),
         (doc["title"], _W_TITLE),
@@ -1286,7 +1289,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
             full: bool = False, verbose: bool = False,
             recalibrate: bool = True,
             refresh_history: Optional[bool] = None,
-            sync: bool = True, heal: bool = True) -> dict:
+            sync: bool = True, heal: bool = True, queue_embedding: bool = True) -> dict:
     """Incremental indexing. Change detection is (mtime, size, sha) — identical on all three, skip.
 
     `recalibrate=False` exists for the places that run **on every prompt, like the hook**.
@@ -1534,6 +1537,10 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                 stats["triggers_healed"] = n_healed
         except Exception:                                # noqa: BLE001
             pass                                         # a healing failure must not block indexing
+    if queue_embedding and (added or updated or removed):
+        from brain import deferred as _deferred
+        if _deferred.local_embedding():
+            deferred.append("embed")
     if deferred:
         stats["deferred"] = deferred
         try:

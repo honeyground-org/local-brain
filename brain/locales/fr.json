@@ -772,5 +772,6 @@
  "obs.reviseLens": "Affiner cette perspective",
  "obs.otherSectors": "Autres sujets",
  "obs.shownBubbles": "Bulles visibles",
- "memory.validity": "Validité : {status} · actuel : {current} · précédent : {previous} · changement : {reason}"
+ "memory.validity": "Validité : {status} · actuel : {current} · précédent : {previous} · changement : {reason}",
+ "memory.feedback_demoted": "Priorité de recherche réduite par le retour ; la validité des faits est distincte."
 }

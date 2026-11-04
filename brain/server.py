@@ -268,13 +268,15 @@ for _tool in TOOLS:
                 "status": {"type": "string", "enum": ["active", "proposed", "disputed", "superseded", "retracted", "archived"]},
                 "valid_from": {"type": "string"}, "valid_to": {"type": "string"},
                 "supersedes": {"type": "array", "items": {"type": "string"}},
+                "legacy_whole_record_sha": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                    "description": "Only when replacing an entire untracked memory: map its supersedes name to the exact SHA read. Never use for a partial correction to a mixed-topic note; retain unrelated facts."},
                 "superseded_by": {"type": "string"}, "change_reason": {"type": "string"},
                 "evidence": {"type": "array", "items": {"type": "string"}}}}
         _tool["description"] += (" For changing facts, preferences, arrangements or decisions, use lifecycle topic/facet "
-            "and evidence. Keep one independently changing fact per memory. Separate plans from actual state with different facets. "
+            "and evidence. To correct an entire untracked memory, add its exact SHA in legacy_whole_record_sha and name in supersedes. Do not retire mixed-topic notes for a partial correction. Keep one independently changing fact per memory. Separate plans from actual state with different facets. "
             "Read the prior memory first; save confirmed changes under a new name with supersedes, valid_from and change_reason. "
             "Never infer replacement from recency alone. Use proposed for tentative ideas; never silently turn them into facts.")
-TOOLS.append({"name": "memory_history", "description": "Read current state, previous revisions and change evidence for a memory, including everyday life and work. Old names also resolve to the current topic history.",
+TOOLS.append({"name": "memory_history", "description": "Read current state, previous revisions and change evidence for a memory, including everyday life and work. Old names also resolve to the current topic history. document_history preserves observed file edits, with diffs; observation time is not a fact validity date.",
               "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "scope": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "required": ["name"]}})
 
 
@@ -418,6 +420,9 @@ def _do_remember(db, args: dict) -> str:
                    retryable=True)
     except OSError as exc:
         out = dict(rc.error("write_failed", str(exc)[:200]), retryable=True)
+    if out.get("ok"):
+        from brain import deferred
+        deferred.kick(db)  # ACK describes the completed save; inference stays outside this request
     if args.get("format") == "text" and out.get("ok"):
         return "%s: %s\nindex: %s\npath: %s\nsha: %s" % (
             {"new": "saved", "updated": "updated", "noop": "unchanged"}[out["result"]],

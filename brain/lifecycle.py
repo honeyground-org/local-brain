@@ -11,11 +11,12 @@ import contextvars
 import datetime
 import difflib
 import json
+import re
 from collections import OrderedDict
 
 STATES = ('active', 'proposed', 'disputed', 'superseded', 'retracted', 'archived')
 FIELDS = ('topic', 'facet', 'status', 'valid_from', 'valid_to', 'supersedes',
-          'superseded_by', 'change_reason', 'evidence')
+          'superseded_by', 'change_reason', 'evidence', 'legacy_whole_record_sha')
 _VIEW = contextvars.ContextVar('brain_memory_view', default=('current', None))
 _CACHE = OrderedDict()
 
@@ -68,6 +69,11 @@ def validate(value):
     for key in ('superseded_by', 'change_reason'):
         if key in value and (not isinstance(value[key], str) or not value[key].strip() or len(value[key]) > 2000):
             return key + ' must be a nonempty string of at most 2000 characters'
+    legacy = value.get('legacy_whole_record_sha', {})
+    if (not isinstance(legacy, dict) or len(legacy) > 50 or
+            any(not isinstance(k, str) or not isinstance(v, str) or not re.fullmatch('[0-9a-f]{40}', v)
+                for k, v in legacy.items()) or not set(legacy) <= set(value.get('supersedes', []))):
+        return 'legacy_whole_record_sha must pin supersedes names to exact SHA-1 versions'
     if value.get('supersedes') and (not value.get('valid_from') or not value.get('change_reason') or not value.get('evidence')):
         return 'a replacement needs valid_from, change_reason and evidence'
     return None
@@ -116,7 +122,7 @@ class Snapshot:
         self.next = {}
         self.prev = {}
         self.issues = {}
-        for row in db.execute('SELECT id,name,path,project_id,lifecycle FROM docs'):
+        for row in db.execute('SELECT id,name,path,project_id,lifecycle,sha FROM docs'):
             d = dict(row)
             try:
                 d['meta'] = json.loads(d['lifecycle'] or '{}')
@@ -128,7 +134,7 @@ class Snapshot:
             m = d['meta']
             for name in m.get('supersedes', []):
                 old = self.by_name.get((d['project_id'], name), [])
-                if len(old) != 1 or old[0] == did or not self.same_fact(did, old[0]):
+                if len(old) != 1 or old[0] == did or not (self.same_fact(did, old[0]) or self.legacy_replacement(did, old[0])):
                     self.issues[did] = 'unresolved_or_mismatched_predecessor'
                     continue
                 self.edge(old[0], did)
@@ -139,6 +145,11 @@ class Snapshot:
                     self.edge(did, new[0])
                 else:
                     self.issues[did] = 'unresolved_or_mismatched_successor'
+
+    def legacy_replacement(self, new, old):
+        successor, predecessor = self.docs[new], self.docs[old]
+        return (not predecessor['meta'] and successor['project_id'] == predecessor['project_id'] and
+                successor['meta'].get('legacy_whole_record_sha', {}).get(predecessor['name']) == predecessor['sha'])
 
     def same_fact(self, a, b):
         x, y = self.docs[a], self.docs[b]
@@ -198,7 +209,7 @@ class Snapshot:
                      and self.eligible(n, day) and self.resolve(n) == [n]] if m.get('topic') and did in resolved else []
         if did in resolved and peers:
             status = 'disputed'
-        return dict(m, status=status, current=(did in resolved and status == 'active') if m else None,
+        return dict(m, status=status, current=(did in resolved and status == 'active') if m else (False if status == 'superseded' else None),
                     current_names=[self.docs[n]['name'] for n in resolved],
                     conflicts=[self.docs[n]['name'] for n in peers],
                     predecessors=[self.docs[n]['name'] for n in sorted(self.prev.get(did, ()))],
@@ -242,6 +253,15 @@ def check_write(db, name, args, current):
         if predecessor == name or len(ids) != 1:
             return 'supersedes must identify one existing memory in the same scope'
         prior = snap.docs[ids[0]]['meta']
+        pinned = value.get('legacy_whole_record_sha', {}).get(predecessor)
+        if pinned:
+            from brain import remembercontract
+            row = snap.docs[ids[0]]
+            if prior or row['sha'] != pinned or remembercontract.file_sha(row['path']) != pinned:
+                return 'legacy replacement requires an untracked predecessor at the exact file SHA you read'
+            continue
+        if not prior:
+            return 'an untracked predecessor requires legacy_whole_record_sha for an explicit whole-record replacement'
         if (prior.get('topic'), prior.get('facet')) != (value['topic'], value['facet']):
             return 'supersedes must keep the same topic and facet'
         if prior.get('valid_from') and instant(value['valid_from']) < instant(prior['valid_from']):
@@ -256,6 +276,13 @@ def history(db, name, scope=None, offset=0, limit=25):
         return {'ok': False, 'error': {'code': 'ambiguous_or_missing', 'message': 'Specify the exact memory name and scope'}}
     seed = seeds[0]
     members = {seed} | {n for n in snap.docs if snap.same_fact(seed, n)}
+    pending = list(members)
+    while pending:
+        did = pending.pop()
+        for linked in snap.prev.get(did, set()) | snap.next.get(did, set()):
+            if linked not in members:
+                members.add(linked)
+                pending.append(linked)
     rows = []
     for did in members:
         r = db.execute('SELECT name,path,body,sha,evidence_date FROM docs WHERE id=?', (did,)).fetchone()
@@ -287,16 +314,23 @@ def history(db, name, scope=None, offset=0, limit=25):
         return at, len(ancestors), record['name']
     rows.sort(key=history_order)
     current = [r['name'] for r in rows if r['lifecycle'].get('current')]
+    from brain import revisions
+    observed = revisions.history(snap.docs[seed]['path'], snap.docs[seed]['project_id'], offset, limit)
     return {'ok': True, 'name': name, 'current_names': current, 'unresolved': not bool(current),
-            'revisions': rows[offset:offset+limit], 'total': len(rows), 'offset': offset,
-            'has_more': offset + limit < len(rows), 'history_complete': False,
+            'revisions': rows[offset:offset+limit], 'document_history': observed, 'total': len(rows), 'offset': offset,
+            'has_more': offset + limit < len(rows) or observed.get('has_more', False),
+            'revision_has_more': offset + limit < len(rows), 'history_complete': False,
             'coverage': 'explicitly linked or same-topic/facet indexed records; unrecorded conversations are unknown'}
 
 
 def format_line(row):
     from brain import i18n
     m = row.get("lifecycle") or {}
-    return i18n.t("memory.validity", status=m.get("status", "untracked"),
+    text = i18n.t("memory.validity", status=m.get("status", "untracked"),
                   current=", ".join(m.get("current_names", [])) or "?",
                   reason=m.get("change_reason") or "?",
                   previous=", ".join(m.get("predecessors", [])) or "—")
+
+    if (row.get("feedback") or {}).get("demoted"):
+        text += " · " + i18n.t("memory.feedback_demoted")
+    return text

@@ -782,7 +782,7 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
            qvec: Optional[Sequence[float]] = None) -> List[Tuple[int, float, float]]:
     """Documents close in meaning [(doc_id, cosine, ★ratio★)] — a full scan.
 
-    ratio = cosine ÷ (the mean of this query's top TOPN_FOR_MEAN cosines). The gate uses this value
+    ratio = cosine ÷ (the mean of this query's top TOPN_FOR_MEAN cosines), reduced by negative feedback. The gate uses this value
     (§min_ratio) — an absolute cosine cannot separate, because of this model's distribution.
     When several chunks point at the same document, ★the closest chunk's★ score becomes the document's
     (using the mean would always lose long documents — every one of our project memories has that shape).
@@ -807,7 +807,9 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
     temporal = lifecycle.snapshot(db)
     # Retired candidates must not consume the result slots. Fetch enough to refill.
     tracked = sum(bool(d["meta"]) for d in temporal.docs.values())
-    n = max(k, TOPN_FOR_MEAN) + tracked
+    penalties = {r['id']: min(1.0, max(0.0, r['weight']))
+                 for r in db.execute('SELECT id,weight FROM docs WHERE weight<1')}
+    n = max(k, TOPN_FOR_MEAN) + tracked + len(penalties)
     local = vecstore.SqliteVectors()
     c = stores.choice("vector")
     session = _SEARCH_SESSION.get()
@@ -845,7 +847,12 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
     order = sorted(resolved.items(), key=lambda pair: -pair[1])
     head = [c for _, c in order[:TOPN_FOR_MEAN]]
     mean = (sum(head) / len(head)) or 1e-9
-    return [(did, cos, cos / mean) for did, cos in order[:k]]
+    # Keep the raw cosine and its reference distribution honest. Feedback changes
+    # priority and gate strength, not geometric similarity; do not normalise it away.
+    order.sort(key=lambda pair: -(pair[1] * penalties.get(pair[0], 1.0)
+                                 if pair[1] >= 0 else pair[1]))
+    return [(did, cos, (cos / mean * penalties.get(did, 1.0) if cos > 0 and mean > 0 else 0.0))
+            for did, cos in order[:k]]
 
 
 def calibrate_cos(db: sqlite3.Connection, control: Sequence[str],

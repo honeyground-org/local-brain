@@ -119,6 +119,7 @@ def _row(r: dict, rank: Optional[int], via: str, shas: Dict[str, str], pids: Dic
         "evidence_age_days": (ev_age if (ev and isinstance(ev_age, int) and ev_age >= 0) else None),
         "file_age_days": r.get("age_days"),
         "stale": bool(r.get("stale")),
+        "feedback": r.get("feedback"),
         "lifecycle": r.get("lifecycle", {"status": "untracked", "current": None}),
         "excerpt": (r.get("excerpt") or "")[:shown],
         "excerpt_chars": shown,
