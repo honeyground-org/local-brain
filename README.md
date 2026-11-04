@@ -471,6 +471,10 @@ for any language.
 - **Scheduled jobs** — semantic indexing and rule discovery, once a day.
   `brain status` reads their logs to show the last run. On macOS the installer uses `launchd`
   (`install/launchd.sh`), which also catches up on runs that were due while the machine slept.
+- **Self-evolution signals** — an unhandled error in a hook, a session hook or a daily job is recorded
+  (where, exception class, brain frames; **never the message**) instead of vanishing behind the hook's
+  exit 0. In the default mode `local` nothing else happens; see
+  [Self-evolution](#self-evolution-personal-data-stays-public-code-is-gated).
 
 ---
 
@@ -688,6 +692,17 @@ small to measure), the hook stays silent rather than guess.
 ## Self-evolution: personal data stays, public code is gated
 
 brain improves in two layers, and the line between them is the point.
+
+**In short:**
+
+- **What your use teaches stays on your machine as data. Nothing personal is ever written into the code.**
+- **Off by default.** In mode `local` errors are only recorded; nothing is changed, pushed or sent anywhere.
+- **A fix leaves the machine only through five gates** (personal traces, language, all checks, a check that
+  reproduces the defect, an independent review) **and then the repository's own pull-request rules** — it
+  cannot skip the required checks or reviews.
+- **Every safeguard is itself checked:** `tests/verify_evolve.py` (49 checks) turns red when one is removed
+  (nine deliberate breakages, from switching off the personal-trace gate to fast-forwarding on any branch;
+  each one red).
 
 | Layer | What it holds | Where it lives | On by default |
 |---|---|---|---|
