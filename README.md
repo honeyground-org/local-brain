@@ -30,9 +30,14 @@ Update the checkout your installed launchers already use:
 
 ```bash
 git pull --ff-only origin main
+./install.sh --recommended     # or the flags you installed with — finished steps are skipped
 brain engines
 brain status
 ```
+
+Running the installer again is safe: it merges into existing settings, skips what is already in place,
+and picks up what a newer version added (for example the EmbeddingGemma service or a daily job whose
+engine you have since chosen).
 
 Your memory files, private configuration and index stay outside the tracked source. Back up the Brain
 home before changing embedding profiles. Existing macOS/Linux MCP servers reload changed Python code
@@ -112,20 +117,20 @@ reuse, a resident model with query priority, separate vector spaces and request-
 The selected Qdrant/Neo4j integrations continue to serve vector and graph retrieval. Existing notes
 and old model vectors are preserved when preparing a new profile.
 
-See [runtime setup](runtime/embeddinggemma/README.md) for the pinned model, dependencies, loopback
-service and manifest. Once the service is running and its manifest is available in the Brain home:
+Set it up with one command; it stops once at the Hugging Face terms that only you can accept and
+prints what to do (see *Defaults and what you can swap* under [Install](#install)):
 
 ```bash
-brain engines --set embed=embeddinggemma --model google/embeddinggemma-300m --base-url http://127.0.0.1:18081/v1
-brain vec build
-brain vec calibrate
-brain engines
+./install.sh --embed embeddinggemma     # or --recommended for Qdrant + Neo4j as well
+brain engines                           # embed → embeddinggemma, "ready"
+brain vec status                        # coverage, and gate_sample: proxy (or labelled)
 ```
 
-Start the service automatically with your OS service manager if you want semantic retrieval after a
-restart. Keep its model, manifest and cache outside the repository. Changing an existing embedding
-provider is an explicit user choice; installing/updating Brain does not silently switch everyone.
-A local service failure never triggers a paid-provider fallback.
+The installer keeps the runtime environment, the model cache and the manifest outside the repository,
+and registers the service with the platform's service manager, so it is back after a restart. To do the
+steps by hand instead, see [runtime setup](runtime/embeddinggemma/README.md). Changing an existing
+embedding provider is an explicit user choice; installing or updating Brain does not silently switch
+anyone. A local service failure never triggers a paid-provider fallback.
 
 **What has been checked:** model prompt parity, complete source-span planning, incremental reuse,
 backend retrieval and repeated latency diagnostics. These checks do not establish superiority over
@@ -490,17 +495,32 @@ for any language.
   nothing changed (previously each ran a full index and recalibration, about a minute of CPU apiece).
   Prompt hooks hand the same worker whatever they left for later. A hand-edited memory becomes
   available after the worker indexes it; explicit MCP operations retain their synchronous refresh path.
-- **Scheduled jobs** — semantic indexing and rule discovery, once a day.
-  `brain status` reads their logs to show the last run. On macOS the installer uses `launchd`
-  (`install/launchd.sh`), which also catches up on runs that were due while the machine slept.
+- **Meaning gate** — with a local embedding engine, every `vec build` (and the daily job) measures again
+  how close a note must be before it is offered, from your own notes. No labels are needed; a labelled
+  set (`brain eval-init` → `short.json`) replaces that measurement once you write one.
+- **Scheduled jobs** — semantic indexing (`brain-vec-daily`) and rule discovery (`brain-rules-daily`),
+  once a day. Each is registered only when its engine is chosen; without one, `brain status` shows it as
+  ⏸ off rather than stopped. `brain status` reads their logs to show the last run. The installer uses
+  `launchd` on macOS (it also catches up on runs that were due while the machine slept), Task Scheduler
+  on Windows, and cron on Linux.
+- **Embedding service** — with `embeddinggemma`, a background service on `127.0.0.1:18081` kept running
+  by the same service manager (launchd · Task Scheduler at sign-in · systemd `--user`).
 
 ---
 
 ## MCP
 
+The installer registers the server with every host it finds: `claude mcp add` for Claude Code and
+`codex mcp add` for Codex (when the `codex` program is installed; otherwise it prints the
+`config.toml` lines to paste). By hand:
+
 ```bash
 claude mcp add brain --scope user -- "$(pwd)/bin/brain-mcp"
+codex mcp add brain -- "$(pwd)/bin/brain-mcp"
 ```
+
+Codex runs hooks only after you approve them: start `codex` once after installing and accept the
+brain's hooks. Until then the MCP tools work and automatic recall does not.
 
 Tools: `recall` · `remember` · `neighbors` · `brain_status` · `brain_suggest` ·
 `brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view` · `brain_capabilities`
@@ -759,6 +779,21 @@ guard still refuses any threshold that does worse than the one in place. `brain 
 estimate, its uncertainty and whether it is still measuring. When there is no ruler at all (a corpus too
 small to measure), the hook stays silent rather than guess.
 
+**The meaning gate starts without labels.** Meaning-based search offers a note only when its similarity
+stands out from the question's other candidates by more than the gate. The gate is measured, never
+preset:
+
+| Sample | When | How |
+|---|---|---|
+| none | before the vectors cover 90 % of the corpus | silent — nothing is offered from meaning alone |
+| `proxy` | no labelled set | fragments cut from your own notes (should be found) against neutral probes (should not); the gate sits above all but 3 % of the probes (`BRAIN_EMBED_PROXY_NOISE`) |
+| `labelled` | `short.json` exists (`brain eval-init`) | your own questions and their right notes; the gate sits above every control |
+
+With a local engine it is measured again after every build, so it follows your notes as they change;
+with a paid engine it is re-measured after a build only from questions already embedded (no new calls),
+and in full when you run `brain vec calibrate`. The coverage point is `BRAIN_EMBED_ARM_AT` (0.9). `brain vec status` shows the value and its
+`gate_sample`. `BRAIN_EMBED_MIN_RATIO` pins it by hand.
+
 ---
 
 ## Tests
@@ -771,7 +806,7 @@ Two kinds live side by side. Most run anywhere on fixtures (`verify_host_neutral
 **your own** notes, labelled questions or session history — on a machine without them they stop with
 **exit code 77 (skipped)** and say what is missing, rather than pass on nothing or fail for no reason.
 `python3 tests/clean_room.py` runs every check the way CI does — the tracked files copied into an
-empty folder, a fresh empty home for each check. Measured 2026-10-10 on macOS: 44 green, 16 skipped,
+empty folder, a fresh empty home for each check. Measured 2026-11-05 on macOS: 66 green, 17 skipped,
 0 red (with a local Qdrant running; without one, the live store check is one more skip). CI runs it on
 Linux, macOS and Windows with Python 3.8 – 3.13, and supplies Qdrant, Neo4j and Docker so nothing that
 matters is skipped there.
@@ -783,6 +818,7 @@ python3 tests/verify_reachability.py    # "still reachable after removal from th
 python3 tests/verify_vs_grep.py         # side by side with grep, on the same words
 python3 tests/verify_related.py         # the graph must not steal the answer's slot
 python3 tests/verify_vectors.py         # semantic search: 3 harm checks + 1 usefulness
+python3 tests/verify_vec_proxy_gate.py  # the meaning gate is measured without labels, and never too early
 python3 tests/verify_guard.py           # every behaviour rule actually fires
 python3 tests/verify_engines.py         # each AI engine adapter, and that a stray key chooses nothing
 python3 tests/verify_ruledisc.py        # does discovery re-find the hand-written rules?
@@ -790,6 +826,7 @@ python3 tests/verify_privacy.py         # intercepts HTTP and inspects the real 
 python3 tests/verify_i18n.py            # translations do not rot silently
 python3 tests/verify_english_only.py    # no Korean left in any shipping file
 python3 tests/verify_first_day.py       # someone else's first day: install, index, every screen renders
+python3 tests/verify_install_portability.py  # paths with spaces, folder case, the gated model, jobs follow engines
 python3 tests/verify_measure_isolation.py  # a measurement never changes the index under anyone else
 python3 tests/verify_server_refresh.py  # a long-running MCP server answers with the code on disk
 python3 tests/verify_stores.py          # vector and graph databases are replaceable: sync, diff, fallback
@@ -817,6 +854,13 @@ python3 tests/verify_pr_report.py       # the pull-request rules, the review gat
 | `brain/vecstore.py` | Vector stores — the local scan and Qdrant |
 | `brain/graphstore.py` | Graph stores — the local link table and Neo4j |
 | `brain/dockerstores.py` | Qdrant and Neo4j in Docker, with the data in folders of your own |
+| `brain/vectors.py` | Meaning-based search — chunks, vectors, and the gate measured from your notes |
+| `brain/proxy.py` | The label-free sample — fragments of your notes against neutral probes |
+| `brain/engines.py` | AI engine adapters (embed · judge) and which one fills each role |
+| `brain/embedruntime.py` | One-command EmbeddingGemma setup — environment, pinned model, service |
+| `brain/scheduler.py` | Daily jobs and background services — launchd · Task Scheduler · systemd / cron |
+| `brain/install.py` | The installer behind `install.sh` — the same on macOS, Windows and Linux |
+| `runtime/embeddinggemma/` | The local model service (its own Python 3.11+ environment, never the core's) |
 | `brain/server.py` | MCP over stdio (JSON-RPC, no SDK); refreshes itself when the code on disk changes |
 | `brain/cli.py` | Terminal entry point — same core as the server |
 | `config.json` | Single source of truth for what gets indexed. A new corpus is one entry |
