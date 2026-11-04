@@ -508,7 +508,11 @@ def measure(db: sqlite3.Connection) -> dict:
 #   37 (2026-10-29)  `recall(scope=)` keeps a project's own memories and the unscoped ones (docs.project_id,
 #       declared in a memory's frontmatter, schema 5) across the word, graph and meaning lanes; without a scope
 #       nothing changes. Bumped because `store` and `search` changed.
-CODE_GENERATION = 40
+#   41 (2026-11-04)  the meaning gate is measured without labels when a person has none: the proxy sample
+#       (§proxy) stands in, with the top 3% of controls allowed above the gate (§vectors.PROXY_NOISE_SHARE), and
+#       a local engine re-measures by embedding what is missing. A labelled sample is used exactly as before.
+#       Bumped because `vectors` changed.
+CODE_GENERATION = 41
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

@@ -18,7 +18,8 @@ The right knowledge at the right moment, so work gets more efficient and your ag
 
 ```bash
 git clone https://github.com/honeyground-org/local-brain ~/tools/local-brain
-cd ~/tools/local-brain && ./install.sh --with-hook --with-guard
+cd ~/tools/local-brain && ./install.sh --with-hook --with-guard   # minimal: Python only, nothing else
+cd ~/tools/local-brain && ./install.sh --recommended              # reference stack: Qdrant + Neo4j + EmbeddingGemma, all local
 ```
 
 ---
@@ -333,7 +334,7 @@ All commands work from any directory once installed (`brain <command>`).
 |---|---|
 | `brain engines` | Which AI engine fills each role (embed · judge), what it is sent, how to change it |
 | `brain stores` | Which database serves vector search and the graph (the local copy · any backend in `brain/backends/`); `--sync` · `--check` |
-| `brain vec status\|build\|calibrate\|search` | Meaning-based search via remote embeddings; `calibrate` also re-measures the judge |
+| `brain vec status\|build\|calibrate\|search` | Meaning-based search; `build` re-measures the gate when the engine is local, `calibrate` measures it now (from your labelled set when there is one, otherwise from your notes) and re-measures the judge when labelled |
 | `brain calibrate` | Re-measure the lexical threshold against this corpus |
 | `brain eval-init` | Draft an evaluation set from *your* history (someone else's gold is theirs) |
 
@@ -555,6 +556,52 @@ The server also picks up new code on disk by itself: after an update there is no
 
 ## Install
 
+### Defaults and what you can swap
+
+Every part below has a default that needs nothing but Python, a recommended local choice that the
+installer sets up for you, and alternatives you can switch to at any time. Each role is chosen on its own,
+and the local SQLite copy always stays, so a database or engine that goes away never breaks recall.
+
+| Role | Works out of the box | Recommended (all local, `--recommended`) | Alternatives |
+|---|---|---|---|
+| Index and word search | SQLite (standard library) | same | — |
+| Meaning-based search (`embed`) | off — word search only | **`embeddinggemma`**: `google/embeddinggemma-300m` on this machine | `gemini` · `openai` · any OpenAI-compatible server (Ollama, LM Studio, vLLM) · `none` |
+| Vector database (`vector`) | the local SQLite copy | **Qdrant** in Docker | `chroma` · `pgvector` · `milvus` · any of them at a URL you already run |
+| Graph database (`graph`) | the local SQLite copy | **Neo4j** in Docker | `memgraph` · a server you already run |
+| Candidate judge (`judge`) | off | off | `gemini` · `openai` · `anthropic` · OpenAI-compatible |
+| Scheduler for daily jobs | detected: launchd (macOS) · Task Scheduler (Windows) · systemd user / cron (Linux) | same | `BRAIN_SCHEDULER=…` |
+| Host | detected: Claude Code · Codex | both | any MCP client (`brain-mcp`) |
+
+```bash
+./install.sh --recommended          # = --all --stores docker --embed embeddinggemma
+```
+
+What `--recommended` does, and the one step it cannot do for you:
+
+1. **Docker** starts Qdrant and Neo4j with their data under the brain's home. No Docker → a warning,
+   and both roles keep answering from the local copy.
+2. **EmbeddingGemma** gets its own Python 3.11+ environment under the brain's home (with `uv` when it is
+   installed, otherwise any Python 3.11+ on the machine), never touching the core's Python.
+3. ⛔ **The model is gated.** Google asks each person to accept its terms on Hugging Face, so the installer
+   stops here once and prints exactly what to do:
+   1. accept the terms at <https://huggingface.co/google/embeddinggemma-300m>
+   2. create a *read* token at <https://huggingface.co/settings/tokens>
+   3. run the `hf auth login` command it prints (the `hf` program inside that environment)
+
+   Then run `./install.sh --recommended` again. Finished steps are skipped.
+4. The pinned model revision (about 1.2 GB) is downloaded once, and a background service is registered
+   with the platform's service manager (launchd · Task Scheduler · systemd user). It answers on
+   `127.0.0.1:18081` only, starts at sign-in and restarts after a crash.
+5. The vectors are built and the vector database is filled. The **meaning gate** (how close a note must
+   be before it is offered) is measured from your own notes with no labels needed, and is measured
+   again whenever the notes change (`brain vec status` shows `gate_sample`). If you later write a labelled
+   evaluation set (`brain eval-init`), that set replaces the label-free measurement.
+
+To swap a part later: `brain engines --set embed=…` (then `brain vec build`), or
+`brain stores --set vector=… --url …` / `--docker graph=…` (then `brain stores --sync`).
+
+### Other ways to install
+
 ```bash
 ./install.sh                            # detect → config → index → register MCP → verify
 ./install.sh --with-hook --with-guard   # fully local: no AI engine, nothing leaves the machine
@@ -576,7 +623,7 @@ which model fills each one — or none:
 
 | Role | What it does | What it is sent | Used by | Engines |
 |---|---|---|---|---|
-| `embed` | turns notes and questions into vectors, so a question finds a note written in other words | note chunks (≤1200 chars) and each searched question | meaning-based search | `gemini` · `openai` (or any OpenAI-compatible server) · `none` |
+| `embed` | turns notes and questions into vectors, so a question finds a note written in other words | note chunks (≤1200 chars) and each searched question | meaning-based search | `embeddinggemma` (local, nothing leaves) · `gemini` · `openai` (or any OpenAI-compatible server) · `none` |
 | `judge` | reads a question and up to 20 candidate notes and scores 0–10 whether each one answers it | the question and candidate excerpts (≤420 chars each) | two-stage recall when word search is silent · `brain score --full` · behaviour-rule discovery | `gemini` · `openai` (or any OpenAI-compatible server) · `anthropic` · `none` |
 
 Secret-looking values are masked before anything is sent (`brain privacy`).

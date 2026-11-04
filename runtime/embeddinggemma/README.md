@@ -20,6 +20,17 @@ All other runtime code and all `brain/` modules remain subject to the standard-l
 
 ## Prepare the runtime and model
 
+**One command does all of this** — environment, pinned model, background service and engine choice —
+and stops once, with the exact next step, at the Hugging Face terms that only a person can accept:
+
+```sh
+./install.sh --embed embeddinggemma     # or ./install.sh --recommended
+python3 -m brain.embedruntime            # the same steps on their own; prints a JSON status
+```
+
+It keeps the environment under the brain's home (`<home>/runtime/embeddinggemma/venv`), not in the
+checkout. The manual steps below are what it runs, for a machine where you want to do them yourself.
+
 From the repository root:
 
 ```sh

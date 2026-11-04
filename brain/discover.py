@@ -40,6 +40,26 @@ SKIP_DIRS = {
 TEXT_EXT = (".md", ".markdown", ".txt", ".mdx")
 
 # Candidate roots — walking starts here. Absent, it is skipped quietly.
+def _true_case(path: str) -> str:
+    """The path ★as the disk spells it★. ⛔ On a case-insensitive disk `~/development` exists when the
+    folder is `~/Development`, and that spelling was written to config.json — every path shown and every
+    git-root comparison then disagreed with the one the person sees (measured 2026-11-04)."""
+    parent, name = os.path.split(path.rstrip(os.sep))
+    if not name or parent == path:
+        return path
+    try:
+        entries = os.listdir(parent)
+    except OSError:
+        return path
+    if name in entries:
+        return os.path.join(_true_case(parent), name)
+    low = name.lower()
+    for e in entries:
+        if e.lower() == low:
+            return os.path.join(_true_case(parent), e)
+    return path
+
+
 def candidate_roots() -> List[str]:
     names = ["work", "development", "dev", "projects", "Projects", "src", "repos",
              "code", "Documents", "notes", "Notes", "Dropbox", "obsidian",
@@ -56,6 +76,7 @@ def candidate_roots() -> List[str]:
     for p in out:
         if not os.path.isdir(p):
             continue
+        p = _true_case(p)
         try:
             key = os.stat(p).st_ino
         except OSError:

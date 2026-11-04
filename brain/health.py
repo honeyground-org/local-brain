@@ -490,6 +490,18 @@ SCHEDULED = (
 )
 
 
+# Which engine a job works with — no engine, nothing for it to do (§schedules · §install.step_schedule).
+JOB_ENGINE = {"brain-vec-daily": "embed", "brain-rules-daily": "judge"}
+
+
+def _engine_unset(role: str) -> bool:
+    try:
+        from brain import engines
+        return engines.choice(role)["provider"] == "none"
+    except Exception:                                    # noqa: BLE001 — unknown is not "off"
+        return False
+
+
 def _log_path(tpl: str) -> str:
     """Expand `{home}` to the current home. The old `~/...` spelling is still accepted."""
     if "{home}" in tpl:
@@ -682,8 +694,14 @@ def schedules(now: float = 0.0, _probe=None, _jobs=None) -> dict:
     # ⛔ `_probe` and `_jobs` are ★injection points for tests★ — this judgement is tied to the real
     #    scheduler and real file ages, and without injection there is no way to measure "did it really block a false green".
     probe = _probe or _launchd
-    out = []
+    out, off = [], []
     for name, log_tpl, what, every, label in (_jobs or SCHEDULED):
+        # ⛔ A job whose engine nobody chose has nothing to do, so it is ★off★, not ★stopped★ — it showed
+        #    as ❌ on every fresh install without a judge (measured 2026-11-04). Not under test injection.
+        needs = JOB_ENGINE.get(name) if _jobs is None else None
+        if needs and _engine_unset(needs):
+            off.append({"job": name, "what": i18n.t(what), "needs": needs})
+            continue
         log = _log_path(log_tpl)                     # ⛔ the home is decided by §store.brain_home
         ld = probe(label)
         ran = _age(log)
@@ -766,7 +784,7 @@ def schedules(now: float = 0.0, _probe=None, _jobs=None) -> dict:
         out.append(row)
 
     bad = [r for r in out if not r["ok"]]
-    return {"jobs": out, "stale": len(bad),
+    return {"jobs": out, "off": off, "stale": len(bad),
             "meaning": "if the scheduled jobs stop, ★the entire self-improving layer stops★ "
                        "(ingest · rule discovery · lexicon self-assessment · threshold calibration) — "
                        "⛔ green means ★the scheduler ran it★, not that the log is fresh"}

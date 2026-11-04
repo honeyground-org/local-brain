@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import re
 import sys
 from typing import Dict, List, Optional
@@ -561,8 +562,14 @@ class Codex(Host):
         #    ★this python and the module★ rather than `cmd`: it must not depend on what is on PATH.
         #    ⛔ Not `-m brain.server`: Codex starts it in the project folder, and `-m` runs a `brain/` found
         #    there instead (§launch).
+        #    ★When the `codex` program is here, it registers the server itself★ (`codex mcp add`, measured
+        #    2026-11-04 with codex-cli 0.166) — it writes config.toml with its own parser, so nothing is
+        #    merged by us and nobody has to paste. The snippet stays for a machine without the program.
         from brain import launch
         av = launch.argv("brain.server")
+        if shutil.which("codex"):
+            return {"check": ["codex", "mcp", "get", "brain"],
+                    "add": ["codex", "mcp", "add", "brain", "--"] + av}
         return {"file": os.path.join(self.root(), "config.toml"),
                 "snippet": ["[mcp_servers.brain]", "command = %s" % json.dumps(av[0]),
                             "args = %s" % json.dumps(av[1:])]}

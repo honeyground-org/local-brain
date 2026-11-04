@@ -855,19 +855,29 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
             for did, cos in order[:k]]
 
 
+def _ceiling(values: Sequence[float], allow: int) -> float:
+    """The value only `allow` of `values` may exceed — the maximum when `allow` is 0."""
+    ordered = sorted(values, reverse=True)
+    return ordered[allow] if len(ordered) > allow else 0.0
+
+
 def calibrate_cos(db: sqlite3.Connection, control: Sequence[str],
                   positives: Sequence[Tuple[str, str]],
-                  margin: float = 0.01, save: bool = True) -> dict:
+                  margin: float = 0.01, save: bool = True,
+                  allow_noise: int = 0, kind: str = "labelled") -> dict:
     """Set the gate ★from a control group★ — the same method used for the BM25 threshold.
 
-    control    real talk needing no memory (surfacing here is noise) → the maximum of their ★ratio★
-    positives  (question, gold memory name) → how many survive above that threshold
+    control      real talk needing no memory (surfacing here is noise) → the ceiling of their ★ratio★
+    positives    (question, gold memory name) → how many survive above that threshold
+    allow_noise  how many controls may still sit above the gate. 0 (a labelled sample) is the maximum;
+                 a label-free sample allows a small share (§PROXY_NOISE_SHARE) because one control
+                 alone could otherwise decide the gate.
+    kind         "labelled" or "proxy" — recorded with the gate so `brain vec status` can say which.
     ⛔ The absolute cosine is reported too, but ★the gate is the ratio★.
     """
     from brain import search as _search
     ctrl = []
-    agree_noise = 0.0
-    agreeing = 0
+    agree_ratios: List[float] = []
     for q in control:
         hits = search(db, q, k=1)
         ctrl.append((hits[0][2] if hits else 0.0, hits[0][1] if hits else 0.0))
@@ -875,10 +885,11 @@ def calibrate_cos(db: sqlite3.Connection, control: Sequence[str],
         #   (§search.agreed). Measured apart from the single-lane maximum: on 2026-11-02 the lanes agreed on
         #   2 of 32 silent controls (ratios up to 1.19) while the single-lane maximum sat at 1.40.
         for r in _search.agreed(db, q, k=AGREE_N, min_ratio=0.0):
-            agreeing += 1
-            agree_noise = max(agree_noise, float(r.get("ratio") or 0.0))
-    noise_ratio = max((r for r, _ in ctrl), default=0.0)
-    noise_cos = max((c for _, c in ctrl), default=0.0)
+            agree_ratios.append(float(r.get("ratio") or 0.0))
+    agreeing = len(agree_ratios)
+    noise_ratio = _ceiling([r for r, _ in ctrl], allow_noise)
+    noise_cos = _ceiling([c for _, c in ctrl], allow_noise)
+    agree_noise = _ceiling(agree_ratios, allow_noise)
     thr = round(noise_ratio + margin, 4)
     thr_agree = round(agree_noise + margin, 4)
 
@@ -902,7 +913,8 @@ def calibrate_cos(db: sqlite3.Connection, control: Sequence[str],
         store.set_meta(db, calibration_key("vec_agree_min_ratio"), str(thr_agree))
         store.set_meta(db, calibration_key("vec_min_cos"), str(round(noise_cos + 0.01, 4)))
         store.set_meta(db, calibration_key("vec_model"), "%s/%s/%d" % (PROVIDER, model_tag(), DIM))
-    return {"gate": "ratio", "min_ratio": thr,
+        store.set_meta(db, calibration_key("vec_gate_kind"), kind)
+    return {"gate": "ratio", "kind": kind, "allow_noise": allow_noise, "min_ratio": thr,
             "noise_ratio_max": round(noise_ratio, 4),
             "noise_cos_max": round(noise_cos, 4),
             "positives_top1": top1, "positives_top3": top3,
@@ -929,30 +941,87 @@ def calibrate_cos(db: sqlite3.Connection, control: Sequence[str],
 MIN_COVERAGE_TO_ARM = float(os.environ.get("BRAIN_EMBED_ARM_AT", "0.9") or 0.9)
 
 
-def recalibrate_if_free(db: sqlite3.Connection) -> Optional[dict]:
-    """Re-measure the gate from the cached control group alone — ★it spends no money★. None if it cannot."""
+# ★A gate from day one, with no labels★ (2026-11-04)
+#
+# Until now the gate was measured only from a person's ★labelled★ sample (`tests/eval/short.json`). A new
+# installation has none, so the gate stayed at its silent fallback (99): the vectors were built, the
+# database was synced, and meaning-based recall still added nothing — on every machine, indefinitely.
+# Measured on a 178-document corpus (EmbeddingGemma, 2026-11-04): ranking was right (the paraphrase
+# "don't kill processes carelessly" found its memory first), yet `brain vec search` answered nothing.
+#
+# The lexical ruler already solved the same problem with a sample cut out of the person's own documents
+# (§brain/proxy.py). The meaning gate now starts from that sample and re-measures as the corpus moves;
+# the moment a labelled sample exists it takes over, unchanged.
+#
+# ⛔ One control may not decide the gate. On that corpus one English neutral probe scored 1.75 against
+#    Korean notes while the next was 1.35: with the plain maximum the gate let ★2 of 60★ proxy questions
+#    through; with the top 3% of controls allowed above it, 12 of 60, and 1 of 38 controls fired.
+#    A labelled sample keeps the plain maximum (allow 0) — that is the person's own judgement.
+PROXY_NOISE_SHARE = float(os.environ.get("BRAIN_EMBED_PROXY_NOISE", "0.03") or 0.03)
+
+
+def gate_sample(db: sqlite3.Connection) -> Tuple[List[str], List[Tuple[str, str]], str]:
+    """(controls, positives, kind) for the gate — the labelled sample first, else the proxy, else none."""
     import json as _json
-    import os as _os
     from brain import evalinit as _evalinit
-    path = _os.path.join(_evalinit.eval_dir(), "short.json")
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(os.path.join(_evalinit.eval_dir(), "short.json"), encoding="utf-8") as fh:
             d = _json.load(fh)
+        ctrl = [c["q"] if isinstance(c, dict) else c for c in d.get("C_no_memory_needed", [])]
+        pos = [(c["q"], c["gold"]) for c in d.get("A_memory_needed", []) if c.get("gold")]
+        if ctrl and pos:
+            return ctrl, pos, "labelled"
     except (OSError, ValueError):
+        pass
+    try:
+        from brain import proxy
+        pa, pc = proxy.sample(db)
+        if len(pa) >= proxy.MIN_A and pc:
+            return list(pc), list(pa), "proxy"
+    except Exception:                                    # noqa: BLE001 — a corpus too small is not an error
+        pass
+    return [], [], "none"
+
+
+def embedding_is_free() -> bool:
+    """True when embedding a query costs nothing and sends nothing: a model on this machine."""
+    if PROVIDER in ("embeddinggemma", "stub"):
+        return True
+    return endpoint_host() in ("", "127.0.0.1", "localhost", "::1")
+
+
+def recalibrate_if_free(db: sqlite3.Connection) -> Optional[dict]:
+    """Re-measure the gate — ★without spending money★. None if it cannot.
+
+    A remote engine re-measures only from cached query embeddings (the questions do not change, only the
+    corpus does). A local engine embeds whatever is missing, because that is free.
+    """
+    if PROVIDER == "none":
         return None
-    ctrl = [c["q"] if isinstance(c, dict) else c
-            for c in d.get("C_no_memory_needed", [])]
-    pos = [(c["q"], c["gold"]) for c in d.get("A_memory_needed", []) if c.get("gold")]
+    ctrl, pos, kind = gate_sample(db)
     if not ctrl or not pos:
-        return None
-    # ★All★ of them must be cached — using only some narrows the control group and sets the threshold low
-    if any(_qcache_get(db, q) is None for q in ctrl):
         return None
     cov = coverage(db)
     if not cov["docs"] or cov["embedded"] / cov["docs"] < MIN_COVERAGE_TO_ARM:
         return None
-    have_pos = [(q, g) for q, g in pos if _qcache_get(db, q) is not None]
-    return calibrate_cos(db, ctrl, have_pos, save=True)
+    if not embedding_is_free():
+        # ★All★ of them must be cached — using only some narrows the control group and sets the threshold low
+        if any(_qcache_get(db, q) is None for q in ctrl):
+            return None
+        pos = [(q, g) for q, g in pos if _qcache_get(db, q) is not None]
+    allow = 0 if kind == "labelled" else int(len(ctrl) * PROXY_NOISE_SHARE)
+    return calibrate_cos(db, ctrl, pos, save=True, allow_noise=allow, kind=kind)
+
+
+def gate_kind(db: sqlite3.Connection) -> str:
+    """Which sample set the gate in use: "labelled", "proxy", or "none" (silent, not measured)."""
+    if min_ratio(db) >= MIN_RATIO_FALLBACK:
+        return "none"
+    try:
+        from brain import store
+        return store.get_meta(db, calibration_key("vec_gate_kind")) or "labelled"
+    except Exception:                                    # noqa: BLE001
+        return "labelled"
 
 
 def warm_control_cache(db: sqlite3.Connection, limit: int = 80) -> dict:
@@ -962,16 +1031,10 @@ def warm_control_cache(db: sqlite3.Connection, limit: int = 80) -> dict:
     control group and sets the threshold low). That cache is filled once and is free forever after — the
     queries do not change, only the corpus does. A few % of one day's share ★makes re-calibration free forever★.
     """
-    import json as _json
-    import os as _os
-    from brain import evalinit as _evalinit
-    try:
-        with open(_os.path.join(_evalinit.eval_dir(), "short.json"), encoding="utf-8") as fh:
-            d = _json.load(fh)
-    except (OSError, ValueError):
+    ctrl, pos, _kind = gate_sample(db)
+    if not ctrl:
         return {"warmed": 0, "missing": 0}
-    qs = [c["q"] if isinstance(c, dict) else c for c in d.get("C_no_memory_needed", [])]
-    qs += [c["q"] for c in d.get("A_memory_needed", []) if c.get("gold")]
+    qs = list(ctrl) + [q for q, _ in pos]
     todo = [q for q in dict.fromkeys(qs) if _qcache_get(db, q) is None][:limit]
     done = 0
     for q in todo:

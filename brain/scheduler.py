@@ -53,6 +53,16 @@ class Scheduler:
                 log: str) -> dict:
         return {"ok": False, "why": "this platform has no scheduler"}
 
+    def install_service(self, label: str, command: List[str], log: str) -> dict:
+        """Keep `command` running: start it now, at every sign-in, and again if it exits with an error.
+
+        ⛔ (2026-11-04) The optional embedding service is a long-running process. Without this, it had
+           to be started by hand after every reboot, and meaning-based recall stopped silently until then.
+        """
+        if os.name == "posix" and sys.platform != "darwin":
+            return _systemd_user_service(label, command, log)   # Linux without crontab still has systemd
+        return {"ok": False, "why": "this platform has no service manager"}
+
     def info(self) -> dict:
         return {"name": self.name, "label": self.label,
                 "evidence": self.evidence, "available": self.available()}
@@ -127,6 +137,36 @@ class Launchd(Scheduler):
                 "why": (p.stderr or "").strip()[:120]}
 
 
+def _launchd_service(label: str, command: List[str], log: str) -> dict:
+    plist = os.path.expanduser("~/Library/LaunchAgents/%s.plist" % label)
+    args = "".join("    <string>%s</string>\n" % _xml(a) for a in command)
+    body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+            '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            '<plist version="1.0"><dict>\n'
+            '  <key>Label</key><string>%s</string>\n'
+            '  <key>ProgramArguments</key><array>\n%s  </array>\n'
+            '  <key>RunAtLoad</key><true/>\n'
+            '  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n'
+            '  <key>StandardOutPath</key><string>%s</string>\n'
+            '  <key>StandardErrorPath</key><string>%s</string>\n'
+            '</dict></plist>\n' % (_xml(label), args, _xml(log), _xml(log)))
+    try:
+        os.makedirs(os.path.dirname(plist), exist_ok=True)
+        with open(plist, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        subprocess.run(["launchctl", "bootout", "gui/%d/%s" % (os.getuid(), label)],
+                       capture_output=True, timeout=TIMEOUT)
+        p = subprocess.run(["launchctl", "bootstrap", "gui/%d" % os.getuid(), plist],
+                           capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:          # noqa: BLE001
+        return {"ok": False, "why": str(exc)[:120]}
+    return {"ok": p.returncode == 0, "path": plist, "why": (p.stderr or "").strip()[:120]}
+
+
+Launchd.install_service = staticmethod(_launchd_service)  # type: ignore[assignment]
+
+
 class Schtasks(Scheduler):
     """Windows Task Scheduler. ★Gives the last-run time and result — no count.★"""
 
@@ -175,6 +215,44 @@ class Schtasks(Scheduler):
         return {"ok": p.returncode == 0, "why": (p.stderr or p.stdout or "").strip()[:120]}
 
 
+def _schtasks_service(label: str, command: List[str], log: str) -> dict:
+    quoted = " ".join('"%s"' % a if " " in a else a for a in command)
+    wrapped = 'cmd /c %s >> "%s" 2>&1' % (quoted, log)
+    try:
+        p = subprocess.run(["schtasks", "/create", "/tn", label, "/tr", wrapped, "/sc", "onlogon", "/f"],
+                           capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
+        if p.returncode == 0:
+            subprocess.run(["schtasks", "/run", "/tn", label], capture_output=True, timeout=TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:          # noqa: BLE001
+        return {"ok": False, "why": str(exc)[:120]}
+    return {"ok": p.returncode == 0, "why": (p.stderr or p.stdout or "").strip()[:120]}
+
+
+Schtasks.install_service = staticmethod(_schtasks_service)  # type: ignore[assignment]
+
+
+def _systemd_user_service(label: str, command: List[str], log: str) -> dict:
+    """Linux: a systemd user unit (restarts on failure, starts at sign-in)."""
+    if not _which("systemctl"):
+        return {"ok": False, "why": "no systemd — start it yourself: %s" % " ".join(command)}
+    unit_dir = os.path.expanduser("~/.config/systemd/user")
+    unit = os.path.join(unit_dir, "%s.service" % label)
+    q = " ".join('"%s"' % a.replace('"', '\\"') if " " in a else a for a in command)
+    body = ("[Unit]\nDescription=%s\n\n[Service]\nExecStart=%s\nRestart=on-failure\n"
+            "StandardOutput=append:%s\nStandardError=append:%s\n\n[Install]\nWantedBy=default.target\n"
+            % (label, q, log, log))
+    try:
+        os.makedirs(unit_dir, exist_ok=True)
+        with open(unit, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, timeout=TIMEOUT)
+        p = subprocess.run(["systemctl", "--user", "enable", "--now", "%s.service" % label],
+                           capture_output=True, text=True, errors="replace", timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:          # noqa: BLE001
+        return {"ok": False, "why": str(exc)[:120]}
+    return {"ok": p.returncode == 0, "path": unit, "why": (p.stderr or "").strip()[:120]}
+
+
 class Cron(Scheduler):
     """Linux etc. ⛔ ★crontab keeps no run history★ — it only knows whether it's registered."""
 
@@ -202,6 +280,9 @@ class Cron(Scheduler):
                     out["at"] = (int(m.group(2)), int(m.group(1)))
                 break
         return out
+
+
+Cron.install_service = staticmethod(_systemd_user_service)  # type: ignore[assignment]
 
 
 def _which(name: str) -> bool:
