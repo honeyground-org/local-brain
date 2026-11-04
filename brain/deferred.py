@@ -20,6 +20,7 @@ from typing import List
 PENDING = "deferred_work"        # meta key: {"work": [...], "since": epoch, "n": marks so far}
 LOCK = "deferred.lock"
 STALE_SEC = 600                  # recovery grace for an ownerless legacy lock, not a live worker timeout
+HANDOVER_WAIT = 10.0              # seconds a started worker waits for the lease guard; hooks never wait
 _TOKEN = ""
 
 
@@ -98,9 +99,29 @@ def _lock_path() -> str:
     return os.path.join(store.brain_home(), LOCK)
 
 
+def _try_guard(fh) -> bool:
+    if os.name == "nt":
+        import msvcrt
+        if os.fstat(fh.fileno()).st_size == 0:
+            fh.write(b"0")
+            fh.flush()
+        fh.seek(0)
+        try:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    import fcntl
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
 @contextmanager
-def _lease_guard():
-    """Serialise lease inspection/replacement without waiting in the hook.
+def _lease_guard(wait: float = 0.0):
+    """Serialise lease inspection/replacement. Hooks never wait (`wait=0`); a started worker does.
 
     The guard file is never unlinked: every process locks the same inode. The OS
     releases the advisory lock even when its owner dies during lease recovery.
@@ -108,27 +129,16 @@ def _lease_guard():
     fh = open(_lock_path() + ".guard", "a+b")
     held = False
     try:
-        if os.name == "nt":
-            import msvcrt
-            if os.fstat(fh.fileno()).st_size == 0:
-                fh.write(b"0")
-                fh.flush()
-            fh.seek(0)
-            try:
-                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                held = True
-            except OSError:
-                pass
-        else:
-            import fcntl
-            try:
-                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                held = True
-            except OSError:
-                pass
+        end = time.monotonic() + wait
+        while True:
+            held = _try_guard(fh)
+            if held or time.monotonic() >= end:
+                break
+            time.sleep(0.02)
         yield held
     finally:
         if held and os.name == "nt":
+            import msvcrt
             fh.seek(0)
             msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
         fh.close()
@@ -404,7 +414,10 @@ def main() -> int:
     seconds = budget()
     inherited = os.environ.get("BRAIN_DEFERRED_LOCKED", "")
     if inherited:
-        with _lease_guard() as held:
+        # ★Wait for the guard★ — a session start checking the lease holds it for a moment. Giving up at once left
+        # the lease naming this process after it exited without working, so the next start took the lease over and
+        # started a second worker, or the work waited for the next start (CI, ten starts at once, 2026-11-03).
+        with _lease_guard(HANDOVER_WAIT) as held:
             if not held or _owner().get("token") != inherited:
                 return 3
             _TOKEN = inherited

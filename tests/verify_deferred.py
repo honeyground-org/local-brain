@@ -214,6 +214,34 @@ def main() -> int:
     check("⑧ failed worker does not respawn immediately", not deferred.kick(db))
     time.sleep(0.25)  # the injected worker budget also caps its cooldown
     check("⑧ unfinished work resumes after a timeout", deferred.kick(db) and wait_cleared(_TMP))
+    # A started worker meets a session start that is checking the lease (it holds the guard for a moment).
+    # It must wait and take over, not exit unworked and leave the lease naming a dead process (CI 2026-11-03:
+    # a second worker, or the work left for the next session start).
+    import threading
+    from brain import launch
+    deferred.mark(db, ["sync"])
+    check("⑨ the starter takes the lease for its worker", deferred._take_lock())
+    token = deferred._TOKEN
+    holding, release = threading.Event(), threading.Event()
+
+    def hold():
+        with deferred._lease_guard() as held:
+            if held:
+                holding.set()
+            release.wait(10)
+    holder = threading.Thread(target=hold)
+    holder.start()
+    holding.wait(5)
+    worker = subprocess.Popen(launch.argv("brain.deferred"), cwd=ROOT,
+                              env=dict(os.environ, BRAIN_DEFERRED_LOCKED=token))
+    time.sleep(2.0)                                       # the worker is up and meets the held guard
+    release.set()
+    holder.join()
+    code = worker.wait(timeout=60)
+    deferred._TOKEN = ""
+    check("⑨ a worker that meets a held guard waits, takes over and does the work",
+          code == 0 and not deferred.pending(db) and not os.path.exists(deferred._lock_path()),
+          "exit %s · pending %s · lease %s" % (code, deferred.pending(db), os.path.exists(deferred._lock_path())))
     db.close()
 
     print("=" * 78)
