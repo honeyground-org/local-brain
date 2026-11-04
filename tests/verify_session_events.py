@@ -176,8 +176,12 @@ def main() -> int:
     results = [json.loads(p.communicate()[0] or "{}") for p in procs]
     kicked = sum(1 for r in results if r.get("kicked"))
     skipped = sum(1 for r in results if r.get("skipped"))
-    check("③ ten starts at once → at most one worker started", kicked <= 1 and kicked + skipped + sum(1 for r in results if not r.get("reasons")) >= 9,
-          "kicked %d · skipped %d" % (kicked, skipped))
+    running = sum(1 for r in results if r.get("running"))
+    idle = sum(1 for r in results if not r.get("reasons") and not r.get("skipped"))
+    # Each start is accounted for exactly once: it started the worker, another start was checking, the worker it
+    # would start was already running, or there was nothing to do (one may be lost to the timing of the test).
+    check("③ ten starts at once → at most one worker started", kicked <= 1 and kicked + skipped + running + idle >= 9,
+          "kicked %d · skipped %d · running %d · nothing to do %d" % (kicked, skipped, running, idle))
     check("③ the change is indexed once and the worker finishes", wait_idle())
     db.close()
     db = store.connect()

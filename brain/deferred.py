@@ -400,6 +400,8 @@ def on_session_start(db) -> dict:
                 pass
             if out["reasons"]:
                 out["kicked"] = kick(db, scan=True)
+                if not out["kicked"] and _alive(int(_owner().get("pid") or 0)):
+                    out["running"] = True       # a worker started by another session start does this work
     out["secs"] = round(time.time() - t0, 3)
     try:
         observe.write("session_start", out)
