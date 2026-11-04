@@ -214,9 +214,13 @@ def _vec_body(out: TextIO) -> bool:
                           "daily_quota_reached": st.get("daily_quota_reached"),
                           "before": before, "after": after,
                           "seconds": st["seconds"]}, ensure_ascii=False) + "\n")
-    if after["stale"] == 0:
-        out.write("★fully complete★ — now set the threshold with `brain vec calibrate` and "
-                  "measure quality with `tests/verify_vectors.py`.\n")
+    gate = vectors.recalibrate_if_free(db)               # the gate follows the corpus (§recalibrate_if_free)
+    if gate:
+        out.write(json.dumps({"gate": {k: gate[k] for k in ("kind", "min_ratio", "positives_top1",
+                                                            "positives_n", "control_n")}},
+                             ensure_ascii=False) + "\n")
+    if after["stale"] == 0 and not gate:
+        out.write("★fully complete★ — the gate is not measured yet: `brain vec calibrate`.\n")
     return failed
 
 

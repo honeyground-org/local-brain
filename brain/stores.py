@@ -624,6 +624,11 @@ def sync(db: sqlite3.Connection, roles: Tuple[str, ...] = ROLES, full: bool = Fa
         if c["backend"] == "sqlite" or c.get("error"):
             out[role] = {"backend": c["backend"], "skipped": "local" if not c.get("error") else c["error"]}
             continue
+        if role == "vector" and _no_embedding(db):
+            # ⛔ No engine, no vectors: syncing would create an empty collection named after "none" and
+            #    report it as in sync (measured 2026-11-04: `brain_none_search_768`, 0 points, "in sync").
+            out[role] = {"backend": c["backend"], "skipped": "no_embedding"}
+            continue
         try:
             if role == "vector":
                 from brain import vecstore
@@ -646,6 +651,16 @@ def sync_if_chosen(db: sqlite3.Connection, roles: Tuple[str, ...] = ROLES) -> Di
     return sync(db, wanted) if wanted else {}
 
 
+def _no_embedding(db: sqlite3.Connection) -> bool:
+    """No engine chosen ★and★ no vectors in the local copy — there is nothing a vector database could hold."""
+    from brain import vectors
+    if vectors.PROVIDER not in ("", "none"):
+        return False
+    vectors.ensure_table(db)
+    return db.execute("SELECT 1 FROM vectors WHERE model=? AND dim=? LIMIT 1",
+                      (vectors.model_tag(), vectors.DIM)).fetchone() is None
+
+
 # ── what the screens show ──────────────────────────────────────────────────
 def _ledger_role(role: str) -> str:
     return "vector" if role == "vector" else "graph.node"
@@ -665,7 +680,9 @@ def describe(db: sqlite3.Connection) -> List[dict]:
                 "WHERE v.model=? AND v.dim=?", (vectors.model_tag(), vectors.DIM)).fetchone()[0]
         else:
             row["local_count"] = db.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
-        if c["backend"] != "sqlite" and not c.get("error"):
+        if role == "vector" and c["backend"] != "sqlite" and _no_embedding(db):
+            row["no_embedding"] = True
+        elif c["backend"] != "sqlite" and not c.get("error"):
             be = vector_backend(c) if role == "vector" else graph_backend(c)
             target = be.target(vectors.model_tag(), vectors.DIM) if role == "vector" else be.target()
             row["target"] = target

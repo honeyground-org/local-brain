@@ -110,10 +110,23 @@ def host_facts() -> None:
     a = cc.mcp_setup(cmd)
     check("Claude Code registers through its own command line",
           a.get("check") == ["claude", "mcp", "get", "brain"] and a.get("add", [])[-1:] == cmd, str(a))
-    b = cx.mcp_setup(cmd)
-    check("⛔ Codex is handed a snippet for a human (its config is never merged by us)",
+    real_which = hosts.shutil.which
+    hosts.shutil.which = lambda name, *a, **k: None if name == "codex" else real_which(name, *a, **k)
+    try:
+        b = cx.mcp_setup(cmd)
+    finally:
+        hosts.shutil.which = real_which
+    check("⛔ without the codex program, Codex is handed a snippet for a human (never merged by us)",
           b.get("file", "").endswith("config.toml") and b.get("snippet", [""])[0] == "[mcp_servers.brain]"
           and "add" not in b, str(b))
+    hosts.shutil.which = lambda name, *a, **k: "/x/codex" if name == "codex" else real_which(name, *a, **k)
+    try:
+        b = cx.mcp_setup(cmd)
+    finally:
+        hosts.shutil.which = real_which
+    check("with the codex program, Codex registers it itself (`codex mcp add brain -- …`)",
+          b.get("check") == ["codex", "mcp", "get", "brain"]
+          and b.get("add", [])[:5] == ["codex", "mcp", "add", "brain", "--"] and "file" not in b, str(b))
     check("a host without MCP → nothing to do", gen.mcp_setup(cmd) == {})
     check("rule files are every host's, once each", hosts.rule_files() == ["CLAUDE.md", "AGENTS.md"],
           str(hosts.rule_files()))

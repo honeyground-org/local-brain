@@ -57,6 +57,23 @@ def main():
     print("\n  this machine: %s (%s · evidence %s)" % (cur.name, cur.label, cur.evidence))
     check("found this machine's scheduler", cur.available() or cur.name == "none")
 
+    # ── ★a job whose engine nobody chose is off, not stopped★ (2026-11-04) ──
+    saved_env = {k: os.environ.pop(k, None) for k in ("BRAIN_EMBED_PROVIDER", "BRAIN_JUDGE_PROVIDER")}
+    os.environ["BRAIN_JUDGE_PROVIDER"] = "none"
+    os.environ["BRAIN_EMBED_PROVIDER"] = "stub"
+    try:
+        got = health.schedules()
+    finally:
+        for k, v in saved_env.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+    off = [j["job"] for j in got.get("off") or []]
+    on = [j["job"] for j in got["jobs"]]
+    check("no judge → brain-rules-daily is off (not counted as stopped)",
+          off == ["brain-rules-daily"] and "brain-rules-daily" not in on, "off %s" % off)
+    check("★control★ — with an embed engine, brain-vec-daily is still judged", "brain-vec-daily" in on, str(on))
+
     # ── ★can BRAIN_SCHEDULER simulate a different platform★ ─────────────
     saved = os.environ.get("BRAIN_SCHEDULER")
     try:
@@ -65,7 +82,13 @@ def main():
             check("BRAIN_SCHEDULER=%s picks that one" % want_name,
                   sch.active(refresh=True).name == want_name, sch.active().name)
             # ⛔ ★does the reliability verdict stay alive on that platform★ — it must answer even with no evidence
-            jobs = health.schedules()["jobs"]
+            # (both engines chosen, so neither job is "off" — §health.JOB_ENGINE)
+            os.environ["BRAIN_EMBED_PROVIDER"], os.environ["BRAIN_JUDGE_PROVIDER"] = "stub", "anthropic"
+            try:
+                jobs = health.schedules()["jobs"]
+            finally:
+                os.environ.pop("BRAIN_EMBED_PROVIDER", None)
+                os.environ.pop("BRAIN_JUDGE_PROVIDER", None)
             check("  the reliability verdict answers on %s too (doesn't die)" % want_name,
                   isinstance(jobs, list) and len(jobs) >= 1 and "ok" in jobs[0],
                   "%d job(s)" % len(jobs))

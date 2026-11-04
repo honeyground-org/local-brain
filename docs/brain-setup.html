@@ -193,7 +193,7 @@ cd ~/work/local-brain
 ./install.sh --help                      # read what you are turning on first
 ```
 
-**Confirm one of these two combinations with me before running it.**
+**Confirm one of these three combinations with me before running it.**
 
 ```bash
 # ⓐ Fully local — no key, no data leaves this computer
@@ -203,6 +203,11 @@ cd ~/work/local-brain
 #    (⛔ note chunks and excerpts are sent to that provider; a local server keeps them here)
 ./install.sh --all --embed gemini --judge gemini        # or openai · anthropic (judge) · none
 #    then `brain engines` shows each role, its engine, and what it sends
+
+# ⓒ The recommended stack, still fully local — Qdrant + Neo4j in Docker, google/embeddinggemma-300m
+#    on this machine. ⛔ The model is gated: it stops once and prints the Hugging Face steps
+#    (accept the terms, a read token, `hf auth login`) that only I can do; then run it again.
+./install.sh --recommended
 ```
 
 What `install.sh` does (idempotent — safe to run repeatedly):

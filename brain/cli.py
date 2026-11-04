@@ -185,7 +185,9 @@ def stores_text(db) -> str:
                 names = i18n.t("cli.stores.sends.names") if (r.get("options") or {}).get("names") else ""
                 out.append("         " + i18n.t("cli.stores.sends.graph", where=where, names=names))
             ping = r.get("ping") or {}
-            if not ping.get("ok"):
+            if r.get("no_embedding"):
+                out.append("         " + i18n.t("cli.stores.status.no_embedding"))
+            elif not ping.get("ok"):
                 out.append("         " + i18n.t("cli.stores.status.unreachable", error=ping.get("error", "")))
             else:
                 sync = i18n.t("cli.stores.in_sync") if r.get("in_sync") else i18n.t("cli.stores.not_synced")
@@ -217,6 +219,9 @@ def stores_text(db) -> str:
 def stores_sync_text(res: dict) -> str:
     out = [i18n.t("cli.stores.sync.title")]
     for role, r in res.items():
+        if r.get("skipped") == "no_embedding":
+            out.append("  " + i18n.t("cli.stores.sync.no_embedding", role=role))
+            continue
         if r.get("skipped"):
             out.append("  " + i18n.t("cli.stores.sync.on_local_copy", role=role))
             continue
@@ -731,28 +736,34 @@ def main(argv=None) -> int:
             st = vectors.coverage(db)
             st.update({"provider": vectors.PROVIDER, "space": vectors.model_tag(),
                        "dim": vectors.DIM, "gate_min_ratio": vectors.min_ratio(db),
+                       "gate_sample": vectors.gate_kind(db),
                        "ref_min_cos": vectors.min_cos(db)})
             _p(st)
         elif args.action == "warm":
             _p(vectors.warm_control_cache(db))
         elif args.action == "build":
-            _p(vectors.build(db, limit_docs=args.limit_docs, progress=True))
+            built = vectors.build(db, limit_docs=args.limit_docs, progress=True)
+            # ★The gate follows the build★ — a finished build with a silent gate answers nothing (§recalibrate_if_free)
+            gate = vectors.recalibrate_if_free(db)
+            if gate:
+                built["gate"] = {k: gate[k] for k in ("kind", "min_ratio", "positives_top1",
+                                                       "positives_n", "control_n")}
+            _p(built)
         elif args.action == "calibrate":
-            # ⛔ Controls and answers come from ★your own evaluation set★ (never invented)
-            import os as _os
-            from brain import evalinit as _ei, rerank as _rr
-            path = _os.path.join(_ei.eval_dir(), "short.json")
-            with open(path, encoding="utf-8") as fh:
-                d = json.load(fh)
-            control = [c["q"] if isinstance(c, dict) else c
-                       for c in d.get("C_no_memory_needed", [])]
-            pos = [(c["q"], c["gold"]) for c in d.get("A_memory_needed", [])
-                   if c.get("gold")]
-            res = vectors.calibrate_cos(db, control, pos)
+            # ⛔ Controls and answers come from ★your own evaluation set★ (never invented) — and with none
+            #    yet, from a sample cut out of your own documents (§vectors.gate_sample). Never a traceback.
+            from brain import rerank as _rr
+            control, pos, kind = vectors.gate_sample(db)
+            if not control or not pos:
+                print(i18n.t("cli.vec.no_sample"))
+                return 1
+            allow = 0 if kind == "labelled" else int(len(control) * vectors.PROXY_NOISE_SHARE)
+            res = vectors.calibrate_cos(db, control, pos, allow_noise=allow, kind=kind)
             res.pop("detail", None)
             # ★the judge too★ — its threshold holds only for the judge and question it was measured
             #   with (§rerank.scale_id), so choosing another engine means measuring here again.
-            if _rr.available():
+            # ⛔ Only on a labelled sample: the judge's scale is not something a proxy may set.
+            if _rr.available() and kind == "labelled":
                 from brain import engines as _en
                 res["judge"] = dict(_rr.calibrate(db, control, pos), engine=_en.judge_id())
             _p(res)
@@ -842,6 +853,8 @@ def main(argv=None) -> int:
                       % ("✅" if j["ok"] else "❌", j["job"], age, by, j["what"]))
                 if j.get("why"):
                     print("     %s" % j["why"])
+        for j in sch.get("off") or []:
+            print("  ⏸  %-20s %s" % (j["job"], i18n.t("cli.status.job_off", role=j["needs"])))
 
         for role, sr in (st.get("stores") or {}).items():
             if not sr.get("ok"):

@@ -116,8 +116,20 @@ def main() -> int:
     cmd = install.entry_command("brain-surely-not-on-path", "brain.cli")
     check("③ the installer's last resort goes through the runner", "_run.py" in cmd and " -m " not in cmd, cmd[-60:])
     codex = next(h for h in hosts.all_hosts() if isinstance(h, hosts.Codex))
-    snip = " ".join(codex.mcp_setup([]).get("snippet") or [])
+    real_which = hosts.shutil.which
+    hosts.shutil.which = lambda name, *a, **k: None if name == "codex" else real_which(name, *a, **k)
+    try:
+        snip = " ".join(codex.mcp_setup([]).get("snippet") or [])
+    finally:
+        hosts.shutil.which = real_which
     check("③ the Codex MCP snippet goes through the runner", "_run.py" in snip and '"-m"' not in snip, snip[-80:])
+    hosts.shutil.which = lambda name, *a, **k: "/usr/local/bin/codex" if name == "codex" else real_which(name, *a, **k)
+    try:
+        add = codex.mcp_setup([]).get("add") or []
+    finally:
+        hosts.shutil.which = real_which
+    check("③ `codex mcp add` goes through the runner too", "--" in add
+          and any(x.endswith("_run.py") for x in add) and "-m" not in add, str(add[-3:]))
     srv = open(os.path.join(ROOT, "brain", "server.py"), encoding="utf-8").read()
     check("③ the MCP server restarts itself through the runner", '"-m", "brain.server"' not in srv
           and "launch.argv(\"brain.server\")" in srv)

@@ -58,8 +58,16 @@ class QdrantVectors:
             if not stores.gone(exc):
                 raise
         # Cosine: Qdrant normalises on the way in — the vectors already are unit length (§vectors._unit)
-        self._call("PUT", "/collections/%s" % name, {"vectors": {"size": int(dim), "distance": "Cosine"}},
-                   timeout=stores.SYNC_TIMEOUT)
+        try:
+            self._call("PUT", "/collections/%s" % name, {"vectors": {"size": int(dim), "distance": "Cosine"}},
+                       timeout=stores.SYNC_TIMEOUT)
+        except stores.StoreError as exc:
+            # ⛔ (2026-11-04) Another process created it between the GET above and this PUT — the first
+            #    `vec build` after choosing an engine races the session-start index. Qdrant answers 409;
+            #    that is the state we wanted, so it is checked like any existing collection, not failed.
+            if "HTTP 409" not in str(exc):
+                raise
+            return self.ensure(model, dim)
         self._call("PUT", "/collections/%s/index?wait=true" % name,
                    {"field_name": "doc_id", "field_schema": "integer"}, timeout=stores.SYNC_TIMEOUT)
 

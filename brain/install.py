@@ -72,6 +72,20 @@ def _quote(part: str) -> str:
     return '"%s"' % part if (" " in part and not part.startswith('"')) else part
 
 
+def entry_argv(script: str, module: str) -> List[str]:
+    """The same choice as `entry_command`, ★as an argv★ — for anything that takes a list (MCP registration,
+    scheduled jobs). ⛔ Never split the one-line form back on spaces: a home folder with a space in it
+    (a Windows `Program Files` or a profile folder named after a person) became two arguments (measured 2026-11-04)."""
+    found = shutil.which(script)
+    if found:
+        return [found]
+    local = os.path.join(ROOT, "bin", script)
+    if os.name != "nt" and os.path.isfile(local):
+        return [local]
+    from brain import launch
+    return launch.argv(module)
+
+
 def entry_command(script: str, module: str) -> str:
     """One line for a command a hook·scheduled job will call.
 
@@ -237,6 +251,9 @@ def step_engines(embed: str, judge: str) -> None:
         if DRY:
             _would(i18n.t("install.would_set_engine", role=role, provider=prov))
             continue
+        if role == "embed" and prov == "embeddinggemma":
+            _setup_embeddinggemma()
+            continue
         try:
             engines.set_choice(role, prov)
             ok(i18n.t("install.engine_set", role=role, provider=prov))
@@ -249,6 +266,68 @@ def step_engines(embed: str, judge: str) -> None:
         say(("  " + line) if line else "")
     if not (embed and judge):
         say("  " + i18n.t("install.engines_hint"))
+
+
+def _setup_embeddinggemma() -> bool:
+    """The local embedding model, end to end (§embedruntime) — or the one thing a person must do next."""
+    from brain import embedruntime
+    say("  " + i18n.t("install.gemma_start", model=embedruntime.MODEL))
+    try:
+        r = embedruntime.setup(say=lambda m: say("      " + m))
+    except Exception as exc:                             # noqa: BLE001 — the install goes on without it
+        r = {"ok": False, "step": "?", "why": str(exc)[:200]}
+    if r.get("ok"):
+        ok(i18n.t("install.gemma_ok", url=r["base_url"], device=r["device"]))
+        return True
+    warn(i18n.t("install.gemma_stopped", step=r.get("step", "?"), why=str(r.get("why", ""))[:200]))
+    if r.get("next"):
+        say("      " + i18n.t("install.gemma_next"))
+        for line in str(r["next"]).splitlines():
+            say("        " + line)
+        say("      " + i18n.t("install.gemma_rerun"))
+    return False
+
+
+def step_vectors() -> None:
+    """Build the vectors, measure the gate, and fill the vector database — ★only for a local engine★.
+
+    ⛔ In a fresh process: the engine choice is read when `brain.vectors` is first imported, and this
+       process imported it before the choice was written. ⛔ A paid or remote engine is never called by
+       the installer — it prints the command instead, so the person decides when the bill starts.
+    """
+    from brain import engines, launch, vectors
+    c = engines.choice("embed")
+    if c["provider"] == "none" or DRY:
+        return
+    say("\n" + i18n.t("install.vectors_title"))
+    if not (c["provider"] in ("embeddinggemma", "stub") or engines.is_local(c)):
+        say("  " + i18n.t("install.vectors_paid", provider=c["provider"]))
+        return
+    if c["provider"] == "embeddinggemma":
+        from brain import embedruntime
+        if not embedruntime.ready():
+            say("  " + i18n.t("install.vectors_wait_service"))
+            return
+    # `vec build` also fills the vector database (when one is chosen) and re-measures the gate.
+    try:
+        p = subprocess.run(launch.argv("brain.cli") + ["vec", "build"], capture_output=True, text=True,
+                           errors="replace", timeout=7200)
+    except (OSError, subprocess.SubprocessError) as exc:
+        warn(i18n.t("install.vectors_failed", cmd="vec build", err=str(exc)[:160]))
+        return
+    try:
+        res = json.loads(p.stdout[p.stdout.index("{"):])
+    except ValueError:
+        res = {}
+    if p.returncode != 0 or not res:
+        warn(i18n.t("install.vectors_failed", cmd="vec build", err=(p.stderr or p.stdout).strip()[-200:]))
+        return
+    gate = res.get("gate") or {}
+    say("      " + i18n.t("install.vectors_built", docs=(res.get("store") or {}).get("docs", res.get("docs", 0)),
+                          kind=gate.get("kind", "-"), ratio=gate.get("min_ratio", "-")))
+    if (res.get("store") or {}).get("error"):
+        warn(i18n.t("install.stores_failed", why=res["store"]["error"]))
+    ok(i18n.t("install.vectors_ok"))
 
 
 # ── 3c. dedicated databases (optional, one role at a time) ─────────────────
@@ -331,7 +410,7 @@ def step_mcp() -> None:
     # ⛔ ★How★ each host registers it is the adapter's to say (§hosts.Host.mcp_setup) — this used to be
     #    `if h.name == "claude-code" … elif "codex"`, so a third host meant editing the installer.
     for h in hosts.detected():
-        spec = h.mcp_setup(cmd.replace('"', "").split())
+        spec = h.mcp_setup(entry_argv("brain-mcp", "brain.server"))
         if spec.get("add"):
             if not shutil.which(spec["add"][0]):
                 say("  " + i18n.t("install.mcp_run_yourself", cmd=cmd))
@@ -342,11 +421,11 @@ def step_mcp() -> None:
             try:
                 p = subprocess.run(spec["check"], capture_output=True, timeout=10)
                 if p.returncode == 0:
-                    ok(i18n.t("install.mcp_already"))
+                    ok(i18n.t("install.mcp_already", host=h.name))
                     continue
                 p = subprocess.run(spec["add"], capture_output=True, timeout=20)
-                ok(i18n.t("install.mcp_registered")) if p.returncode == 0 else warn(
-                    i18n.t("install.mcp_auto_failed", cmd=cmd))
+                ok(i18n.t("install.mcp_registered", host=h.name)) if p.returncode == 0 else warn(
+                    i18n.t("install.mcp_auto_failed", host=h.name, cmd=" ".join(_quote(x) for x in spec["add"])))
             except (OSError, subprocess.SubprocessError) as exc:   # noqa: BLE001
                 warn(i18n.t("install.mcp_exc", err=str(exc)[:80]))
         elif spec.get("file"):
@@ -529,13 +608,17 @@ def step_schedule(enable: bool) -> None:
         return
     home = store.brain_home()
     os.makedirs(home, exist_ok=True)
-    jobs = (("brain-vec-daily", "brain.jobs.vec_daily", (9, 0), "vec-daily.log"),
-            ("brain-rules-daily", "brain.jobs.rules_daily", (9, 30), "rules-daily.log"))
-    for name, module, at, log in jobs:
+    from brain import engines
+    jobs = (("brain-vec-daily", "brain.jobs.vec_daily", (9, 0), "vec-daily.log", "embed"),
+            ("brain-rules-daily", "brain.jobs.rules_daily", (9, 30), "rules-daily.log", "judge"))
+    for name, module, at, log, role in jobs:
+        # ⛔ A job whose engine is not chosen would run every day to do nothing, and the status screen
+        #    showed it as a failure (measured 2026-11-04). Registered once its engine is chosen.
+        if engines.choice(role)["provider"] == "none":
+            say("  " + i18n.t("install.job_needs_engine", name=name, role=role))
+            continue
         label = "com.local-brain.%s" % name.replace("brain-", "")
-        cmd = entry_command(name, module)
-        parts = [p.strip('"') for p in cmd.split(" -m ")]
-        argv = ([parts[0], "-m", parts[1]] if len(parts) == 2 else [cmd.strip('"')])
+        argv = entry_argv(name, module)
         if DRY:
             _would(i18n.t("install.would_register_job", label=label,
                          time="%02d:%02d" % (at[0], at[1]), scheduler=s.name,
@@ -563,8 +646,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--with-cron", action="store_true",
                     help="daily self-improvement jobs")
     ap.add_argument("--all", action="store_true", help="all of the above")
+    ap.add_argument("--recommended", action="store_true",
+                    help="the reference stack, all local: --all + --stores docker (Qdrant + Neo4j) + "
+                         "--embed embeddinggemma (google/embeddinggemma-300m on this machine)")
     ap.add_argument("--embed", default="", metavar="PROVIDER",
-                    help="engine for meaning-based search: gemini · openai · none (see `brain engines`)")
+                    help="engine for meaning-based search: embeddinggemma (local, recommended) · gemini · "
+                         "openai (or any OpenAI-compatible server) · none (see `brain engines`)")
     ap.add_argument("--judge", default="", metavar="PROVIDER",
                     help="engine that judges candidates: gemini · openai · anthropic · none")
     from brain import stores as _st
@@ -581,6 +668,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     a = ap.parse_args(argv)
     global DRY
     DRY = a.dry_run
+    if a.recommended:
+        a.all = True
+        a.stores = a.stores or "docker"
+        a.embed = a.embed or "embeddinggemma"
     if a.all:
         a.with_hook = a.with_guard = a.with_cron = True
     if a.lang:
@@ -607,6 +698,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     step_engines(a.embed, a.judge)
     step_stores(plan)
+    step_vectors()
     step_mcp()
     step_hooks(a.with_hook, a.with_guard)
     step_schedule(a.with_cron)
