@@ -288,7 +288,7 @@ def _setup_embeddinggemma() -> bool:
     return False
 
 
-def step_vectors(plan: Dict[str, tuple]) -> None:
+def step_vectors() -> None:
     """Build the vectors, measure the gate, and fill the vector database — ★only for a local engine★.
 
     ⛔ In a fresh process: the engine choice is read when `brain.vectors` is first imported, and this
@@ -308,19 +308,25 @@ def step_vectors(plan: Dict[str, tuple]) -> None:
         if not embedruntime.ready():
             say("  " + i18n.t("install.vectors_wait_service"))
             return
-    cli = launch.argv("brain.cli")
-    steps = [["vec", "build"]] + ([["stores", "--sync"]] if "vector" in plan or "graph" in plan else [])
-    for args in steps:
-        try:
-            p = subprocess.run(cli + args, capture_output=True, text=True, errors="replace", timeout=7200)
-        except (OSError, subprocess.SubprocessError) as exc:
-            warn(i18n.t("install.vectors_failed", cmd=" ".join(args), err=str(exc)[:160]))
-            return
-        if p.returncode != 0:
-            warn(i18n.t("install.vectors_failed", cmd=" ".join(args), err=(p.stderr or p.stdout).strip()[-200:]))
-            return
-        for line in (p.stdout.strip().splitlines() or [])[-4:]:
-            say("      " + line)
+    # `vec build` also fills the vector database (when one is chosen) and re-measures the gate.
+    try:
+        p = subprocess.run(launch.argv("brain.cli") + ["vec", "build"], capture_output=True, text=True,
+                           errors="replace", timeout=7200)
+    except (OSError, subprocess.SubprocessError) as exc:
+        warn(i18n.t("install.vectors_failed", cmd="vec build", err=str(exc)[:160]))
+        return
+    try:
+        res = json.loads(p.stdout[p.stdout.index("{"):])
+    except ValueError:
+        res = {}
+    if p.returncode != 0 or not res:
+        warn(i18n.t("install.vectors_failed", cmd="vec build", err=(p.stderr or p.stdout).strip()[-200:]))
+        return
+    gate = res.get("gate") or {}
+    say("      " + i18n.t("install.vectors_built", docs=(res.get("store") or {}).get("docs", res.get("docs", 0)),
+                          kind=gate.get("kind", "-"), ratio=gate.get("min_ratio", "-")))
+    if (res.get("store") or {}).get("error"):
+        warn(i18n.t("install.stores_failed", why=res["store"]["error"]))
     ok(i18n.t("install.vectors_ok"))
 
 
@@ -415,11 +421,11 @@ def step_mcp() -> None:
             try:
                 p = subprocess.run(spec["check"], capture_output=True, timeout=10)
                 if p.returncode == 0:
-                    ok(i18n.t("install.mcp_already"))
+                    ok(i18n.t("install.mcp_already", host=h.name))
                     continue
                 p = subprocess.run(spec["add"], capture_output=True, timeout=20)
-                ok(i18n.t("install.mcp_registered")) if p.returncode == 0 else warn(
-                    i18n.t("install.mcp_auto_failed", cmd=cmd))
+                ok(i18n.t("install.mcp_registered", host=h.name)) if p.returncode == 0 else warn(
+                    i18n.t("install.mcp_auto_failed", host=h.name, cmd=" ".join(_quote(x) for x in spec["add"])))
             except (OSError, subprocess.SubprocessError) as exc:   # noqa: BLE001
                 warn(i18n.t("install.mcp_exc", err=str(exc)[:80]))
         elif spec.get("file"):
@@ -692,7 +698,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     step_engines(a.embed, a.judge)
     step_stores(plan)
-    step_vectors(plan)
+    step_vectors()
     step_mcp()
     step_hooks(a.with_hook, a.with_guard)
     step_schedule(a.with_cron)
