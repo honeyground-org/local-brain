@@ -772,5 +772,6 @@
  "obs.reviseLens": "視点の修正を提案",
  "obs.otherSectors": "その他のテーマ",
  "obs.shownBubbles": "表示バブル",
- "memory.validity": "有効状態: {status} · 現在: {current} · 以前: {previous} · 変更: {reason}"
+ "memory.validity": "有効状態: {status} · 現在: {current} · 以前: {previous} · 変更: {reason}",
+ "memory.feedback_demoted": "検索フィードバックにより優先度が下がっています。事実の有効性とは別です。"
 }

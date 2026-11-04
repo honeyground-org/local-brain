@@ -249,25 +249,47 @@ def _spawn() -> None:
         pass
 
 
+EMBED_SPACE_KEY = "deferred_embed_space"
+EMBED_RESULT_KEY = "deferred_embed_result"
+
+
+def local_embedding() -> bool:
+    """Only the explicitly selected local engine gets event-driven document inference."""
+    from brain import engines
+    c = engines.choice("embed")
+    return c.get("provider") not in ("none", "stub", None) and engines.is_local(c)
+
+
+def _embed_changed(db) -> dict:
+    """Checkpointed build; failures remain queued, separate from serving-store health."""
+    from brain import store, vectors
+    result = {"at": time.time(), "state": "working"}
+    store.set_meta(db, EMBED_RESULT_KEY, json.dumps(result))
+    try:
+        result.update(vectors.build(db))
+        result["state"] = ("pending" if result.get("docs_left") or
+                           (result.get("store") or {}).get("error") else "current")
+        if result["state"] == "current":
+            store.set_meta(db, EMBED_SPACE_KEY, vectors.model_tag())
+    except Exception as exc:                              # keep the durable queue for another worker
+        result.update(state="error", error=type(exc).__name__ + ": " + str(exc)[:200])
+    store.set_meta(db, EMBED_RESULT_KEY, json.dumps(result))
+    return result
+
+
 def run(db) -> dict:
     """Do the pending work now: index anything new, update the chosen databases, heal triggers."""
     from brain import observe, store, stores
     t0 = time.time()
+    local = local_embedding()
+    if local:
+        mark(db, ["embed"])  # durable before indexing/inference, including a first catch-up run
     start = pending(db)
     todo = start.get("work") or []
     out = {"work": todo}
-    stats = store.reindex(db, recalibrate=False)        # anything changed since the hook; heals triggers
+    stats = store.reindex(db, recalibrate=False, queue_embedding=False)
     out["changed"] = sum(int(stats.get(k) or 0) for k in ("added", "updated", "removed"))
     ok = not any(v == "error" for v in (stats.get("stores") or {}).values())
-    # ★Work that used to run on every session start runs here, once, when its event happened★ (§on_session_start)
-    if out["changed"]:
-        try:
-            from brain import vectors as _vec
-            got = _vec.recalibrate_if_free(db)           # the meaning gate's scale follows the corpus size
-            if got:
-                out["vec_min_ratio"] = got["min_ratio"]
-        except Exception:                                # noqa: BLE001
-            pass
     if out["changed"] or "git" in todo:
         try:
             out["pointer_keys"] = store.save_git_pointers(db)
@@ -280,6 +302,18 @@ def run(db) -> dict:
         out["stores"] = {r: ("error" if v.get("error") else "unchanged" if v.get("unchanged") else "sent")
                          for r, v in pushed.items()}
         ok = not any(v == "error" for v in out["stores"].values())
+    if local:
+        out["embedding"] = _embed_changed(db)
+        ok = ok and out["embedding"]["state"] == "current"
+    # ★Work that used to run on every session start runs here, once, when its event happened★ (§on_session_start)
+    if out["changed"] or (out.get("embedding") or {}).get("docs"):
+        try:
+            from brain import vectors as _vec
+            got = _vec.recalibrate_if_free(db)           # the meaning gate's scale follows the corpus size
+            if got:
+                out["vec_min_ratio"] = got["min_ratio"]
+        except Exception:                                # noqa: BLE001
+            pass
     from brain import calibrate
     calibrate.threshold(db)  # missing/drifted rulers are measured outside the hook
     from brain import personal
@@ -382,6 +416,14 @@ def on_session_start(db) -> dict:
         else:
             if store.needs_reindex(db):
                 out["reasons"].append("files")
+            if local_embedding():
+                from brain import vectors
+                try:
+                    caught_up = store.get_meta(db, EMBED_SPACE_KEY, "") == vectors.model_tag()
+                except Exception:
+                    caught_up = False
+                if not caught_up and "embed" not in pending(db).get("work", []):
+                    mark(db, ["embed"])
             if pending(db).get("work"):
                 out["reasons"].append("pending")
             try:

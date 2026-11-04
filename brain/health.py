@@ -16,6 +16,7 @@ distortion is not a warning but **handing over the material for judgement** — 
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
@@ -319,6 +320,27 @@ def stores_state(db: sqlite3.Connection) -> dict:
     return out
 
 
+def embedding_state(db: sqlite3.Connection) -> dict:
+    """Current content coverage, not just the number of vectors or a DB sync flag."""
+    from brain import deferred, engines, vectors
+    c = engines.choice("embed")
+    out = {"provider": c.get("provider"), "event_driven": deferred.local_embedding(),
+           "current": None, "pending_docs": None}
+    try:
+        out["last_attempt"] = json.loads(store.get_meta(db, deferred.EMBED_RESULT_KEY, "") or "{}")
+        if c.get("provider") in (None, "none"):
+            out["state"] = "disabled"
+            return out
+        skip = set(vectors.no_embed_sources())
+        eligible = sum(r[0] not in skip for r in db.execute("SELECT source FROM docs"))
+        stale = len(vectors.stale_docs(db))
+        out.update(eligible_docs=eligible, current_docs=eligible-stale, pending_docs=stale,
+                   current=stale == 0, state="current" if stale == 0 else "pending")
+    except Exception as exc:
+        out.update(state="unavailable", error=type(exc).__name__ + ": " + str(exc)[:200])
+    return out
+
+
 def status(db: sqlite3.Connection) -> dict:
     st = store.corpus_stats(db)
     by_source = {r["source"]: r["c"] for r in _rows(db,
@@ -354,6 +376,7 @@ def status(db: sqlite3.Connection) -> dict:
         # ⛔ ★A chosen database that stopped answering must show up here too★ (§stores) — the local copy
         #    answers in its place, so nothing breaks, and that is exactly why it would go unnoticed.
         "stores": stores_state(db),
+        "embedding": embedding_state(db),
         "by_source": by_source,
         "memory_by_kind": by_kind,
         "judge_budget": judge,
@@ -439,7 +462,10 @@ def suggestions(db: sqlite3.Connection) -> dict:
 def feedback(db: sqlite3.Connection, name: str, signal: str) -> dict:
     if signal not in _W_DELTA:
         return {"error": "unknown signal: %s" % signal}
-    row = db.execute("SELECT id, path, weight FROM docs WHERE name=?", (name,)).fetchone()
+    rows = db.execute("SELECT id, path, weight FROM docs WHERE name=?", (name,)).fetchall()
+    if len(rows) > 1:
+        return {"error": "ambiguous memory name; feedback was not applied: %s" % name}
+    row = rows[0] if rows else None
     if not row:
         return {"error": "not found: %s" % name}
     new_w = max(_W_MIN, min(_W_MAX, row["weight"] + _W_DELTA[signal]))

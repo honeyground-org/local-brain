@@ -772,5 +772,6 @@
  "obs.reviseLens": "Refinar perspectiva",
  "obs.otherSectors": "Otros temas",
  "obs.shownBubbles": "Burbujas visibles",
- "memory.validity": "Vigencia: {status} · actual: {current} · anterior: {previous} · cambio: {reason}"
+ "memory.validity": "Vigencia: {status} · actual: {current} · anterior: {previous} · cambio: {reason}",
+ "memory.feedback_demoted": "Prioridad de búsqueda reducida por comentarios; la validez factual es independiente."
 }

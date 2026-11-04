@@ -772,5 +772,6 @@
  "obs.reviseLens": "관점 수정 의견",
  "obs.otherSectors": "다른 주제",
  "obs.shownBubbles": "표시 버블",
- "memory.validity": "유효 상태: {status} · 현재: {current} · 이전: {previous} · 변경: {reason}"
+ "memory.validity": "유효 상태: {status} · 현재: {current} · 이전: {previous} · 변경: {reason}",
+ "memory.feedback_demoted": "검색 피드백으로 우선순위가 낮아졌습니다. 사실의 유효성과는 별개입니다."
 }

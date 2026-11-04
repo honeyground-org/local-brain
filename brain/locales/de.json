@@ -772,5 +772,6 @@
  "obs.reviseLens": "Perspektive verfeinern",
  "obs.otherSectors": "Weitere Themen",
  "obs.shownBubbles": "Sichtbare Blasen",
- "memory.validity": "Gültigkeit: {status} · aktuell: {current} · zuvor: {previous} · Änderung: {reason}"
+ "memory.validity": "Gültigkeit: {status} · aktuell: {current} · zuvor: {previous} · Änderung: {reason}",
+ "memory.feedback_demoted": "Suchpriorität durch Feedback reduziert; sachliche Gültigkeit ist davon unabhängig."
 }

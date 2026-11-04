@@ -111,7 +111,7 @@ def unsupported(flags: Dict[str, Any]) -> List[str]:
     return out
 
 
-def _embed() -> Dict[str, Any]:
+def _embed(db=None) -> Dict[str, Any]:
     from brain import engines, vectors
     c = engines.choice("embed")
     out: Dict[str, Any] = {"provider": c.get("provider"), "model": c.get("model"),
@@ -122,22 +122,27 @@ def _embed() -> Dict[str, Any]:
         out["ready"] = bool(engines.available("embed"))
     except Exception as exc:                            # noqa: BLE001 — "not ready" with its reason, never a crash
         out["reason"] = str(exc)[:200]
+    if db is not None:
+        from brain import health
+        out["freshness"] = health.embedding_state(db)
     return out
 
 
 def _refresh() -> str:
-    """When new memories get their meaning vectors — the scheduled job, read from the scheduler."""
+    """Local changes are queued; the scheduled job remains a catch-up path."""
+    from brain import deferred
+    prefix = "background after indexed changes; " if deferred.local_embedding() else ""
     try:
         from brain import health
         for j in health.schedules().get("jobs", []):
             if j.get("job") == "brain-vec-daily":
                 at = j.get("at") or []
                 when = ("daily %02d:%02d" % (at[0], at[1])) if len(at) == 2 else "daily"
-                return when + (" (registered)" if j.get("registered") else " (not registered)") + \
+                return prefix + when + (" (registered)" if j.get("registered") else " (not registered)") + \
                     " — `brain vec build` to force"
     except Exception:                                   # noqa: BLE001
         pass
-    return "no scheduled job — `brain vec build` to force"
+    return prefix + "no scheduled job — `brain vec build` to force"
 
 
 def _judge() -> Dict[str, Any]:
@@ -211,7 +216,7 @@ def describe(db: sqlite3.Connection, tools: List[dict], protocol: str, memory_di
                    "code_generation": calibrate.CODE_GENERATION,
                    "schema_version": store.SCHEMA_VERSION, "db_schema_version": db_schema,
                    "tokenizer_version": textindex.TOKENIZER_VERSION},
-        "embed": _embed(),
+        "embed": _embed(db),
         "judge": _judge(),
         "stores": _stores(db),
         "corpus": _corpus(db, memory_dir),

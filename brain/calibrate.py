@@ -508,7 +508,7 @@ def measure(db: sqlite3.Connection) -> dict:
 #   37 (2026-10-29)  `recall(scope=)` keeps a project's own memories and the unscoped ones (docs.project_id,
 #       declared in a memory's frontmatter, schema 5) across the word, graph and meaning lanes; without a scope
 #       nothing changes. Bumped because `store` and `search` changed.
-CODE_GENERATION = 39
+CODE_GENERATION = 40
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·
