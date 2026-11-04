@@ -362,7 +362,12 @@ def private_identifiers() -> set:
     import getpass
     import socket
     from brain import store
-    exact = {str(Path.home()), getpass.getuser(), socket.gethostname(), store.brain_home()}
+    try:
+        user = getpass.getuser()
+    except Exception:                                    # noqa: BLE001 - Windows with no USERNAME raises OSError
+        user = ""
+    home = Path.home()
+    exact = {str(home), home.name, user, socket.gethostname(), store.brain_home()}
     try:
         for source in store.load_config(tolerant=True).get("sources") or []:
             if isinstance(source, dict) and source.get("path"):
