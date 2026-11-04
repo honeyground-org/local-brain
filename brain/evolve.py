@@ -102,6 +102,8 @@ def record_error(where: str, exc: Optional[BaseException] = None) -> None:
             return
         frames = []
         for frame in traceback.extract_tb(exc.__traceback__):
+            if not os.path.isabs(frame.filename):
+                continue                                 # `<frozen runpy>` (3.11+) would resolve against the cwd
             try:
                 rel = Path(frame.filename).resolve().relative_to(ROOT)
             except (ValueError, OSError):
