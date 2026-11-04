@@ -53,6 +53,28 @@ every session.
 | **Performance boost** | Better context, better output. The agent sees what you already learned before it acts. |
 | **Compounding know-how** | Every session adds to it. What you learn grows instead of evaporating. |
 
+## Meet Cosmos Orbit: carry the work through to completion
+
+**Give your agent memory with Brain, and keep the work moving with
+[Cosmos Orbit](https://github.com/honeyground-org/cosmos-orbit).**
+
+Orbit is an open-source local companion for **Claude Code and Codex CLI**. It keeps the original
+goal, your corrections and completion evidence together as work continues across sessions.
+
+- **Keep the goal in view.** Carry the request, corrections and next steps through compaction and
+  session handoffs.
+- **Check the result.** Run completion checks and an independent review before marking work verified.
+- **Pick up unfinished work.** Use a durable task ledger and checkpoints to support recovery and
+  continue from the recorded state.
+
+Together, Brain supplies relevant knowledge from earlier work, while Orbit tracks what the current
+task still needs to finish. Orbit's optional Brain integration retrieves attributed context and can
+queue memories for retry-safe saving. Either product also works independently.
+
+**[Explore Cosmos Orbit →](https://github.com/honeyground-org/cosmos-orbit)** ·
+[Try the interactive preview](https://honeyground-org.github.io/cosmos-orbit/) ·
+[Installation and getting started](https://github.com/honeyground-org/cosmos-orbit#attach-orbit-to-the-session-you-already-use)
+
 ## How it works: one local index, three moments
 
 ```mermaid
