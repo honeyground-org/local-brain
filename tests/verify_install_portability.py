@@ -84,7 +84,7 @@ class _P:
 def gemma() -> None:
     print("\n" + "=" * 72 + "\n③ EmbeddingGemma — one command, stopping at the person's step\n" + "=" * 72)
     hf = os.path.join(_TMP, "hf")
-    open(hf, "w").close()
+    open(hf, "w", encoding="utf-8").close()
     saved = (embedruntime.step_env, embedruntime._run, embedruntime.venv_hf, embedruntime.snapshot_path,
              embedruntime.step_service)
     embedruntime.step_env = lambda say: {"ok": True, "step": "env"}
@@ -158,14 +158,14 @@ print(json.dumps({"first": first}))
 '''
     env = dict(os.environ, BRAIN_VECTOR_STORE="qdrant", BRAIN_VECTOR_STORE_URL="http://127.0.0.1:9",
                BRAIN_EMBED_PROVIDER="none", BRAIN_STORE_SYNC_TIMEOUT="2")
-    p = subprocess.run([sys.executable, "-c", code, ROOT], capture_output=True, text=True, env=env, timeout=60)
+    p = subprocess.run([sys.executable, "-c", code, ROOT], capture_output=True, text=True, errors="replace", env=env, timeout=60)
     try:
         first = json.loads(p.stdout.strip().splitlines()[-1])["first"]
     except (ValueError, IndexError):
         first = {"stderr": p.stderr[-300:]}
     check("nothing to send → skipped, no request made", first.get("skipped") == "no_embedding", str(first))
     env["BRAIN_EMBED_PROVIDER"] = "stub"
-    p = subprocess.run([sys.executable, "-c", code, ROOT], capture_output=True, text=True, env=env, timeout=60)
+    p = subprocess.run([sys.executable, "-c", code, ROOT], capture_output=True, text=True, errors="replace", env=env, timeout=60)
     try:
         first = json.loads(p.stdout.strip().splitlines()[-1])["first"]
     except (ValueError, IndexError):
