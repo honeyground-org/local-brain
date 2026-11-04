@@ -117,6 +117,7 @@
  "cli.help.cmd.eval_init": "Draw an evaluation set out of this corpus",
  "cli.help.cmd.export": "What you earned, in one file (calibration deliberately excluded)",
  "cli.help.cmd.feedback": "Was that recall useful or wrong — it changes future ranking",
+ "cli.help.cmd.evolve": "Self-evolution — repeated errors become gated fixes; off until a maintainer turns it on",
  "cli.help.cmd.i18n_check": "Translation catalogs — ⛔missing keys, placeholder mismatches (uncounted, they rot)",
  "cli.help.cmd.import_": "Merge — ⛔ dry-run by default; `--apply` to commit",
  "cli.help.cmd.index": "Index (incremental). `--full` rebuilds everything",

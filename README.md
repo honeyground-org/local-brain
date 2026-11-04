@@ -338,6 +338,7 @@ All commands work from any directory once installed (`brain <command>`).
 |---|---|
 | `brain privacy` | Audit the outbound door — which memories hold secret-shaped values (values never shown) |
 | `brain i18n --check` | Translation catalogs — missing keys, unused keys, placeholder mismatches |
+| `brain evolve` | Self-evolution — what this installation learned, the repeated errors it saw, open fixes ([details](#self-evolution-personal-data-stays-public-code-is-gated)) |
 
 **Tip: pass synonyms to `recall` with `-t`.** Memories are often written in different words than your
 question; on the author's own notes, synonyms lifted hits from 2 of 9 questions to 8 of 9.
@@ -470,6 +471,10 @@ for any language.
 - **Scheduled jobs** — semantic indexing and rule discovery, once a day.
   `brain status` reads their logs to show the last run. On macOS the installer uses `launchd`
   (`install/launchd.sh`), which also catches up on runs that were due while the machine slept.
+- **Self-evolution signals** — an unhandled error in a hook, a session hook or a daily job is recorded
+  (where, exception class, brain frames; **never the message**) instead of vanishing behind the hook's
+  exit 0. In the default mode `local` nothing else happens; see
+  [Self-evolution](#self-evolution-personal-data-stays-public-code-is-gated).
 
 ---
 
@@ -684,6 +689,79 @@ small to measure), the hook stays silent rather than guess.
 
 ---
 
+## Self-evolution: personal data stays, public code is gated
+
+brain improves in two layers, and the line between them is the point.
+
+**In short:**
+
+- **What your use teaches stays on your machine as data. Nothing personal is ever written into the code.**
+- **Off by default.** In mode `local` errors are only recorded; nothing is changed, pushed or sent anywhere.
+- **A fix leaves the machine only through five gates** (personal traces, language, all checks, a check that
+  reproduces the defect, an independent review) **and then the repository's own pull-request rules** — it
+  cannot skip the required checks or reviews.
+- **Every safeguard is itself checked:** `tests/verify_evolve.py` (49 checks) turns red when one is removed
+  (nine deliberate breakages, from switching off the personal-trace gate to fast-forwarding on any branch;
+  each one red).
+
+| Layer | What it holds | Where it lives | On by default |
+|---|---|---|---|
+| **Personal** | everything learned from one person's use — the hook threshold measured on their corpus, the margin learned from their sample, the reading policy chosen from their own evidence, behaviour rules discovered from their transcripts | that person's brain home, never the code | yes |
+| **Public** | general fixes to the code itself — a defect that would hit any user, with a check that proves it | the upstream repository, through its normal pull-request rules | no — a maintainer turns it on |
+
+A value tuned to one person (a threshold, a word list, a phrase) belongs in the personal layer and is never
+written into the code; a defect in the code is fixed for everyone and never carries anything personal.
+
+**Signals.** Every unhandled error in the module runner (`bin/_run.py`, which starts every hook in a checkout
+install) — including the one the prompt hook swallows so it can exit 0 — and in the session hooks and the daily
+jobs is appended to `<brain home>/evolve/errors.jsonl` as *where it happened, the exception class and the brain
+frames it passed through* — never the message, which can hold a prompt, a note or a path. Hooks still exit 0;
+the record is how a silent failure becomes visible. Rows with the same place, class and
+innermost frame form one candidate; a candidate is due after it occurred twice (once can be the weather).
+
+**One run.** Session start (the same event that wakes the index worker) checks for a due candidate or an
+open pull request to follow and starts one detached run; in mode `local` it stops after reading at most
+one small file. A run holds a lock, takes the most frequent due candidate, and gives an agent an isolated
+worktree of the upstream repository at `origin/main`. The agent is Claude Code started without the person's
+settings, hooks, MCP servers or brain, with an empty temporary brain home and its commands sandboxed with no
+network. It reads `CONTRIBUTING.md`, writes a failing check first, makes the smallest general fix, and answers
+`fixable=false` when the right fix is a personal value or the error is the environment.
+
+**Gates.** The change leaves the machine only when all of them pass:
+
+1. **Personal traces** — no added line, title or description carries the home folder, the user or host
+   name, the brain home, a corpus root, an e-mail address, a credential-shaped token, or a phrase from the
+   person's own notes: a four-word sequence found in the index but not anywhere in the repository itself
+   (`tests/verify_evolve.py` feeds it a real phrase from a synthetic corpus and must reject it, and must let
+   through a phrase the repository already contains).
+2. **Language** — added lines are plain ASCII outside `brain/locales/`.
+3. **Checks** — `python3 tests/clean_room.py` passes on the change.
+4. **Reproduces** — a new or changed `tests/verify_*.py` fails on the base commit (a skip, exit 77, proves
+   nothing).
+5. **Generality** — a fresh reviewer that can only read the worktree judges it useful to any user, with no
+   regression risk.
+
+A change that fails any gate is never pushed. A candidate is tried again only after it occurs again, at most
+three times.
+
+**Modes.**
+
+| Mode | What a gated change becomes | Turn it on |
+|---|---|---|
+| `local` (default) | nothing — errors are recorded and shown, the personal layer keeps learning | `brain evolve --mode local` (also turns the others off) |
+| `propose` | a local branch `evolve/<candidate>` and a report in `<brain home>/evolve/` | `brain evolve --mode propose [--repo PATH]` |
+| `merge` | a pushed branch and a pull request that follows the rules above — `area: what changed` title, sign-off, the template's five sections — with auto-merge (squash), so required checks and reviews decide when it lands; once merged, a later run fast-forwards the running checkout if it is on `main` (git refuses if that would touch your uncommitted edits) | `brain evolve --mode merge [--repo PATH]` (needs push access and `gh`) |
+
+`--repo` defaults to the checkout brain runs from. Turning a mode on counts only what happens from then on.
+`brain evolve` prints the state as JSON (mode, the personal layer, candidates, open pull requests, recent
+runs); `brain evolve --run` makes one attempt now.
+
+**Records**, all under `<brain home>/evolve/`: `errors.jsonl` (signals; capped at 1 MB until read),
+`state.json` (mode, candidates, open pull requests, the last 50 runs and merges with each gate's result), `evolve.log`
+(the detached run's output), `<branch>.md` (proposals). Deleting the folder resets it.
+
+---
+
 ## Tests
 
 Each of these states its own pass criteria in the file, and runs a control group
@@ -719,6 +797,7 @@ python3 tests/verify_stores.py          # vector and graph databases are replace
 python3 tests/verify_stores_live.py     # Qdrant and Neo4j, live: the same answers as the local copy
 python3 tests/verify_docker_stores.py   # Docker: data survives restarts and removed containers, refills itself
 python3 tests/verify_pr_report.py       # the pull-request rules, the review gate and CODEOWNERS can each fail
+python3 tests/verify_evolve.py          # self-evolution: every gate rejects, nothing personal is pushed
 ```
 
 ---
@@ -736,6 +815,7 @@ python3 tests/verify_pr_report.py       # the pull-request rules, the review gat
 | `brain/ruledisc.py` | Discovers behaviour rules from use: transcripts × memories → judge |
 | `brain/hosts.py` | Host adapters — Claude Code, Codex, generic |
 | `brain/i18n.py` | Message catalogs, English-first |
+| `brain/evolve.py` | Self-evolution — error signals, gated fixes in an isolated worktree, pull requests ([details](#self-evolution-personal-data-stays-public-code-is-gated)) |
 | `brain/stores.py` | Storage backends — which database serves each role, the sync ledger, the fallback |
 | `brain/vecstore.py` | Vector stores — the local scan and Qdrant |
 | `brain/graphstore.py` | Graph stores — the local link table and Neo4j |

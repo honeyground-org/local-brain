@@ -562,6 +562,12 @@ def main_notice() -> int:
             _db.close()
     except Exception:                                    # noqa: BLE001
         pass
+    # Self-evolution reacts to the same event (§evolve.maybe_start): in mode local, one stat of a missing file.
+    try:
+        from brain import evolve as _evolve
+        _evolve.maybe_start()
+    except Exception:                                    # noqa: BLE001
+        pass
     recs = collect(d.get("session_id") or "")
     parts = [format_notice(recs)] if recs else []
     # A grown index hitting its limit is announced from the same spot — two output points would
@@ -618,7 +624,12 @@ def _safe(fn) -> int:
     """⛔ ★A hook must never block the host, no matter what★ — it ends at 0 even on failure."""
     try:
         return fn() or 0
-    except Exception:                                    # noqa: BLE001
+    except Exception as exc:                             # noqa: BLE001
+        try:                                             # a signal for self-evolution (§evolve.record_error)
+            from brain import evolve
+            evolve.record_error("tail." + getattr(fn, "__name__", "?"), exc)
+        except Exception:                                # noqa: BLE001
+            pass
         return 0
 
 

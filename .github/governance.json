@@ -37,8 +37,8 @@
     },
     "privacy": {
       "impact": "high",
-      "summary": "what leaves the machine: AI engines, the proxy, scrubbing",
-      "paths": ["brain/privacy.py", "brain/engines.py", "brain/proxy.py"],
+      "summary": "what leaves the machine: AI engines, the proxy, scrubbing, self-evolution's gates",
+      "paths": ["brain/privacy.py", "brain/engines.py", "brain/proxy.py", "brain/evolve.py"],
       "owners": []
     },
     "install": {

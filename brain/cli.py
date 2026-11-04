@@ -83,6 +83,7 @@ HELP_GROUPS = (
     ("cli.help.group.safety", (
         ("privacy", "cli.help.cmd.privacy"),
         ("feedback", "cli.help.cmd.feedback"),
+        ("evolve", "cli.help.cmd.evolve"),
     )),
 )
 
@@ -508,6 +509,15 @@ def main(argv=None) -> int:
     p = sub.add_parser("feedback", help="Rate a recall result (self-improvement)")
     p.add_argument("name")
     p.add_argument("signal", choices=["useful", "wrong", "stale", "open"])
+
+    p = sub.add_parser("evolve", help="Self-evolution: what this installation learned, repeated errors, "
+                                      "and gated fixes (off unless a maintainer turns it on)")
+    p.add_argument("--mode", choices=["local", "propose", "merge"],
+                   help="local (default): learn only into this brain home · propose: gated fixes as local "
+                        "branches · merge: gated fixes as pull requests with auto-merge")
+    p.add_argument("--repo", help="a git checkout of local-brain to work from (default: the one brain runs from)")
+    p.add_argument("--run", action="store_true", help="one attempt now (the session-start hook starts these)")
+    p.add_argument("--candidate", help="with --run: this candidate instead of the most frequent due one")
 
     # ⛔ ★Bare `brain` prints the help★ — argparse's default only says "error: cmd is required".
     #    The first thing a newcomer does is type `brain` on its own and see what happens.
@@ -1195,6 +1205,16 @@ def main(argv=None) -> int:
             print("\n" + i18n.t("cli.rules.list.signal_file", path=ruledisc.signals_file()))
     elif args.cmd == "feedback":
         _p(health.feedback(db, args.name, args.signal))
+    elif args.cmd == "evolve":
+        from brain import evolve
+        try:
+            if args.mode or args.repo:
+                evolve.configure(args.mode, args.repo)
+            out = evolve.run(args.candidate) if args.run else evolve.view()
+        except (ValueError, evolve.Busy) as error:
+            print(json.dumps({"error": str(error)}, ensure_ascii=False))
+            return 1
+        print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0
 
 

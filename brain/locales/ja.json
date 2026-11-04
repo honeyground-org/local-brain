@@ -115,6 +115,7 @@
  "cli.help.cmd.eval_init": "このコーパスから評価セットを抜き出す",
  "cli.help.cmd.export": "得たものを1ファイルに(較正は意図的に除く)",
  "cli.help.cmd.feedback": "その想起が役立ったか間違っていたか — 今後の順位に反映される",
+ "cli.help.cmd.evolve": "自己進化 — 繰り返すエラーを関門を通った修正に; 保守者が有効にするまでオフ",
  "cli.help.cmd.i18n_check": "翻訳カタログ — ⛔不足キー、プレースホルダー不一致(数えないと静かに腐る)",
  "cli.help.cmd.import_": "統合 — ⛔ 既定はドライラン、`--apply` で実際に適用",
  "cli.help.cmd.index": "索引(増分)。`--full` で全体を作り直す",

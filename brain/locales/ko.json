@@ -115,6 +115,7 @@
  "cli.help.cmd.eval_init": "이 코퍼스에서 평가 세트를 뽑는다",
  "cli.help.cmd.export": "번 것을 파일 하나로(눈금은 일부러 뺀다)",
  "cli.help.cmd.feedback": "그 회상이 쓸모 있었는지 틀렸는지 — 다음 순위에 반영된다",
+ "cli.help.cmd.evolve": "자체 진화 — 반복되는 오류를 관문을 통과한 수정으로; 유지보수자가 켜기 전에는 꺼져 있다",
  "cli.help.cmd.i18n_check": "번역 카탈로그 — ⛔빠진 키, 자리표시자 불일치(안 세면 조용히 썩는다)",
  "cli.help.cmd.import_": "병합 — ⛔ 기본은 드라이런; `--apply` 로 실제 적용",
  "cli.help.cmd.index": "색인(증분). `--full` 은 전체를 다시 만든다",
