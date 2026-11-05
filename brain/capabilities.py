@@ -74,6 +74,8 @@ def tool_flags(tools: List[dict]) -> Dict[str, Any]:
             "project_id": "project_id" in rm,
             "source": "source" in rm,
             "lifecycle": "lifecycle" in rm,
+            "prepare_only": "prepare_only" in rm,
+            "expected_fact_sha": "expected_fact_sha" in rm,
             "observed_at": "observed_at" in rm,
             "embed_now": "embed_now" in rm,
             "ack": (["stored", "indexed_words", "embedded", "served"] if "json" in _formats(rm) else []),

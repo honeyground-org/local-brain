@@ -946,6 +946,31 @@ within an exact `project_id` scope. A scope can represent a person or household 
 Keep a future intention, a confirmed decision and the actual situation in distinct facets; for
 example `move_plan` and `current_address`. Do not automatically equate a decision with implementation.
 
+Before changing a fact, use `recall` to discover related records and reuse their topic/facet identifiers,
+including when the new conversation is in a different language. Call `remember` with the proposed
+payload and `prepare_only: true`: it writes no memory and returns same-scope fact revisions, source
+hashes, validity and an `expected_fact_sha`. Review the records, then send the confirmed payload with
+that hash. A changed fact snapshot returns `fact_changed`; refresh the preview before deciding again.
+An identical successful retry still returns `noop`.
+The preview always returns JSON and refreshes only the local index, without embedding calls or
+remote-store synchronization. It does not count as a saved memory in the session's continuity record.
+
+A new active record that leaves an existing effective fact unresolved returns `reconciliation_required`
+without writing. Explicitly link the confirmed predecessors with `supersedes`, or retain uncertainty
+as `proposed` or `disputed`. Never supersede a mixed-topic note to correct just one fact. Save responses
+include `validity`: a successful save is distinct from a currently applicable fact, and an index delay
+reports unknown validity. Preview bodies are bounded; use `memory_history` to inspect omitted records.
+Known scheduled changes are checked too: bound a temporary fact with `valid_to`, or explicitly resolve
+the future schedule before adding an overlapping indefinite fact. A past correction whose validity
+has ended does not need to supersede a later, non-overlapping current fact.
+
+These controls do not parse language-specific change phrases. Text and identifiers accept Unicode;
+topic/facet equality uses canonical Unicode normalization without translating or case-folding them.
+The same stable identifiers connect records written in different languages. Translation, similarity,
+or a later recording date alone never authorizes replacement. Discovery still depends on the selected
+retrieval engine's language coverage; a preview is not proof that every semantically equivalent note
+was found. Untracked memories remain explicitly unverified rather than silently becoming current facts.
+
 ```json
 {
   "name": "remember",

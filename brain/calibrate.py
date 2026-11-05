@@ -512,7 +512,9 @@ def measure(db: sqlite3.Connection) -> dict:
 #       (§proxy) stands in, with the top 3% of controls allowed above the gate (§vectors.PROXY_NOISE_SHARE), and
 #       a local engine re-measures by embedding what is missing. A labelled sample is used exactly as before.
 #       Bumped because `vectors` changed.
-CODE_GENERATION = 41
+#   42 (2026-11-05) Canonical Unicode fact identity and guarded reconciliation before saves.
+#       Bumped because lifecycle resolution changed.
+CODE_GENERATION = 42
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·
