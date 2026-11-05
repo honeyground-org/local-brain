@@ -11,7 +11,9 @@ import contextvars
 import datetime
 import difflib
 import json
+import hashlib
 import re
+import unicodedata
 from collections import OrderedDict
 
 STATES = ('active', 'proposed', 'disputed', 'superseded', 'retracted', 'archived')
@@ -19,6 +21,37 @@ FIELDS = ('topic', 'facet', 'status', 'valid_from', 'valid_to', 'supersedes',
           'superseded_by', 'change_reason', 'evidence', 'legacy_whole_record_sha')
 _VIEW = contextvars.ContextVar('brain_memory_view', default=('current', None))
 _CACHE = OrderedDict()
+
+
+def identity(meta):
+    """Canonical Unicode, not translation, transliteration or case folding."""
+    return tuple(unicodedata.normalize('NFC', meta.get(k) or '') for k in ('topic', 'facet'))
+
+
+def prepare(db, name, args):
+    """Bounded review of one fact. Similar prose is never replacement authority."""
+    from brain import remembercontract
+    meta = args.get('lifecycle') or {}
+    scope = args.get('project_id') or ''
+    records, versions = [], []
+    snap = snapshot(db)
+    for did, record in snap.docs.items():
+        if record['project_id'] != scope or not meta.get('topic') or identity(record['meta']) != identity(meta):
+            continue
+        actual_sha = remembercontract.file_sha(record['path'])
+        versions.append((record['name'], record['path'], record['sha'], actual_sha))
+        row = db.execute('SELECT body FROM docs WHERE id=?', (did,)).fetchone()
+        records.append({'name': record['name'], 'sha': record['sha'], 'source_matches_index': actual_sha == record['sha'],
+                        'lifecycle': snap.info(did), 'body': (row['body'] or '')[:2000],
+                        'body_truncated': len(row['body'] or '') > 2000})
+    records.sort(key=lambda r: r['name'])
+    raw = json.dumps([scope, identity(meta), sorted(versions)], ensure_ascii=False, separators=(',', ':'))
+    return {'contract': remembercontract.CONTRACT, 'ok': True, 'stored': False, 'result': 'prepared', 'scope': scope,
+            'expected_fact_sha': hashlib.sha256(raw.encode('utf-8')).hexdigest() if meta.get('topic') else None,
+            'records': records[:50], 'total': len(records), 'truncated': len(records) > 50,
+            'untracked': not bool(meta), 'source_matches_index': all(r['source_matches_index'] for r in records),
+            'coverage': 'indexed records with the same exact scope and Unicode-normalized topic/facet; semantic equivalence is not inferred',
+            'next': 'Use recall to discover identifiers across languages, then reuse topic/facet. Keep one fact per memory. Read memory_history for omitted records. Confirm evidence before superseding; use proposed or disputed when uncertain.'}
 
 
 def instant(value):
@@ -154,8 +187,7 @@ class Snapshot:
     def same_fact(self, a, b):
         x, y = self.docs[a], self.docs[b]
         return (x['project_id'] == y['project_id'] and x['meta'].get('topic')
-                and (x['meta'].get('topic'), x['meta'].get('facet')) ==
-                    (y['meta'].get('topic'), y['meta'].get('facet')))
+                and identity(x['meta']) == identity(y['meta']))
 
     def edge(self, old, new):
         self.next.setdefault(old, set()).add(new)
@@ -243,7 +275,7 @@ def check_write(db, name, args, current):
     if issue:
         return issue
     old = current.get('lifecycle')
-    if old and any(old.get(k) != value.get(k) for k in ('topic', 'facet')):
+    if old and identity(old) != identity(value):
         return 'topic and facet cannot change in place; create a separate memory'
     if value.get('superseded_by'):
         return 'write the successor with supersedes; do not create a forward link from the write API'
@@ -262,11 +294,37 @@ def check_write(db, name, args, current):
             continue
         if not prior:
             return 'an untracked predecessor requires legacy_whole_record_sha for an explicit whole-record replacement'
-        if (prior.get('topic'), prior.get('facet')) != (value['topic'], value['facet']):
+        if identity(prior) != identity(value):
             return 'supersedes must keep the same topic and facet'
         if prior.get('valid_from') and instant(value['valid_from']) < instant(prior['valid_from']):
             return 'a replacement cannot start before its predecessor'
     return None
+
+
+def reconcile_write(db, name, args):
+    """Require an explicit decision for competing active facts; never newest-file-wins."""
+    review = prepare(db, name, args)
+    expected = args.get('expected_fact_sha')
+    if expected and (expected != review['expected_fact_sha'] or not review['source_matches_index']):
+        review['reason'] = 'source_not_indexed' if not review['source_matches_index'] else 'fact_snapshot_changed'
+        return 'fact_changed', review
+    meta = args.get('lifecycle') or {}
+    if not meta or meta.get('status', 'active') != 'active':
+        return None, review
+    snap = snapshot(db)
+    scope = args.get('project_id') or ''
+    day = meta.get('valid_from') or now()
+    heads = set()
+    for at in (day, now()):
+        with view('current', at):
+            heads.update(r['name'] for did, r in snap.docs.items()
+                         if r['project_id'] == scope and identity(r['meta']) == identity(meta)
+                         and snap.eligible(did, at) and snap.resolve(did) == [did])
+    missing = heads - set(meta.get('supersedes', []))
+    if missing:
+        review['unresolved_names'] = sorted(missing)
+        return 'reconciliation_required', review
+    return None, review
 
 
 def history(db, name, scope=None, offset=0, limit=25):

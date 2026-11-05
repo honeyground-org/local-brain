@@ -262,6 +262,8 @@ for _tool in TOOLS:
         _properties.update({"view": {"type": "string", "enum": ["current", "history"], "default": "current"},
                             "as_of": {"type": "string", "description": "Effective date or ISO timestamp with timezone; omitted means now"}})
     if _tool["name"] == "remember":
+        _properties['prepare_only'] = {'type': 'boolean', 'description': 'Preview same-scope fact revisions without saving. Use before changing a fact; returns expected_fact_sha for a guarded save.'}
+        _properties['expected_fact_sha'] = {'type': 'string', 'pattern': '^[0-9a-f]{64}$', 'description': 'From prepare_only. Reject a save if indexed fact revisions or their source files changed. Retrying a completed identical save remains a noop.'}
         _properties["lifecycle"] = {"type": "object", "required": ["topic", "facet"],
             "additionalProperties": False, "properties": {
                 "topic": {"type": "string"}, "facet": {"type": "string"},
@@ -275,7 +277,11 @@ for _tool in TOOLS:
         _tool["description"] += (" For changing facts, preferences, arrangements or decisions, use lifecycle topic/facet "
             "and evidence. To correct an entire untracked memory, add its exact SHA in legacy_whole_record_sha and name in supersedes. Do not retire mixed-topic notes for a partial correction. Keep one independently changing fact per memory. Separate plans from actual state with different facets. "
             "Read the prior memory first; save confirmed changes under a new name with supersedes, valid_from and change_reason. "
-            "Never infer replacement from recency alone. Use proposed for tentative ideas; never silently turn them into facts.")
+            "Never infer replacement from recency alone. Use proposed for tentative ideas; never silently turn them into facts. "
+            "Before saving a changing fact, recall related memories in the user's language and reuse their topic/facet identifiers across languages. "
+            "Call remember with prepare_only=true, review the records, then save with expected_fact_sha. "
+            "Resolve competing active facts with explicit supersedes and evidence, or store an uncertain claim as disputed. "
+            "Do not translate identifiers or infer a replacement from semantic similarity. Stored does not mean verified current: inspect validity in the acknowledgement.")
 TOOLS.append({"name": "memory_history", "description": "Read current state, previous revisions and change evidence for a memory, including everyday life and work. Old names also resolve to the current topic history. document_history preserves observed file edits, with diffs; observation time is not a fact validity date.",
               "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "scope": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "required": ["name"]}})
 
@@ -386,9 +392,21 @@ def _do_remember(db, args: dict) -> str:
             if "project_id" not in args and cur.get("project_id"):
                 args["project_id"] = cur["project_id"]
             from brain import lifecycle
+            if args.get('prepare_only'):
+                if 'lifecycle' not in args and cur.get('lifecycle'):
+                    args['lifecycle'] = cur['lifecycle']
+                try:
+                    store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False)
+                except Exception as exc:
+                    return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
+                preview = lifecycle.prepare(db, name, args)
+                preview['write_issue'] = lifecycle.check_write(db, name, args, cur)
+                return json.dumps(preview, ensure_ascii=False)
             issue = lifecycle.check_write(db, name, args, cur)
             if issue:
                 return json.dumps(rc.error("invalid_argument", issue), ensure_ascii=False)
+            if args.get('expected_fact_sha') and not args.get('lifecycle'):
+                return json.dumps(rc.error('invalid_argument', 'A fact snapshot requires lifecycle topic/facet'))
             if cur.get("lifecycle") and (
                     cur.get("body") != store.parse_frontmatter(rc.render(name, args, cur.get("verified_at") or ""))[1].strip()
                     or cur.get("lifecycle") != args.get("lifecycle")
@@ -396,6 +414,22 @@ def _do_remember(db, args: dict) -> str:
                 return json.dumps(rc.error("revision_required", "Keep the old revision; create a new name with lifecycle.supersedes"))
             args = rc.prepared(args)
             result, conflict = rc.decide(cur, args)
+            if result in ('new', 'updated'):
+                if args.get('lifecycle'):
+                    try:
+                        # Reconcile against fresh source observations under the shared writer lock.
+                        # No remote sync, trigger healing or inference inside this precondition check.
+                        store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False)
+                    except Exception as exc:
+                        return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
+                    issue = lifecycle.check_write(db, name, args, cur)
+                    if issue:
+                        return json.dumps(rc.error('invalid_argument', issue), ensure_ascii=False)
+                code, review = lifecycle.reconcile_write(db, name, args)
+                if code:
+                    review['records'] = [{k: r[k] for k in ('name', 'sha', 'source_matches_index', 'lifecycle')}
+                                         for r in review['records']]
+                    return json.dumps(rc.error(code, 'Review the current fact before saving; no memory was written', review), ensure_ascii=False)
             verified_at = (cur.get("verified_at") if result == "noop"
                            else (args.get("observed_at") or ("" if args.get("lifecycle") else time.strftime("%Y-%m-%d"))))
             stats: dict = {}
@@ -413,6 +447,11 @@ def _do_remember(db, args: dict) -> str:
                     stats = {"error": str(exc)[:200]}
             out = rc.ack(db, name=name, path=path, result=result, conflict=conflict, args=args,
                          stats=stats, t0=t0, verified_at=verified_at, cur=cur)
+            if out.get('stored'):
+                row = db.execute('SELECT id,sha FROM docs WHERE path=?', (path,)).fetchone()
+                out['validity'] = (lifecycle.snapshot(db).info(row['id']) if row and row['sha'] == out['sha']
+                                   else {'status': 'unknown', 'current': None, 'issue': 'index_pending'})
+                out['meta']['validity_as_of'] = out['validity'].pop('as_of', None)
     except sqlite3.OperationalError as exc:
         busy = "locked" in str(exc).lower() or "busy" in str(exc).lower()
         out = dict(rc.error("busy" if busy else "write_failed",
@@ -424,9 +463,9 @@ def _do_remember(db, args: dict) -> str:
         from brain import deferred
         deferred.kick(db)  # ACK describes the completed save; inference stays outside this request
     if args.get("format") == "text" and out.get("ok"):
-        return "%s: %s\nindex: %s\npath: %s\nsha: %s" % (
+        return "%s: %s\nindex: %s\npath: %s\nsha: %s\nvalidity: %s" % (
             {"new": "saved", "updated": "updated", "noop": "unchanged"}[out["result"]],
-            name, json.dumps(out["index"], ensure_ascii=False), path, out["sha"])
+            name, json.dumps(out["index"], ensure_ascii=False), path, out["sha"], json.dumps(out.get('validity'), ensure_ascii=False))
     return json.dumps(out, ensure_ascii=False)
 
 

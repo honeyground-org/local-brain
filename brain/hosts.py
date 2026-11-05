@@ -170,7 +170,7 @@ class Host:
         return ""
 
     def tool_calls(self, line: str) -> List[tuple]:
-        """One log line → `[(tool name, kind, text)]`, kind being `"shell"` | `"path"` | `""`.
+        """One log line → `[(tool name, kind, text)]`, kind being `"shell"` | `"path"` | `"preview"` | `""`.
 
         ⛔ ★Every host writes its log in its own shape★, and a reader that knows only one shape does
         not fail — it returns ★zero★, which reads exactly like "this person never does that". Rule
@@ -334,7 +334,9 @@ class ClaudeCode(Host):
             if not (isinstance(x, dict) and x.get("type") == "tool_use"):
                 continue
             name, inp = x.get("name") or "", x.get("input") or {}
-            if name in shell:
+            if name.endswith('remember') and inp.get('prepare_only') is True:
+                out.append((name, 'preview', ''))
+            elif name in shell:
                 out.append((name, "shell", inp.get("command") or ""))
             elif name in edit:
                 out.append((name, "path", inp.get("file_path") or inp.get("notebook_path") or ""))
@@ -523,6 +525,12 @@ class Codex(Host):
             raw = json.dumps(raw, ensure_ascii=False)
         if not isinstance(raw, str):
             return []
+        if name.endswith('remember'):
+            try:
+                if json.loads(raw).get('prepare_only') is True:
+                    return [(name, 'preview', '')]
+            except (ValueError, AttributeError):
+                pass
         out: List[tuple] = []
         for m in _CODEX_CMD.finditer(raw):
             out.append((name, "shell", _js_unescape(m.group(1))))

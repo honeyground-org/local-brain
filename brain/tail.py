@@ -346,6 +346,8 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
     for name, kind, arg in host.tool_calls(line):
         # ★A memory save resets the tail to 0★ — whether via a remember call or a direct file write.
         if name.endswith("remember"):
+            if kind == 'preview':
+                continue
             tail.update(_blank_tail())
             tail["_saved"] = True
             continue

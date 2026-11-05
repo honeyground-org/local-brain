@@ -40,10 +40,16 @@ def validate(args: dict) -> Optional[Dict[str, Any]]:
     if not isinstance(args, dict):
         return error("invalid_argument", "arguments must be an object")
     name = args.get("name")
-    if (not isinstance(name, str) or not re.fullmatch(r"[\w.-]{1,128}", name)
+    if (not isinstance(name, str) or not 1 <= len(name) <= 128
+            or any(not (c.isalnum() or unicodedata.category(c).startswith('M') or c in '._-') for c in name)
             or name in (".", "..")):
         return error("invalid_argument", "name must be a 1–128 character slug using letters, digits, dots, underscores or hyphens")
     fmt = args.get("format")
+    if 'prepare_only' in args and not isinstance(args['prepare_only'], bool):
+        return error('invalid_argument', 'prepare_only must be a boolean')
+    if 'expected_fact_sha' in args and (not isinstance(args['expected_fact_sha'], str) or
+                                      not re.fullmatch('[0-9a-f]{64}', args['expected_fact_sha'])):
+        return error('invalid_argument', 'expected_fact_sha must be the SHA-256 returned by prepare_only')
     if fmt not in (None, "text", "json"):
         return error("invalid_argument", "format must be \"text\" or \"json\"", {"format": fmt})
     key = args.get("idempotency_key")
