@@ -960,6 +960,9 @@ without writing. Explicitly link the confirmed predecessors with `supersedes`, o
 as `proposed` or `disputed`. Never supersede a mixed-topic note to correct just one fact. Save responses
 include `validity`: a successful save is distinct from a currently applicable fact, and an index delay
 reports unknown validity. Preview bodies are bounded; use `memory_history` to inspect omitted records.
+Known scheduled changes are checked too: bound a temporary fact with `valid_to`, or explicitly resolve
+the future schedule before adding an overlapping indefinite fact. A past correction whose validity
+has ended does not need to supersede a later, non-overlapping current fact.
 
 These controls do not parse language-specific change phrases. Text and identifiers accept Unicode;
 topic/facet equality uses canonical Unicode normalization without translating or case-folding them.

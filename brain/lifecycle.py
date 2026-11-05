@@ -301,13 +301,17 @@ def check_write(db, name, args, current):
     return None
 
 
-def reconcile_write(db, name, args):
+def reconcile_write(db, name, args, unchanged_fact=False):
     """Require an explicit decision for competing active facts; never newest-file-wins."""
     review = prepare(db, name, args)
     expected = args.get('expected_fact_sha')
     if expected and (expected != review['expected_fact_sha'] or not review['source_matches_index']):
         review['reason'] = 'source_not_indexed' if not review['source_matches_index'] else 'fact_snapshot_changed'
         return 'fact_changed', review
+    if unchanged_fact:
+        # The caller's immutable-revision check already proved the fact payload identical.
+        # Renewing only retry metadata must not require a forbidden self-supersession.
+        return None, review
     meta = args.get('lifecycle') or {}
     if not meta or meta.get('status', 'active') != 'active':
         return None, review

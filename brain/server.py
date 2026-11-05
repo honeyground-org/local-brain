@@ -425,7 +425,7 @@ def _do_remember(db, args: dict) -> str:
                     issue = lifecycle.check_write(db, name, args, cur)
                     if issue:
                         return json.dumps(rc.error('invalid_argument', issue), ensure_ascii=False)
-                code, review = lifecycle.reconcile_write(db, name, args)
+                code, review = lifecycle.reconcile_write(db, name, args, unchanged_fact=bool(cur.get('lifecycle')))
                 if code:
                     review['records'] = [{k: r[k] for k in ('name', 'sha', 'source_matches_index', 'lifecycle')}
                                          for r in review['records']]
