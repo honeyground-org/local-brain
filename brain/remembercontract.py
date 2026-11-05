@@ -40,6 +40,8 @@ def validate(args: dict) -> Optional[Dict[str, Any]]:
     if not isinstance(args, dict):
         return error("invalid_argument", "arguments must be an object")
     name = args.get("name")
+    # Combining marks are letters' components in many scripts (including Indic text).
+    # Preserve the supplied filename; filesystem aliases remain protected by the SHA write guard.
     if (not isinstance(name, str) or not 1 <= len(name) <= 128
             or any(not (c.isalnum() or unicodedata.category(c).startswith('M') or c in '._-') for c in name)
             or name in (".", "..")):
