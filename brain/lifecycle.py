@@ -314,8 +314,19 @@ def reconcile_write(db, name, args):
     snap = snapshot(db)
     scope = args.get('project_id') or ''
     day = meta.get('valid_from') or now()
+    moments = {day}
+    present = now()
+    if started(meta, present) and not ended(meta, present):
+        moments.add(present)
+    for record in snap.docs.values():
+        effective = record['meta'].get('valid_from')
+        if (record['project_id'] == scope and identity(record['meta']) == identity(meta) and effective
+                and instant(effective) >= instant(day) and not ended(meta, effective)):
+            moments.add(effective)
     heads = set()
-    for at in (day, now()):
+    # Check every known transition inside the proposed interval, including scheduled facts.
+    # A bounded historical correction must not be forced to replace unrelated present state.
+    for at in moments:
         with view('current', at):
             heads.update(r['name'] for did, r in snap.docs.items()
                          if r['project_id'] == scope and identity(r['meta']) == identity(meta)
