@@ -79,6 +79,7 @@
 /brain/capabilities.py @wangjacsi
 /brain/dockerstores.py @wangjacsi
 /brain/embedruntime.py @wangjacsi
+/brain/hostcontract.py @wangjacsi
 /runtime/embeddinggemma/ @wangjacsi
 /brain/config.example.json @wangjacsi
 /brain/remembercontract.py @wangjacsi

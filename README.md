@@ -83,7 +83,7 @@ queue memories for retry-safe saving. Either product also works independently.
 
 ## Installed with Cosmos: one brain per computer
 
-The [Cosmos](https://cosmos-aios.com) desktop app ships a pinned local-brain release (`v0.1.0`, verified by
+The [Cosmos](https://cosmos-aios.com) desktop app ships a pinned local-brain release (verified by
 SHA-256) and installs it on first run when the computer has none — Python 3.11 through a pinned `uv`, and
 EmbeddingGemma from the Honeyground mirror, with no Hugging Face token. When local-brain is already
 installed, Cosmos attaches to it instead, so Claude Code, Codex and Cosmos share one index and one embedding space.
@@ -93,6 +93,11 @@ installed, Cosmos attaches to it instead, so Claude Code, Codex and Cosmos share
   removes the note; Cosmos never writes into your personal memory folder.
 - Cosmos reads the rest of this brain through `recall`, and embeds through the same EmbeddingGemma service
   (`127.0.0.1:18081`, the `space` fingerprint is checked on every request).
+- **Versions stay in step.** The functions a host calls in-process are listed once in
+  [`brain/hostcontract.py`](brain/hostcontract.py) with an API number (`HOST_API`). Cosmos reads it, and
+  `brain.__version__`, before attaching and refuses an API it does not know; `tests/verify_host_contract.py`
+  keeps the code and that list in agreement. A release archive for hosts to pin is built with
+  `python .github/scripts/release_archive.py` (same commit, same bytes, one SHA-256).
 
 ## How it works: one local index, three moments
 
@@ -144,6 +149,12 @@ and registers the service with the platform's service manager, so it is back aft
 steps by hand instead, see [runtime setup](runtime/embeddinggemma/README.md). Changing an existing
 embedding provider is an explicit user choice; installing or updating Brain does not silently switch
 anyone. A local service failure never triggers a paid-provider fallback.
+
+**Model terms.** EmbeddingGemma is provided under and subject to the Gemma Terms of Use found at
+[ai.google.dev/gemma/terms](https://ai.google.dev/gemma/terms). Using it through Brain, you must not use it for
+the restricted uses in the [Gemma Prohibited Use Policy](https://ai.google.dev/gemma/prohibited_use_policy) or in
+violation of applicable law. A copy of both documents ships with the model files (from the mirror or Hugging Face).
+These terms apply to the model; Brain's own code remains under the Apache License 2.0.
 
 **What has been checked:** model prompt parity, complete source-span planning, incremental reuse,
 backend retrieval and repeated latency diagnostics. These checks do not establish superiority over
