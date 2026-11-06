@@ -81,6 +81,19 @@ queue memories for retry-safe saving. Either product also works independently.
 [Try the interactive preview](https://honeyground-org.github.io/cosmos-orbit/) ·
 [Installation and getting started](https://github.com/honeyground-org/cosmos-orbit#attach-orbit-to-the-session-you-already-use)
 
+## Installed with Cosmos: one brain per computer
+
+The [Cosmos](https://cosmos-aios.com) desktop app ships a pinned local-brain release (`v0.1.0`, verified by
+SHA-256) and installs it on first run when the computer has none — Python 3.11 through a pinned `uv`, and
+EmbeddingGemma from the Honeyground mirror, with no Hugging Face token. When local-brain is already
+installed, Cosmos attaches to it instead, so Claude Code, Codex and Cosmos share one index and one embedding space.
+
+- Cosmos registers one source of its own, `cosmos` → `<brain home>/cosmos-notes/`, and keeps it equal to what
+  Cosmos knows that stays true (facts, preferences, daily digests, session summaries). Forgetting in Cosmos
+  removes the note; Cosmos never writes into your personal memory folder.
+- Cosmos reads the rest of this brain through `recall`, and embeds through the same EmbeddingGemma service
+  (`127.0.0.1:18081`, the `space` fingerprint is checked on every request).
+
 ## How it works: one local index, three moments
 
 ```mermaid
