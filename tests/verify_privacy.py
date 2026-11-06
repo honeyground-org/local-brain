@@ -201,9 +201,19 @@ for p in sorted(glob.glob(os.path.join(os.path.dirname(os.path.dirname(
     if "urlopen" in src and os.path.basename(p) not in ("privacy.py",):
         doors.append((os.path.basename(p), "privacy" in src))
 print("   modules that call out remotely: %s" % ", ".join(n for n, _ in doors))
-missing = [n for n, ok in doors if not ok]
+# ★A door that only downloads is not an outgoing door★ — but it has to stay that way, so it is named
+#  here with its reason and pinned to one shape: a GET of the model archive, nothing sent (2026-11-06).
+DOWNLOAD_ONLY = {"embedruntime.py": "fetches the pinned model archive from a fixed URL; sends no memory text"}
+missing = [n for n, ok in doors if not ok and n not in DOWNLOAD_ONLY]
 check(not missing, "every module that calls out remotely goes through privacy",
       "★doesn't go through: %s★" % missing if missing else "")
+for name in DOWNLOAD_ONLY:
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "brain", name),
+               encoding="utf-8").read()
+    calls = re.findall(r"urlopen\(([^,)]*)", src)
+    check(calls == ["url"] and "data=" not in src.split("urlopen(")[1].split(")")[0]
+          and "Request(" not in src,
+          "%s only downloads (one urlopen of the archive URL, no body)" % name, str(calls))
 
 head("⑤ the audit never returns a value")
 rep = privacy.audit()
