@@ -52,6 +52,24 @@ MIRROR_URL = ("https://github.com/honeyground-org/local-brain/releases/download/
 MIRROR_SHA256 = "d885d927dcbb3c9ee460c75cf4b495771954753651313fdd3533a157cdde14e8"
 MIRROR_DIR = "embeddinggemma-300m-57c266a"          # the one top-level folder inside the archive
 TERMS_PAGE = "https://ai.google.dev/gemma/terms"
+# ★A machine with neither uv nor Python 3.11+★ (2026-11-06) — most Macs a Cosmos user owns. The
+#  installer used to stop there and print `brew install uv`. It now fetches this pinned uv build itself
+#  (hash-checked); uv then fetches Python 3.11 and the pinned requirements. Same library versions →
+#  the same vector-space fingerprint as any other install.
+UV_VERSION = "0.13.4"
+UV_ASSETS = {
+    ("darwin", "arm64"): ("uv-aarch64-apple-darwin.tar.gz",
+                          "e0b1d4743ce64c55d9f0f4a444afa6b81125680070ee04e853fcd0f6c1ebf8f1"),
+    ("darwin", "x86_64"): ("uv-x86_64-apple-darwin.tar.gz",
+                           "7be2dcd316122f4b3e5a0a7889f6248266c14425374e105ff7dc9779184603a6"),
+    ("linux", "x86_64"): ("uv-x86_64-unknown-linux-gnu.tar.gz",
+                          "2b428396f12572d4429cf210ca234dd599a33b3af0958a4d5ed569d63e3f344f"),
+    ("linux", "aarch64"): ("uv-aarch64-unknown-linux-gnu.tar.gz",
+                           "1ae72b4718729e2ccc4f1ae2c6d1e531ca8467800e0546e9130b3886023a60ab"),
+    ("win32", "amd64"): ("uv-x86_64-pc-windows-msvc.zip",
+                         "ccec7508a07d9933d7cb1261880633efcf1f30d6e6eddab21823f1dae6f23225"),
+}
+UV_BASE = "https://github.com/astral-sh/uv/releases/download/"
 TOKENS_PAGE = "https://huggingface.co/settings/tokens"
 MIN_PY = (3, 11)
 
@@ -124,7 +142,12 @@ def step_env(say: Callable[[str], None]) -> dict:
             return {"ok": True, "step": "env", "python": venv_python(), "reused": True}
     os.makedirs(runtime_dir(), exist_ok=True)
     venv = os.path.join(runtime_dir(), "venv")
-    uv = shutil.which("uv")
+    uv = shutil.which("uv") or (bundled_uv() if os.path.isfile(bundled_uv()) else "")
+    if not uv and not find_python():
+        got = bootstrap_uv(say)
+        if not got.get("ok"):
+            return {"ok": False, "step": "env", "why": got.get("why"), "next": python_hint()}
+        uv = got["uv"]
     say("creating the runtime environment (Python 3.11+, torch, sentence-transformers — a few minutes, once)")
     if uv:
         p = _run([uv, "venv", "--python", "3.11", venv], timeout=900)
@@ -163,6 +186,75 @@ def _sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
+def _download(url: str, dest: str) -> None:
+    """★The one door this module opens★ — a GET; nothing from the brain is ever sent."""
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=60) as resp, open(dest, "wb") as out:
+        shutil.copyfileobj(resp, out, 1 << 20)
+
+
+def uv_asset(plat: str = "", machine: str = "") -> Optional[tuple]:
+    import platform
+    plat = plat or ("darwin" if sys.platform == "darwin" else ("win32" if os.name == "nt" else "linux"))
+    m = (machine or platform.machine()).lower()
+    if plat == "darwin":
+        m = "arm64" if m in ("arm64", "aarch64") else m
+    elif plat == "linux":
+        m = "aarch64" if m in ("arm64", "aarch64") else ("x86_64" if m in ("x86_64", "amd64") else m)
+    else:
+        m = "amd64" if m in ("x86_64", "amd64") else m
+    return UV_ASSETS.get((plat, m))
+
+
+def bundled_uv() -> str:
+    return os.path.join(runtime_dir(), "uv", "uv.exe" if os.name == "nt" else "uv")
+
+
+def bootstrap_uv(say: Callable[[str], None], base: str = "") -> dict:
+    """Fetch the pinned uv build into the runtime folder. ⛔ Placed only after its SHA-256 matches."""
+    import tarfile
+    import tempfile
+    import zipfile
+    target = bundled_uv()
+    if os.path.isfile(target):
+        return {"ok": True, "uv": target, "reused": True}
+    asset = uv_asset()
+    if not asset:
+        return {"ok": False, "why": "no pinned uv build for this platform"}
+    name, digest = asset
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    work = tempfile.mkdtemp(prefix=".uv-", dir=os.path.dirname(target))
+    try:
+        archive = os.path.join(work, name)
+        say("fetching uv %s (a small, pinned tool that brings Python 3.11 — once)" % UV_VERSION)
+        try:
+            _download((base or UV_BASE) + UV_VERSION + "/" + name, archive)
+        except Exception as e:
+            return {"ok": False, "why": "uv download failed: %s" % e}
+        if _sha256_file(archive) != digest:
+            return {"ok": False, "why": "the uv download does not match its pinned hash"}
+        exe = os.path.basename(target)
+        data = None
+        if name.endswith(".zip"):
+            with zipfile.ZipFile(archive) as z:
+                hits = [n for n in z.namelist() if n.rsplit("/", 1)[-1] == exe]
+                data = z.read(hits[0]) if hits else None
+        else:
+            with tarfile.open(archive) as t:
+                hits = [m for m in t.getmembers() if m.isfile() and m.name.rsplit("/", 1)[-1] == exe]
+                data = t.extractfile(hits[0]).read() if hits else None
+        if not data:
+            return {"ok": False, "why": "the uv archive holds no %s" % exe}
+        tmp = os.path.join(work, exe)
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, target)
+        return {"ok": True, "uv": target}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def fetch_mirror(snap: str, say: Callable[[str], None], url: str = "",
                  expected: str = "") -> dict:
     """Download the archived snapshot, prove it, and put it exactly where Hugging Face would.
@@ -173,7 +265,6 @@ def fetch_mirror(snap: str, say: Callable[[str], None], url: str = "",
     """
     import tarfile
     import tempfile
-    import urllib.request
     url = url or mirror_url()
     expected = expected or MIRROR_SHA256
     parent = os.path.dirname(snap)
@@ -184,8 +275,7 @@ def fetch_mirror(snap: str, say: Callable[[str], None], url: str = "",
         say("downloading %s @ %s from the Honeyground mirror (about 1.27 GB, once — no token needed)"
             % (MODEL, REVISION[:12]))
         try:
-            with urllib.request.urlopen(url, timeout=60) as resp, open(archive, "wb") as out:
-                shutil.copyfileobj(resp, out, 1 << 20)
+            _download(url, archive)
         except Exception as e:
             return {"ok": False, "step": "model", "why": "mirror download failed: %s" % e}
         got = _sha256_file(archive)
