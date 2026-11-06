@@ -127,14 +127,42 @@ class Launchd(Scheduler):
             os.makedirs(os.path.dirname(plist), exist_ok=True)
             with open(plist, "w", encoding="utf-8") as fh:
                 fh.write(body)
-            subprocess.run(["launchctl", "bootout", "gui/%d/%s" % (os.getuid(), label)],
-                           capture_output=True, timeout=TIMEOUT)
-            p = subprocess.run(["launchctl", "bootstrap", "gui/%d" % os.getuid(), plist],
-                               capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
+            p = _launchd_replace(label, plist)
         except (OSError, subprocess.SubprocessError) as exc:      # noqa: BLE001
             return {"ok": False, "why": str(exc)[:120]}
         return {"ok": p.returncode == 0, "path": plist,
                 "why": (p.stderr or "").strip()[:120]}
+
+
+# ★Replacing a running job waits for the old one to leave★ (measured 2026-11-06).
+# `launchctl bootout` returns while the job is still exiting; a `bootstrap` right after fails with
+# "Bootstrap failed: 5: Input/output error" — and the old job is already gone, so the service stays
+# down until someone re-registers it. Re-running the installer while the embedding service answered
+# did exactly that. A job that ignores SIGTERM for 4 s reproduced it every time; waiting until
+# `launchctl print` no longer finds the label made the same bootstrap succeed.
+REPLACE_WAIT = 15.0            # seconds to wait for the old job to leave (launchd's own exit timeout is 20)
+REPLACE_POLL = 0.25
+
+
+def _launchd_replace(label: str, plist: str, sleep=None, clock=None) -> "subprocess.CompletedProcess":
+    import time
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    target = "gui/%d/%s" % (os.getuid(), label)
+    subprocess.run(["launchctl", "bootout", target], capture_output=True, timeout=TIMEOUT)
+    deadline = clock() + REPLACE_WAIT
+    while clock() < deadline:
+        if subprocess.run(["launchctl", "print", target], capture_output=True,
+                          timeout=TIMEOUT).returncode != 0:
+            break                                        # gone — safe to load the new one
+        sleep(REPLACE_POLL)
+    p = subprocess.run(["launchctl", "bootstrap", "gui/%d" % os.getuid(), plist],
+                       capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
+    if p.returncode == 5:                                # still tearing down — once more, after a pause
+        sleep(1.0)
+        p = subprocess.run(["launchctl", "bootstrap", "gui/%d" % os.getuid(), plist],
+                           capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
+    return p
 
 
 def _launchd_service(label: str, command: List[str], log: str) -> dict:
@@ -155,10 +183,7 @@ def _launchd_service(label: str, command: List[str], log: str) -> dict:
         os.makedirs(os.path.dirname(plist), exist_ok=True)
         with open(plist, "w", encoding="utf-8") as fh:
             fh.write(body)
-        subprocess.run(["launchctl", "bootout", "gui/%d/%s" % (os.getuid(), label)],
-                       capture_output=True, timeout=TIMEOUT)
-        p = subprocess.run(["launchctl", "bootstrap", "gui/%d" % os.getuid(), plist],
-                           capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
+        p = _launchd_replace(label, plist)
     except (OSError, subprocess.SubprocessError) as exc:          # noqa: BLE001
         return {"ok": False, "why": str(exc)[:120]}
     return {"ok": p.returncode == 0, "path": plist, "why": (p.stderr or "").strip()[:120]}

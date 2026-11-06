@@ -52,6 +52,36 @@ def main():
         check("%s: when it can't ask, it's ★known=False★ (no evidence gets invented)" % s.name,
               got["known"] is False and got["runs"] is None)
 
+    # ── ★replacing a running job waits for the old one to leave★ (2026-11-06) ──────────────
+    # bootout returns while the job is still exiting; an immediate bootstrap failed with error 5 and
+    # left the service down. Simulated launchctl: the old job is still listed for two polls.
+    import subprocess as _sp
+    calls, listed = [], [2]
+
+    class _P:
+        def __init__(self, rc): self.returncode, self.stderr, self.stdout = rc, "", ""
+
+    def fake_run(argv, **kw):
+        calls.append(argv[1])
+        if argv[1] == "print":
+            listed[0] -= 1
+            return _P(0 if listed[0] >= 0 else 113)
+        if argv[1] == "bootstrap":
+            return _P(5 if listed[0] >= 0 else 0)   # fails while the old job is still there
+        return _P(0)
+
+    real = _sp.run
+    _sp.run = fake_run
+    try:
+        t = [0.0]
+        got = sch._launchd_replace("com.nope.replace", "/nope.plist",
+                                   sleep=lambda s: t.__setitem__(0, t[0] + s), clock=lambda: t[0])
+    finally:
+        _sp.run = real
+    check("replacing a running job waits until launchd no longer lists it, then loads (no error 5)",
+          got.returncode == 0 and calls[0] == "bootout" and calls[-1] == "bootstrap"
+          and calls.count("bootstrap") == 1, str(calls))
+
     # ── what's actually in use on this machine ────────────────────────────────────────
     cur = sch.active()
     print("\n  this machine: %s (%s · evidence %s)" % (cur.name, cur.label, cur.evidence))
