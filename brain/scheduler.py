@@ -144,11 +144,17 @@ REPLACE_WAIT = 15.0            # seconds to wait for the old job to leave (launc
 REPLACE_POLL = 0.25
 
 
+def _gui_domain() -> str:
+    # launchd exists only on macOS; the simulated check in verify_scheduler runs on every OS and
+    # Windows has no os.getuid (the clean room failed there from 0.1.1 until this guard).
+    return "gui/%d" % (os.getuid() if hasattr(os, "getuid") else 0)
+
+
 def _launchd_replace(label: str, plist: str, sleep=None, clock=None) -> "subprocess.CompletedProcess":
     import time
     sleep = sleep or time.sleep
     clock = clock or time.monotonic
-    target = "gui/%d/%s" % (os.getuid(), label)
+    target = "%s/%s" % (_gui_domain(), label)
     subprocess.run(["launchctl", "bootout", target], capture_output=True, timeout=TIMEOUT)
     deadline = clock() + REPLACE_WAIT
     while clock() < deadline:
@@ -156,11 +162,11 @@ def _launchd_replace(label: str, plist: str, sleep=None, clock=None) -> "subproc
                           timeout=TIMEOUT).returncode != 0:
             break                                        # gone — safe to load the new one
         sleep(REPLACE_POLL)
-    p = subprocess.run(["launchctl", "bootstrap", "gui/%d" % os.getuid(), plist],
+    p = subprocess.run(["launchctl", "bootstrap", _gui_domain(), plist],
                        capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
     if p.returncode == 5:                                # still tearing down — once more, after a pause
         sleep(1.0)
-        p = subprocess.run(["launchctl", "bootstrap", "gui/%d" % os.getuid(), plist],
+        p = subprocess.run(["launchctl", "bootstrap", _gui_domain(), plist],
                            capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
     return p
 
