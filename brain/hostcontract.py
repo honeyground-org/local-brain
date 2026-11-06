@@ -29,6 +29,12 @@ SURFACE = [
     ("brain.embedruntime", "ready", ("timeout",)),
     ("brain.embedruntime", "step_env", ()),
     ("brain.install", "main", ()),                         # `python -m brain.install --embed embeddinggemma`
+    # After writing notes into a source, a host with no hooks wakes the worker so they are indexed and
+    # embedded. It starts `brain.deferred` with the runtime's own Python: inside a bundled host
+    # `sys.executable` is the host, not Python, so `deferred.kick()` cannot be used there.
+    ("brain.embedruntime", "venv_python", ()),
+    ("brain.launch", "argv", ("python",)),
+    ("brain.deferred", "main", ()),                        # run as `brain.deferred`; holds its own lease
 ]
 
 

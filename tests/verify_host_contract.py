@@ -34,6 +34,9 @@ def main():
     print("=" * 72 + "\nhost contract (what Cosmos calls)\n" + "=" * 72)
     gone = hostcontract.missing()
     check("every SURFACE entry exists with the parameters a host passes", not gone, "; ".join(gone))
+    with open(os.path.join(ROOT, "brain", "deferred.py"), encoding="utf-8") as fh:
+        check("brain.deferred runs as a module (a host starts it with the runtime's Python)",
+              'if __name__ == "__main__":' in fh.read())
     with open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8") as fh:
         declared = re.search(r'^version = "([^"]+)"', fh.read(), re.M).group(1)
     check("brain.__version__ equals pyproject.toml", getattr(brain, "__version__", None) == declared,
