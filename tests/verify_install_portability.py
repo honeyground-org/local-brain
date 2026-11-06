@@ -227,6 +227,52 @@ def gemma_mirror() -> None:
           embedruntime.REVISION[:7] in embedruntime.MIRROR_URL and len(embedruntime.MIRROR_SHA256) == 64)
 
 
+def uv_bootstrap() -> None:
+    print("\n" + "=" * 72 + "\n③c no uv and no Python 3.11 → a pinned uv is fetched, proven, placed\n" + "=" * 72)
+    import hashlib
+    import tarfile
+    from pathlib import Path
+    base = os.path.join(_TMP, "uvb")
+    rel = os.path.join(base, "srv", embedruntime.UV_VERSION)
+    os.makedirs(rel, exist_ok=True)
+    name, _ = embedruntime.uv_asset()
+    exe = "uv.exe" if os.name == "nt" else "uv"
+    inner = os.path.join(base, "pkg", name.split(".")[0])
+    os.makedirs(inner, exist_ok=True)
+    Path(inner, exe).write_bytes(b"#!/bin/sh\necho uv-fake\n")
+    arch = os.path.join(rel, name)
+    if name.endswith(".zip"):
+        import zipfile
+        with zipfile.ZipFile(arch, "w") as z:
+            z.write(os.path.join(inner, exe), arcname=os.path.basename(inner) + "/" + exe)
+    else:
+        with tarfile.open(arch, "w:gz") as t:
+            t.add(os.path.join(inner, exe), arcname=os.path.basename(inner) + "/" + exe)
+    url = Path(os.path.join(base, "srv")).as_uri() + "/"
+    saved = (embedruntime.runtime_dir, dict(embedruntime.UV_ASSETS))
+    embedruntime.runtime_dir = lambda: os.path.join(base, "rt")
+    key = next(k for k, v in embedruntime.UV_ASSETS.items() if v[0] == name)
+    try:
+        r = embedruntime.bootstrap_uv(lambda m: None, base=url)
+        check("a uv build whose hash differs from the pin is refused",
+              not r["ok"] and "pinned hash" in r["why"] and not os.path.exists(embedruntime.bundled_uv()), str(r))
+        embedruntime.UV_ASSETS[key] = (name, hashlib.sha256(Path(arch).read_bytes()).hexdigest())
+        r = embedruntime.bootstrap_uv(lambda m: None, base=url)
+        target = embedruntime.bundled_uv()
+        check("the proven uv is placed in the runtime folder, executable",
+              r["ok"] and os.path.isfile(target) and (os.name == "nt" or os.access(target, os.X_OK)), str(r))
+        check("…and the next run reuses it", embedruntime.bootstrap_uv(lambda m: None, base=url).get("reused"))
+        check("…with no working folder left beside it",
+              sorted(os.listdir(os.path.dirname(target))) == [exe], str(os.listdir(os.path.dirname(target))))
+    finally:
+        embedruntime.runtime_dir = saved[0]
+        embedruntime.UV_ASSETS.clear()
+        embedruntime.UV_ASSETS.update(saved[1])
+    check("every pinned uv build names its platform and a 64-hex hash",
+          all(len(h) == 64 and v.startswith("uv-") for v, h in embedruntime.UV_ASSETS.values()))
+    check("this machine has a pinned build", embedruntime.uv_asset() is not None)
+
+
 def no_engine_no_collection() -> None:
     print("\n" + "=" * 72 + "\n④ no embedding engine → no vector collection\n" + "=" * 72)
     code = r'''
@@ -290,6 +336,7 @@ def main() -> int:
     true_case()
     gemma()
     gemma_mirror()
+    uv_bootstrap()
     no_engine_no_collection()
     jobs_follow_engines()
     print("\n" + ("❌ %d failed" % len(FAILS) if FAILS else "✅ all passed"))
