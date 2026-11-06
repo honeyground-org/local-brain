@@ -95,6 +95,8 @@ def gemma() -> None:
     def fake(argv, timeout=0, env=None, answers=None):
         calls.append(argv[1:3])
         return answers.get(tuple(argv[1:3]), _P(0))
+    old_mirror = os.environ.get("BRAIN_EMBED_MIRROR")
+    os.environ["BRAIN_EMBED_MIRROR"] = "off"      # these checks are the Hugging Face path
     try:
         embedruntime._run = lambda argv, timeout=0, env=None: fake(
             argv, answers={("auth", "whoami"): _P(1, "", "Not logged in")})
@@ -144,6 +146,85 @@ def gemma() -> None:
     finally:
         (embedruntime.step_env, embedruntime._run, embedruntime.venv_hf, embedruntime.snapshot_path,
          embedruntime.step_service) = saved
+        if old_mirror is None:
+            os.environ.pop("BRAIN_EMBED_MIRROR", None)
+        else:
+            os.environ["BRAIN_EMBED_MIRROR"] = old_mirror
+
+
+def gemma_mirror() -> None:
+    print("\n" + "=" * 72 + "\n③b EmbeddingGemma — the token-free mirror, proven before it is placed\n" + "=" * 72)
+    import hashlib
+    import tarfile
+    from pathlib import Path
+    base = os.path.join(_TMP, "mirror")
+    src = os.path.join(base, "src", embedruntime.MIRROR_DIR)
+    os.makedirs(os.path.join(src, "2_Dense"), exist_ok=True)
+    files = {"config.json": b'{"model_type": "gemma3_text"}', "model.safetensors": b"\x00" * 4096,
+             "2_Dense/model.safetensors": b"\x01" * 512}
+    for rel, data in files.items():
+        Path(src, rel).write_bytes(data)
+    Path(src, "files.sha256").write_text("".join(
+        "%s  %s\n" % (hashlib.sha256(d).hexdigest(), r) for r, d in files.items()), encoding="utf-8")
+    good = os.path.join(base, "good.tar")
+    with tarfile.open(good, "w") as tar:
+        tar.add(src, arcname=embedruntime.MIRROR_DIR)
+    good_sha = hashlib.sha256(Path(good).read_bytes()).hexdigest()
+    url = Path(good).as_uri()
+    say = lambda m: None
+
+    snap = os.path.join(base, "hub", "snapshots", embedruntime.REVISION)
+    r = embedruntime.fetch_mirror(snap, say, url=url, expected="0" * 64)
+    check("a copy whose archive hash differs is refused", not r["ok"] and "pinned hash" in r["why"], str(r))
+    check("…and leaves no snapshot behind", not os.path.exists(snap))
+
+    Path(src, "model.safetensors").write_bytes(b"\x02" * 4096)     # the listed hash no longer holds
+    bad = os.path.join(base, "bad.tar")
+    with tarfile.open(bad, "w") as tar:
+        tar.add(src, arcname=embedruntime.MIRROR_DIR)
+    Path(src, "model.safetensors").write_bytes(files["model.safetensors"])
+    r = embedruntime.fetch_mirror(snap, say, url=Path(bad).as_uri(),
+                                  expected=hashlib.sha256(Path(bad).read_bytes()).hexdigest())
+    check("a file that does not match its listed hash is refused",
+          not r["ok"] and "model.safetensors" in r["why"] and not os.path.exists(snap), str(r))
+
+    evil = os.path.join(base, "evil.tar")
+    with tarfile.open(evil, "w") as tar:
+        tar.add(os.path.join(src, "config.json"), arcname="../escape.json")
+    r = embedruntime.fetch_mirror(snap, say, url=Path(evil).as_uri(),
+                                  expected=hashlib.sha256(Path(evil).read_bytes()).hexdigest())
+    check("an archive entry outside the model folder is refused",
+          not r["ok"] and "unexpected entry" in r["why"]
+          and not os.path.exists(os.path.join(base, "hub", "snapshots", "escape.json")), str(r))
+
+    r = embedruntime.fetch_mirror(snap, say, url=url, expected=good_sha)
+    check("the proven copy lands exactly where Hugging Face would put it",
+          r["ok"] and r["source"] == "mirror" and r["files"] == 3
+          and Path(snap, "2_Dense", "model.safetensors").read_bytes() == files["2_Dense/model.safetensors"],
+          str(r))
+    check("…with no working folder left beside it",
+          sorted(os.listdir(os.path.dirname(snap))) == [embedruntime.REVISION],
+          str(os.listdir(os.path.dirname(snap))))
+
+    saved = (embedruntime.snapshot_path, embedruntime.MIRROR_SHA256, os.environ.get("BRAIN_EMBED_MIRROR"))
+    snap2 = os.path.join(base, "hub2", "snapshots", embedruntime.REVISION)
+    embedruntime.snapshot_path = lambda: snap2
+    embedruntime.MIRROR_SHA256 = good_sha
+    os.environ["BRAIN_EMBED_MIRROR"] = url
+    try:
+        r = embedruntime.step_model(say)
+        check("step_model takes the mirror first — no Hugging Face sign-in asked",
+              r["ok"] and r.get("source") == "mirror" and r["path"] == snap2, str(r))
+        r = embedruntime.step_model(say)
+        check("…and reuses it on the next run", r["ok"] and r.get("reused"), str(r))
+    finally:
+        embedruntime.snapshot_path, embedruntime.MIRROR_SHA256 = saved[0], saved[1]
+        if saved[2] is None:
+            os.environ.pop("BRAIN_EMBED_MIRROR", None)
+        else:
+            os.environ["BRAIN_EMBED_MIRROR"] = saved[2]
+    check("the default mirror is the pinned revision",
+          embedruntime.REVISION[:7] in embedruntime.MIRROR_URL and len(embedruntime.MIRROR_SHA256) == 64)
 
 
 def no_engine_no_collection() -> None:
@@ -208,6 +289,7 @@ def main() -> int:
     mcp_argv()
     true_case()
     gemma()
+    gemma_mirror()
     no_engine_no_collection()
     jobs_follow_engines()
     print("\n" + ("❌ %d failed" % len(FAILS) if FAILS else "✅ all passed"))

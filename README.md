@@ -117,8 +117,8 @@ reuse, a resident model with query priority, separate vector spaces and request-
 The selected Qdrant/Neo4j integrations continue to serve vector and graph retrieval. Existing notes
 and old model vectors are preserved when preparing a new profile.
 
-Set it up with one command; it stops once at the Hugging Face terms that only you can accept and
-prints what to do (see *Defaults and what you can swap* under [Install](#install)):
+Set it up with one command, with no Hugging Face account or token: the installer downloads the pinned
+model from Honeyground's copy (see *Defaults and what you can swap* under [Install](#install)):
 
 ```bash
 ./install.sh --embed embeddinggemma     # or --recommended for Qdrant + Neo4j as well
@@ -602,14 +602,19 @@ What `--recommended` does, and the one step it cannot do for you:
    and both roles keep answering from the local copy.
 2. **EmbeddingGemma** gets its own Python 3.11+ environment under the brain's home (with `uv` when it is
    installed, otherwise any Python 3.11+ on the machine), never touching the core's Python.
-3. ⛔ **The model is gated.** Google asks each person to accept its terms on Hugging Face, so the installer
-   stops here once and prints exactly what to do:
-   1. accept the terms at <https://huggingface.co/google/embeddinggemma-300m>
-   2. create a *read* token at <https://huggingface.co/settings/tokens>
-   3. run the `hf auth login` command it prints (the `hf` program inside that environment)
+3. **The model needs no token.** The installer downloads revision `57c266a` (about 1.27 GB, once) from
+   [Honeyground's copy](https://github.com/honeyground-org/local-brain/releases/tag/model-embeddinggemma-300m-57c266a),
+   checks the archive's pinned SHA-256 and every file's SHA-256, and places it exactly where Hugging Face
+   would. The files are byte-identical to that revision, so the vectors are identical too (measured: the
+   same vector-space fingerprint and the same 768-dimension vectors as a Hugging Face download).
+   Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms;
+   a copy of the terms and the prohibited use policy is placed next to the model.
 
-   Then run `./install.sh --recommended` again. Finished steps are skipped.
-4. The pinned model revision (about 1.2 GB) is downloaded once, and a background service is registered
+   If that copy cannot be reached, the installer falls back to Hugging Face, where the model is gated:
+   accept the terms at <https://huggingface.co/google/embeddinggemma-300m>, create a *read* token at
+   <https://huggingface.co/settings/tokens>, run the `hf auth login` command it prints, then run the
+   installer again. `BRAIN_EMBED_MIRROR=off` uses Hugging Face only.
+4. A background service is registered
    with the platform's service manager (launchd · Task Scheduler · systemd user). It answers on
    `127.0.0.1:18081` only, starts at sign-in and restarts after a crash.
 5. The vectors are built and the vector database is filled. The **meaning gate** (how close a note must

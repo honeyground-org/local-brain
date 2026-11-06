@@ -17,7 +17,8 @@ model's terms and signing in to Hugging Face). Run it again afterwards; every st
 
 - It never installs model libraries into the core's Python. The runtime lives in its own environment
   under the brain's home (`<home>/runtime/embeddinggemma/venv`), outside the checkout.
-- It never accepts a licence or handles a token for the person. It only checks whether they have.
+- It never accepts a licence or handles a token for the person. The token-free mirror is the same
+  revision redistributed under the Gemma Terms of Use, which travel with it (2026-11-06).
 - It never falls back to a paid or remote engine when a step fails. It says which step failed.
 
 Standard library only, like the rest of `brain/`; the model libraries are only ever imported by
@@ -42,6 +43,15 @@ PORT = int(os.environ.get("BRAIN_EMBED_PORT", "18081") or 18081)
 BASE_URL = "http://127.0.0.1:%d/v1" % PORT
 LABEL = "com.local-brain.embeddinggemma"
 MODEL_PAGE = "https://huggingface.co/" + MODEL
+# ★A copy that needs no token★ (2026-11-06). The gated model stopped every install at a step only a
+#  person could take. Honeyground redistributes the same revision under the Gemma Terms of Use (which
+#  allow it, with the terms and the notice attached). ⛔ Byte-identical, not "a model of the same size":
+#  the files are part of the vector space's fingerprint, so a different copy would be a different space.
+MIRROR_URL = ("https://github.com/honeyground-org/local-brain/releases/download/"
+              "model-embeddinggemma-300m-57c266a/embeddinggemma-300m-57c266a.tar")
+MIRROR_SHA256 = "d885d927dcbb3c9ee460c75cf4b495771954753651313fdd3533a157cdde14e8"
+MIRROR_DIR = "embeddinggemma-300m-57c266a"          # the one top-level folder inside the archive
+TERMS_PAGE = "https://ai.google.dev/gemma/terms"
 TOKENS_PAGE = "https://huggingface.co/settings/tokens"
 MIN_PY = (3, 11)
 
@@ -139,11 +149,96 @@ def snapshot_path() -> str:
     return os.path.join(from_env, "models--" + MODEL.replace("/", "--"), "snapshots", REVISION)
 
 
+def mirror_url() -> str:
+    """Where the token-free copy comes from. `BRAIN_EMBED_MIRROR=off` keeps Hugging Face only."""
+    return (os.environ.get("BRAIN_EMBED_MIRROR") or MIRROR_URL).strip()
+
+
+def _sha256_file(path: str) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def fetch_mirror(snap: str, say: Callable[[str], None], url: str = "",
+                 expected: str = "") -> dict:
+    """Download the archived snapshot, prove it, and put it exactly where Hugging Face would.
+
+    ⛔ Nothing is placed until both proofs pass: the archive's SHA-256 (pinned here) and every model
+    file's SHA-256 (listed inside it). A half-written or tampered copy leaves no snapshot behind, so
+    the next run starts clean and the Hugging Face path stays available.
+    """
+    import tarfile
+    import tempfile
+    import urllib.request
+    url = url or mirror_url()
+    expected = expected or MIRROR_SHA256
+    parent = os.path.dirname(snap)
+    os.makedirs(parent, exist_ok=True)
+    work = tempfile.mkdtemp(prefix=".mirror-", dir=parent)
+    try:
+        archive = os.path.join(work, "snapshot.tar")
+        say("downloading %s @ %s from the Honeyground mirror (about 1.27 GB, once — no token needed)"
+            % (MODEL, REVISION[:12]))
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp, open(archive, "wb") as out:
+                shutil.copyfileobj(resp, out, 1 << 20)
+        except Exception as e:
+            return {"ok": False, "step": "model", "why": "mirror download failed: %s" % e}
+        got = _sha256_file(archive)
+        if got != expected:
+            return {"ok": False, "step": "model",
+                    "why": "mirror archive does not match the pinned hash (%s…)" % got[:12]}
+        dest = os.path.join(work, "x")
+        with tarfile.open(archive) as tar:
+            for m in tar.getmembers():          # ⛔ only plain files and folders under the one folder
+                name = m.name.replace("\\", "/")
+                parts = name.split("/")
+                if (not (m.isfile() or m.isdir()) or name.startswith("/") or ".." in parts
+                        or parts[0] != MIRROR_DIR):
+                    return {"ok": False, "step": "model", "why": "unexpected entry in the archive: %s" % name}
+            tar.extractall(dest)
+        root = os.path.join(dest, MIRROR_DIR)
+        listed = os.path.join(root, "files.sha256")
+        if not os.path.isfile(listed):
+            return {"ok": False, "step": "model", "why": "the archive has no files.sha256"}
+        count = 0
+        with open(listed, encoding="utf-8") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                digest, rel = line.strip().split(None, 1)
+                path = os.path.join(root, rel.lstrip("*"))
+                if not os.path.isfile(path) or _sha256_file(path) != digest:
+                    return {"ok": False, "step": "model", "why": "file does not match its hash: %s" % rel}
+                count += 1
+        if not os.path.isfile(os.path.join(root, "config.json")) or not count:
+            return {"ok": False, "step": "model", "why": "the archive holds no model"}
+        if os.path.isdir(snap):
+            shutil.rmtree(snap)                 # an incomplete folder (no config.json) from an old try
+        os.replace(root, snap)
+        say("verified %d files; the model is covered by the Gemma Terms of Use (%s), "
+            "a copy is in %s" % (count, TERMS_PAGE, os.path.join(snap, "GEMMA_TERMS_OF_USE.txt")))
+        return {"ok": True, "step": "model", "path": snap, "source": "mirror", "files": count}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def step_model(say: Callable[[str], None]) -> dict:
-    """The pinned model, downloaded once. ⛔ A gated model: the person accepts its terms and signs in."""
+    """The pinned model, downloaded once — from the token-free mirror first, Hugging Face second.
+
+    ⛔ The Hugging Face copy is gated: there the person accepts its terms and signs in."""
     snap = snapshot_path()
     if os.path.isfile(os.path.join(snap, "config.json")):
         return {"ok": True, "step": "model", "path": snap, "reused": True}
+    if mirror_url().lower() not in ("off", "0", "none", ""):
+        got = fetch_mirror(snap, say)
+        if got.get("ok"):
+            return got
+        say("the mirror did not work (%s); trying Hugging Face" % got.get("why"))
     hf = venv_hf() if os.path.isfile(venv_hf()) else (shutil.which("hf") or "")
     if not hf:
         return {"ok": False, "step": "model", "why": "the `hf` command is missing from the runtime environment"}
