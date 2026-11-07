@@ -514,7 +514,9 @@ def measure(db: sqlite3.Connection) -> dict:
 #       Bumped because `vectors` changed.
 #   42 (2026-11-05) Canonical Unicode fact identity and guarded reconciliation before saves.
 #       Bumped because lifecycle resolution changed.
-CODE_GENERATION = 42
+#   43 (2026-11-07) `vecstore.sync`/`graphstore.sync` take a `source` (a host's own canonical copy). The notes'
+#       path is unchanged; bumped because `vecstore`/`graphstore` changed.
+CODE_GENERATION = 43
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

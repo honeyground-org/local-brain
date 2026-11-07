@@ -96,19 +96,42 @@ def ask(db: sqlite3.Connection, question: str, *args):
                         lambda: getattr(LOCAL, question)(db, *args))
 
 
+class NotesGraphSource:
+    """★The brain's own notes as a graph★ — what `sync` has always pushed. The default `source`.
+
+    A host with its own canonical copy (Cosmos, 2026-11-07) passes another object with the same two members,
+    so the same engine (ledger, diff, self-healing, `stores.serve`) runs over its graph:
+
+      nodes() → [(id, name)]   every node; `name` is only ever sent with `names`, scrubbed (below)
+      edges() → [(a, b)]       every edge between two of those nodes
+    """
+
+    def __init__(self, db: sqlite3.Connection):
+        self.db = db
+
+    def nodes(self):
+        return list(self.db.execute("SELECT id, name FROM docs"))
+
+    def edges(self):
+        return LOCAL.edges(self.db)
+
+
 def sync(db: sqlite3.Connection, backend, full: bool = False, progress: bool = False,
-         names: bool = False) -> dict:
+         names: bool = False, source=None) -> dict:
     """Push the local graph (every document as a node, every resolved edge) to `backend`. Only the difference.
 
     ⛔ A node's name is sent only with `names` — and then through the outbound door first (§privacy.scrub).
-       Decided here, for every backend: a backend is handed "" and cannot send what it never received.
+       Decided here, for every backend and every `source`: a backend is handed "" and cannot send what it
+       never received.
+    `source` — whose graph (§NotesGraphSource); the brain's own notes when not given. The ledger lives in `db`.
     """
     from brain import privacy
+    source = source if source is not None else NotesGraphSource(db)
     target = backend.target()
-    labels = {r[0]: (privacy.scrub(r[1])[0] if names else "")
-              for r in db.execute("SELECT id, name FROM docs")}
+    labels = {int(r[0]): (privacy.scrub(r[1])[0] if names else "") for r in source.nodes()}
     want_nodes = {str(d): (n or "1") for d, n in labels.items()}
-    want_edges = {"%d>%d" % e: "1" for e in LOCAL.edges(db) if e[0] in labels and e[1] in labels}
+    want_edges = {"%d>%d" % (int(e[0]), int(e[1])): "1" for e in source.edges()
+                  if int(e[0]) in labels and int(e[1]) in labels}
     stats = {"backend": backend.backend, "target": target, "nodes": len(want_nodes), "edges": len(want_edges),
              "sent_nodes": 0, "deleted_nodes": 0, "sent_edges": 0, "removed_edges": 0}
     if full:
