@@ -43,6 +43,7 @@ SURFACE = [
     ("brain.stores", "serve", ()),
     ("brain.stores", "health", ()),
     ("brain.stores", "last_served", ()),
+    ("brain.stores", "sync_source", ("full", "names")),
     ("brain.vecstore", "make", ()),
     ("brain.vecstore", "sync", ("full", "source")),
     ("brain.graphstore", "make", ()),

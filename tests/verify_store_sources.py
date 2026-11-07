@@ -14,6 +14,11 @@ take an optional `source`; without one they push the notes, as they always have.
   ⑤ a graph source: nodes and edges, ★no names unless `names`★, and an edge to an unknown node is not sent
   ⑥ a lost copy (the database reset behind the ledger's back) is noticed and refilled for a host too
   ⑦ control — must be red without the feature: a sync ★without★ `source` does not send the host's rows
+  ⑧ `stores.sync_source` on a host's ★plain★ database (no `meta` table, no Row factory) records it in sync,
+     and `serve` then asks the database
+  ⑨ before any sync — or on another target — `serve` answers from the host's own copy
+  ⑩ a database that fails: the host's copy answers, the failure is written down, and the next question
+     within `DOWN_RETRY_SEC` does not knock again
 
 How to run:  PYTHONPATH=. python3 tests/verify_store_sources.py
 """
@@ -217,6 +222,39 @@ def main() -> int:
         vecstore.sync(ndb, ctl)
         check("⑦ control: a sync without `source` does not send the host's rows",
               not any(k[0] in (101, 102) for k in ctl.points), str(sorted(ctl.points)))
+
+        # ⑧ sync_source on a plain host database
+        pdb = sqlite3.connect(os.path.join(_TMP, "plain.db"))       # no meta table, no sqlite3.Row
+        pv = FakeVectors("plain")
+        target = pv.target("host-model", 4)
+        asked = []
+        before = stores.serve(pdb, "vector", target, lambda: asked.append("remote") or "remote",
+                              lambda: "local")
+        check("⑨ before any sync the host's own copy answers", before == "local" and not asked,
+              str(stores.last_served("vector")))
+        out = stores.sync_source(pdb, "vector", pv, HostVectors())
+        check("⑧ sync_source sends the host's rows and records them in sync",
+              out.get("sent_docs") == 2 and stores.health(pdb, "vector").get("synced") == target, str(out))
+        got = stores.serve(pdb, "vector", target, lambda: "remote", lambda: "local")
+        check("⑧ then `serve` asks the database", got == "remote"
+              and stores.last_served("vector").get("by") == "remote", str(stores.last_served("vector")))
+        other = stores.serve(pdb, "vector", target + "-other", lambda: "remote", lambda: "local")
+        check("⑨ another target is not in sync — the host's copy answers", other == "local")
+
+        # ⑩ a failing database
+        calls = []
+
+        def boom():
+            calls.append(1)
+            raise stores.StoreError("connection refused")
+        first = stores.serve(pdb, "vector", target, boom, lambda: "local")
+        second = stores.serve(pdb, "vector", target, boom, lambda: "local")
+        h = stores.health(pdb, "vector")
+        check("⑩ a failing database: the host's copy answers and it is written down",
+              first == "local" and h.get("ok") is False and int(h.get("fallbacks") or 0) >= 1, str(h))
+        check("⑩ the next question does not knock again", second == "local" and len(calls) == 1,
+              str(stores.last_served("vector")))
+        stores._DOWN.pop("vector", None)
     finally:
         for k, v in _SAVED.items():
             if v is None:
