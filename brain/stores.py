@@ -532,11 +532,19 @@ def _health_key(role: str) -> str:
     return "store_health_" + role
 
 
+def _ensure_meta(db: sqlite3.Connection) -> None:
+    """★A host's own database has no `meta` table★ (Cosmos, 2026-11-07) — the brain's index always does
+    (`store.connect`), so this is a no-op there. Same definition as the index's, so either can read it."""
+    db.execute("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)")
+
+
 def health(db: sqlite3.Connection, role: str) -> dict:
-    from brain import store
+    # ⛔ read by position, not by name: a host's connection has no `sqlite3.Row` factory
     try:
-        h = json.loads(store.get_meta(db, _health_key(role), "") or "{}")
-    except ValueError:
+        _ensure_meta(db)
+        row = db.execute("SELECT v FROM meta WHERE k=?", (_health_key(role),)).fetchone()
+        h = json.loads((row[0] if row else "") or "{}")
+    except (ValueError, sqlite3.Error):
         h = {}
     return h if isinstance(h, dict) else {}
 
@@ -547,6 +555,7 @@ def record(db: sqlite3.Connection, role: str, **fields) -> None:
     h.update(fields)
     h["at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     try:
+        _ensure_meta(db)
         with db:
             store.set_meta(db, _health_key(role), json.dumps(h, ensure_ascii=False))
     except sqlite3.Error:
@@ -643,6 +652,31 @@ def sync(db: sqlite3.Connection, roles: Tuple[str, ...] = ROLES, full: bool = Fa
             record(db, role, ok=False, error=str(exc)[:300])
             out[role] = {"backend": c["backend"], "error": str(exc)[:300]}
     return out
+
+
+def sync_source(db: sqlite3.Connection, role: str, backend, source, full: bool = False,
+                names: bool = False) -> dict:
+    """★A host's canonical copy, through the same engine★ (Cosmos, 2026-11-07) — `sync` for one role and one
+    `source` (§vecstore.NotesSource · §graphstore.NotesGraphSource), with the same bookkeeping: the ledger and
+    the health note go in `db` (the host's own database), so `serve(db, …)` answers from `backend` exactly
+    when this says it is in sync. Never raises — the error is the result.
+
+    The host builds `backend` from `choice(role)` with its own `namespace`, so its rows never share a
+    collection or a graph with the notes.
+    """
+    try:
+        if role == "vector":
+            from brain import vecstore
+            out = vecstore.sync(db, backend, full=full, source=source)
+        else:
+            from brain import graphstore
+            out = graphstore.sync(db, backend, full=full, names=names, source=source)
+        record(db, role, ok=True, error="", synced=out["target"])
+        _DOWN.pop(role, None)
+        return out
+    except StoreError as exc:
+        record(db, role, ok=False, error=str(exc)[:300])
+        return {"backend": getattr(backend, "backend", ""), "error": str(exc)[:300]}
 
 
 def sync_if_chosen(db: sqlite3.Connection, roles: Tuple[str, ...] = ROLES) -> Dict[str, dict]:
