@@ -35,6 +35,18 @@ SURFACE = [
     ("brain.embedruntime", "venv_python", ()),
     ("brain.launch", "argv", ("python",)),
     ("brain.deferred", "main", ()),                        # run as `brain.deferred`; holds its own lease
+    # ★The store engine over the host's own canonical copy★ (2026-11-07) — Cosmos syncs its memories and its
+    # entity graph to the same Qdrant/Neo4j through the same ledger, and asks them through `serve`, so an
+    # update to this engine is an update to Cosmos. A host checks for `source` before using it (an older
+    # local-brain without it leaves the host on its own copy — added, so no bump).
+    ("brain.stores", "choice", ()),
+    ("brain.stores", "serve", ()),
+    ("brain.stores", "health", ()),
+    ("brain.stores", "last_served", ()),
+    ("brain.vecstore", "make", ()),
+    ("brain.vecstore", "sync", ("full", "source")),
+    ("brain.graphstore", "make", ()),
+    ("brain.graphstore", "sync", ("full", "names", "source")),
 ]
 
 

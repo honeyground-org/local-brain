@@ -88,15 +88,49 @@ def make(c: dict):
     return b.make(c)
 
 
-def sync(db: sqlite3.Connection, backend, full: bool = False, progress: bool = False) -> dict:
-    """Push the local copy's current-model vectors to `backend`. Only what the ledger says it lacks."""
-    from brain import vectors
-    model, dim = vectors.model_tag(), vectors.DIM
+class NotesSource:
+    """★The brain's own notes★ — what `sync` has always pushed. The default `source`.
+
+    A host that keeps its own canonical copy (Cosmos, 2026-11-07) passes another object with the same three
+    members, so ★the same engine★ — ledger, diff, self-healing, `stores.serve` — runs over its rows:
+
+      model_dim() → (model, dim)              the vector space being pushed
+      desired(model, dim) → {doc_id: version} every document the copy holds now; `version` changes when its
+                                              vectors change (here: content sha | chunk count)
+      rows(model, dim, ids) → [(doc_id, chunk_no, unit vector)]
+
+    The ledger and health stay in `db` — the caller's database, so two copies never share a ledger.
+    """
+
+    def __init__(self, db: sqlite3.Connection):
+        self.db = db
+
+    def model_dim(self) -> Tuple[str, int]:
+        from brain import vectors
+        vectors.ensure_table(self.db)
+        return vectors.model_tag(), vectors.DIM
+
+    def desired(self, model: str, dim: int) -> Dict[str, str]:
+        return {str(r[0]): "%s|%d" % (r[1], r[2]) for r in self.db.execute(
+            "SELECT v.doc_id, MAX(v.sha), COUNT(*) FROM vectors v JOIN docs d ON d.id=v.doc_id "
+            "WHERE v.model=? AND v.dim=? AND v.sha=d.sha GROUP BY v.doc_id", (model, dim))}
+
+    def rows(self, model: str, dim: int, ids: Sequence[int]):
+        return [(r[0], r[1], _unpack(r[2])) for r in self.db.execute(
+            "SELECT doc_id, chunk_no, vec FROM vectors WHERE model=? AND dim=? AND doc_id IN (%s)"
+            % ",".join("?" * len(ids)), (model, dim, *ids))]
+
+
+def sync(db: sqlite3.Connection, backend, full: bool = False, progress: bool = False,
+         source=None) -> dict:
+    """Push the local copy's current-model vectors to `backend`. Only what the ledger says it lacks.
+
+    `source` — whose rows (§NotesSource); the brain's own notes when not given. The ledger lives in `db`.
+    """
+    source = source if source is not None else NotesSource(db)
+    model, dim = source.model_dim()
     target = backend.target(model, dim)
-    vectors.ensure_table(db)
-    desired = {str(r[0]): "%s|%d" % (r[1], r[2]) for r in db.execute(
-        "SELECT v.doc_id, MAX(v.sha), COUNT(*) FROM vectors v JOIN docs d ON d.id=v.doc_id "
-        "WHERE v.model=? AND v.dim=? AND v.sha=d.sha GROUP BY v.doc_id", (model, dim))}
+    desired = source.desired(model, dim)
     stats = {"backend": backend.backend, "target": target, "docs": len(desired),
              "sent_docs": 0, "sent_chunks": 0, "deleted_docs": 0}
     if full:
@@ -130,9 +164,7 @@ def sync(db: sqlite3.Connection, backend, full: bool = False, progress: bool = F
         stats["deleted_docs"] = len(gone)
     for i in range(0, len(up), DOCS_PER_BATCH):
         ids = [int(k) for k in up[i:i + DOCS_PER_BATCH]]
-        rows = [(r[0], r[1], _unpack(r[2])) for r in db.execute(
-            "SELECT doc_id, chunk_no, vec FROM vectors WHERE model=? AND dim=? AND doc_id IN (%s)"
-            % ",".join("?" * len(ids)), (model, dim, *ids))]
+        rows = source.rows(model, dim, ids)
         backend.delete_docs(model, dim, ids)          # a document that lost chunks loses them there too
         backend.upsert(model, dim, rows)
         stores.ledger_apply(db, "vector", target, {str(d): desired[str(d)] for d in ids})
