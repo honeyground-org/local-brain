@@ -203,7 +203,8 @@ for p in sorted(glob.glob(os.path.join(os.path.dirname(os.path.dirname(
 print("   modules that call out remotely: %s" % ", ".join(n for n, _ in doors))
 # ★A door that only downloads is not an outgoing door★ — but it has to stay that way, so it is named
 #  here with its reason and pinned to one shape: a GET of the model archive, nothing sent (2026-11-06).
-DOWNLOAD_ONLY = {"embedruntime.py": "fetches the pinned model archive from a fixed URL; sends no memory text"}
+DOWNLOAD_ONLY = {"embedruntime.py": "fetches the pinned model archive from a fixed URL; sends no memory text",
+                 "nativestores.py": "fetches the pinned, checksummed database and Java archives; sends nothing"}
 missing = [n for n, ok in doors if not ok and n not in DOWNLOAD_ONLY]
 check(not missing, "every module that calls out remotely goes through privacy",
       "★doesn't go through: %s★" % missing if missing else "")

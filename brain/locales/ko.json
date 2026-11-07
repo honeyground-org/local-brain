@@ -628,7 +628,7 @@
  "cli.stores.last_error": "마지막 오류 {at}: {error}",
  "cli.stores.secret_hint": "비밀번호  {env}, 또는 {path} 의 \"{field}\"",
  "cli.stores.choices": "선택지    {choices}",
- "cli.stores.how_to_change": "바꾸기    brain stores --set vector=qdrant --url http://localhost:6333   ·   --docker graph=이름   ·   --sync   ·   --check",
+ "cli.stores.how_to_change": "바꾸기    brain stores --set vector=qdrant --url http://localhost:6333   ·   --native   ·   --docker graph=이름   ·   --sync   ·   --check",
  "cli.stores.set": "{role} 설정 → {entry}",
  "cli.stores.one_role_for_options": "--url 과 백엔드 옵션은 한 번에 한 역할에만 적용된다",
  "cli.stores.sync.title": "동기화",
@@ -649,7 +649,7 @@
  "cli.stores.check.differ": "다름",
  "cli.status.store_fallback": "저장소 — {role} → {backend} 가 응답하지 않아 로컬 사본이 대신 답하는 중 ({error}). `brain stores` 참고.",
  "cli.status.store_unsynced": "저장소 — {role} → {backend} 가 아직 동기화 전이라 `brain stores --sync` 전까지 로컬 사본이 답한다.",
- "install.stores_title": "도커로 띄우는 전용 DB (벡터 검색 · 그래프)",
+ "install.stores_title": "전용 DB (벡터 검색 · 그래프)",
  "install.would_docker_store": "{role} 을 도커로 시작 ({image}), 데이터는 {data} 에 보관",
  "install.stores_up": "{role} 도커에서 실행 중 ({version}) — 데이터는 {data}",
  "install.stores_failed": "도커 DB 준비 안 됨: {why} — 로컬 사본이 계속 답한다",
@@ -789,5 +789,14 @@
  "obs.otherSectors": "다른 주제",
  "obs.shownBubbles": "표시 버블",
  "memory.validity": "유효 상태: {status} · 현재: {current} · 이전: {previous} · 변경: {reason}",
- "memory.feedback_demoted": "검색 피드백으로 우선순위가 낮아졌습니다. 사실의 유효성과는 별개입니다."
+ "memory.feedback_demoted": "검색 피드백으로 우선순위가 낮아졌습니다. 사실의 유효성과는 별개입니다.",
+ "install.would_native_store": "{role} ({backend} {version})을 도커 없이 이 컴퓨터의 서비스로 설치하고 데이터는 {data} 에 둔다",
+ "install.stores_native_up": "{role} 도커 없이 설치·실행 중 ({version}) — 재시작 후에도 스스로 켜진다. 데이터는 {data}",
+ "install.stores_native_failed": "도커 없는 설치가 끝나지 않았다: {why} — 그동안 로컬 사본이 답한다",
+ "install.stores_no_native": "{backend} 는 brain 에 도커 없는 설치가 없습니다 — --stores docker 를 쓰거나 주소를 주세요: --{role}-store {backend}=URL",
+ "install.stores_docker_retired": "전에 이 역할을 하던 도커 컨테이너를 멈췄다: {services} (데이터 폴더는 남는다)",
+ "cli.stores.native_line": "설치형    {version} · 서비스 {service} (로그인 때 자동 시작) · 데이터는 {data}",
+ "cli.stores.native_up": "도커 없이 설치·실행 중: {roles}",
+ "cli.stores.native_failed": "도커 없는 설치 실패: {why}",
+ "cli.stores.bad_native": "도커 없이 설치할 수 있는 역할·백엔드가 아니다: {token} — 역할: {roles}; 백엔드: {backends}"
 }

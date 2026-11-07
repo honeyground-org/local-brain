@@ -628,7 +628,7 @@
  "cli.stores.last_error": "dernière erreur {at} : {error}",
  "cli.stores.secret_hint": "mot de passe  {env}, ou \"{field}\" dans {path}",
  "cli.stores.choices": "choix     {choices}",
- "cli.stores.how_to_change": "changer   brain stores --set vector=qdrant --url http://localhost:6333   ·   --docker graph=NOM   ·   --sync   ·   --check",
+ "cli.stores.how_to_change": "changer   brain stores --set vector=qdrant --url http://localhost:6333   ·   --native   ·   --docker graph=NOM   ·   --sync   ·   --check",
  "cli.stores.set": "{role} défini → {entry}",
  "cli.stores.one_role_for_options": "--url et les options du backend s'appliquent à un rôle à la fois",
  "cli.stores.sync.title": "synchronisation",
@@ -649,7 +649,7 @@
  "cli.stores.check.differ": "différents",
  "cli.status.store_fallback": "stockage — {role} → {backend} ne répond pas ; la copie locale répond à sa place ({error}). Voir `brain stores`.",
  "cli.status.store_unsynced": "stockage — {role} → {backend} n'est pas encore synchronisé ; la copie locale répond jusqu'à `brain stores --sync`.",
- "install.stores_title": "Bases dédiées dans Docker (recherche vectorielle · graphe)",
+ "install.stores_title": "Bases dédiées (recherche vectorielle · graphe)",
  "install.would_docker_store": "démarrer {role} ({image}) dans Docker, données dans {data}",
  "install.stores_up": "{role} tourne dans Docker ({version}) — données dans {data}",
  "install.stores_failed": "bases Docker pas prêtes : {why} — la copie locale continue de répondre",
@@ -789,5 +789,14 @@
  "obs.otherSectors": "Autres sujets",
  "obs.shownBubbles": "Bulles visibles",
  "memory.validity": "Validité : {status} · actuel : {current} · précédent : {previous} · changement : {reason}",
- "memory.feedback_demoted": "Priorité de recherche réduite par le retour ; la validité des faits est distincte."
+ "memory.feedback_demoted": "Priorité de recherche réduite par le retour ; la validité des faits est distincte.",
+ "install.would_native_store": "installer {role} ({backend} {version}) sans Docker, comme service de cette machine, données dans {data}",
+ "install.stores_native_up": "{role} installé sans Docker et en marche ({version}) — redémarre seul après un redémarrage ; données dans {data}",
+ "install.stores_native_failed": "bases non installées sans Docker : {why} — la copie locale continue de répondre",
+ "install.stores_no_native": "{backend} n'a pas d'installation native dans brain — utilisez --stores docker ou donnez son adresse : --{role}-store {backend}=URL",
+ "install.stores_docker_retired": "conteneurs Docker qui le servaient avant arrêtés : {services} (leur dossier de données reste)",
+ "cli.stores.native_line": "natif     {version} · service {service} (démarre à la connexion) · données dans {data}",
+ "cli.stores.native_up": "installé sans Docker et en marche : {roles}",
+ "cli.stores.native_failed": "installation sans Docker échouée : {why}",
+ "cli.stores.bad_native": "ni un rôle ni un backend que brain installe sans Docker : {token} — rôles : {roles} ; backends : {backends}"
 }
