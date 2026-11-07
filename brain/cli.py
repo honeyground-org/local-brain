@@ -199,6 +199,11 @@ def stores_text(db) -> str:
                 state = {x["service"]: x["state"] for x in _dk.status()}.get(spec.name, "") or "-"
                 out.append("         " + i18n.t("cli.stores.docker_line", state=state,
                                                 data=", ".join(_dk.data_dirs(spec))))
+            elif (r.get("options") or {}).get("managed") == "native" and spec and spec.native:
+                from brain import nativestores as _nv
+                out.append("         " + i18n.t("cli.stores.native_line", version=spec.native.version,
+                                                service=_nv.label(spec),
+                                                data=", ".join(_nv.data_dirs(spec).values())))
             if spec and spec.secret and spec.secret.required and not _st.secret(r):
                 out.append("         " + i18n.t("cli.stores.secret_hint", env=spec.secret.env,
                                                 field=spec.secret.field, path=_en.secrets_path()))
@@ -396,6 +401,10 @@ def main(argv=None) -> int:
                    help="run databases in Docker — both roles' defaults, or per role: vector · graph · "
                         "graph=NAME · NAME (%s); data stays in a folder of your own"
                         % " · ".join(sorted(n for n, b in _st.backends().items() if b.docker)))
+    p.add_argument("--native", nargs="*", metavar="ROLE|BACKEND", default=None,
+                   help="install databases without Docker — downloaded (pinned, checksummed) and kept "
+                        "running by this machine's service manager, also after a restart; both roles' "
+                        "defaults, or per role (%s)" % " · ".join(sorted(n for n, b in _st.backends().items() if b.native)))
     p.add_argument("--docker-stop", action="store_true",
                    help="stop the Docker databases (the data stays; the local copy answers meanwhile)")
     p.add_argument("--sync", action="store_true", help="push the local copy to the chosen databases")
@@ -701,6 +710,22 @@ def main(argv=None) -> int:
                 return 1
             print(i18n.t("cli.stores.docker_up", roles=", ".join("%s %s" % kv for kv in res["roles"].items()),
                          compose=res["compose"]))
+            args.sync = True
+        if args.native is not None:
+            from brain import nativestores as _nv
+            try:
+                wanted = _nv.resolve(args.native) if args.native else dict(_st.NATIVE_DEFAULT)
+            except ValueError as exc:
+                print(i18n.t("cli.stores.bad_native", token=str(exc), roles=", ".join(_st.ROLES),
+                             backends=", ".join(sorted(_nv.declared()))))
+                return 2
+            res = _nv.up(wanted)
+            if not res["ok"]:
+                print(i18n.t("cli.stores.native_failed", why=res["why"]))
+                return 1
+            print(i18n.t("cli.stores.native_up", roles=", ".join("%s %s" % kv for kv in res["roles"].items())))
+            if res.get("retired"):
+                print(i18n.t("install.stores_docker_retired", services=", ".join(res["retired"])))
             args.sync = True
         if args.docker_stop:
             from brain import dockerstores as _dk

@@ -332,14 +332,18 @@ def step_vectors() -> None:
 
 # ── 3c. dedicated databases (optional, one role at a time) ─────────────────
 def store_plan(mode: str, vector: str = "", graph: str = "") -> Dict[str, tuple]:
-    """What the store flags ask for: {role: (backend, url)} — url "" means run it in Docker.
+    """What the store flags ask for: {role: (backend, url, how)} — url "" means brain runs it itself,
+    `how` = "native" (downloaded, a service of this machine) or "docker".
 
+    `--stores native` = every role's default installed without Docker (§nativestores, the recommended way);
     `--stores docker` = every role's default in Docker (§stores.DOCKER_DEFAULT); `--vector-store NAME` and
     `--graph-store NAME` choose a role on its own (`NAME=URL` for a server that already runs). A role
     named on its own wins over `--stores`. Raises ValueError(role, value) for a backend that is not there.
     """
     from brain import stores
-    plan = {r: (n, "") for r, n in stores.DOCKER_DEFAULT.items()} if mode == "docker" else {}
+    how = mode if mode in ("docker", "native") else "native"
+    plan = ({r: (n, "", how) for r, n in stores.DOCKER_DEFAULT.items()} if mode in ("docker", "native")
+            else {})
     for role, value in (("vector", vector), ("graph", graph)):
         if not value:
             continue
@@ -350,34 +354,58 @@ def store_plan(mode: str, vector: str = "", graph: str = "") -> Dict[str, tuple]
         if name == "sqlite":
             plan.pop(role, None)
         else:
-            plan[role] = (name, url.strip())
+            # a role named on its own: natively when the backend can be, otherwise in Docker as before
+            own = how if mode in ("docker", "native") else ("native" if stores.spec(name).native else "docker")
+            plan[role] = (name, url.strip(), own)
     return plan
 
 
 def step_stores(plan: Dict[str, tuple]) -> None:
-    """Each chosen role: started in Docker with its data in a folder of the brain's home, or pointed at the
-    address given — then filled from the local copy (§dockerstores · §stores).
+    """Each chosen role: installed natively (downloaded, kept running by this machine's service manager —
+    §nativestores) or started in Docker (§dockerstores), or pointed at the address given — then filled
+    from the local copy (§stores).
 
-    ⛔ Optional and never automatic: the local SQLite copy answers everything without it. A machine without
-       Docker gets a warning, not a failed install — and a role not named is not touched.
+    ⛔ Optional and never automatic: the local SQLite copy answers everything without it. A machine
+       without a native build or without Docker gets a warning, not a failed install — and a role not
+       named is not touched.
     """
     if not plan:
         return
-    from brain import dockerstores, store, stores
+    from brain import dockerstores, nativestores, store, stores
     say("\n" + i18n.t("install.stores_title"))
-    in_docker = {r: n for r, (n, url) in plan.items() if not url}
+    native = {r: n for r, (n, url, how) in plan.items() if not url and how == "native"}
+    in_docker = {r: n for r, (n, url, how) in plan.items() if not url and how == "docker"}
+    for role, name in list(native.items()):
+        if stores.spec(name).native is None:
+            warn(i18n.t("install.stores_no_native", backend=name, role=role))
+            del native[role]
     for role, name in list(in_docker.items()):
         if stores.spec(name).docker is None:
             warn(i18n.t("install.stores_no_docker", backend=name, role=role))
             del in_docker[role]
     if DRY:
+        if native:
+            nativestores.up(native, dry_run=True, say=say)
         if in_docker:
             dockerstores.up(in_docker, dry_run=True, say=say)
-        for role, (name, url) in plan.items():
+        for role, (name, url, _how) in plan.items():
             if url:
                 _would(i18n.t("install.stores_set", role=role, backend=name, url=url))
         return
     chosen = []
+    if native:
+        res = nativestores.up(native, say=lambda m: say("      " + m))
+        if not res["ok"]:
+            warn(i18n.t("install.stores_native_failed", why=res["why"]))
+        else:
+            chosen += list(native)
+            for role, version in res["roles"].items():
+                ok(i18n.t("install.stores_native_up", role=role, version="%s %s" % (native[role], version),
+                          data=", ".join(res["data"][role])))
+        # ⛔ the Docker container that served the role before is stopped, never removed — its data
+        #    folder stays, and `--stores docker` brings it back
+        if res.get("retired"):
+            ok(i18n.t("install.stores_docker_retired", services=", ".join(res["retired"])))
     if in_docker:
         res = dockerstores.up(in_docker)
         if not res["ok"]:
@@ -387,7 +415,7 @@ def step_stores(plan: Dict[str, tuple]) -> None:
             for role, version in res["roles"].items():
                 ok(i18n.t("install.stores_up", role=role, version="%s %s" % (in_docker[role], version),
                           data=", ".join(res["data"][role])))
-    for role, (name, url) in plan.items():
+    for role, (name, url, _how) in plan.items():
         if url:
             stores.set_choice(role, name, url)
             ok(i18n.t("install.stores_set", role=role, backend=name, url=url))
@@ -647,7 +675,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="daily self-improvement jobs")
     ap.add_argument("--all", action="store_true", help="all of the above")
     ap.add_argument("--recommended", action="store_true",
-                    help="the reference stack, all local: --all + --stores docker (Qdrant + Neo4j) + "
+                    help="the reference stack, all local: --all + --stores native (Qdrant + Neo4j, "
+                         "downloaded and kept running without Docker) + "
                          "--embed embeddinggemma (google/embeddinggemma-300m on this machine)")
     ap.add_argument("--embed", default="", metavar="PROVIDER",
                     help="engine for meaning-based search: embeddinggemma (local, recommended) · gemini · "
@@ -655,12 +684,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--judge", default="", metavar="PROVIDER",
                     help="engine that judges candidates: gemini · openai · anthropic · none")
     from brain import stores as _st
-    ap.add_argument("--stores", default="", choices=["", "local", "docker"],
-                    help="local (default) · docker = every role's default in Docker (%s)"
-                         % " + ".join("%s %s" % kv for kv in _st.DOCKER_DEFAULT.items()))
+    ap.add_argument("--stores", default="", choices=["", "local", "native", "docker"],
+                    help="local (default: the SQLite copy only) · native = every role's default downloaded "
+                         "and run as a service of this machine, no Docker (%s) · docker = the same in Docker"
+                         % " + ".join("%s %s" % kv for kv in _st.NATIVE_DEFAULT.items()))
     for role in _st.ROLES:
         ap.add_argument("--%s-store" % role, default="", metavar="NAME[=URL]",
-                        help="%s: %s — in Docker, or NAME=URL for a server that already runs"
+                        help="%s: %s — installed by brain (native, or Docker with --stores docker), "
+                             "or NAME=URL for a server that already runs"
                              % (role, " · ".join(_st.names(role))))
     ap.add_argument("--lang", default="", help="UI language (en de es fr ja ko)")
     ap.add_argument("--dry-run", action="store_true",
@@ -670,7 +701,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     DRY = a.dry_run
     if a.recommended:
         a.all = True
-        a.stores = a.stores or "docker"
+        a.stores = a.stores or "native"
         a.embed = a.embed or "embeddinggemma"
     if a.all:
         a.with_hook = a.with_guard = a.with_cron = True

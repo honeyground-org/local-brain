@@ -408,13 +408,16 @@ def installer() -> None:
     from brain import install
     print("\n④ each role installs on its own")
     plan = install.store_plan
-    check("--graph-store neo4j → only the graph", plan("", "", "neo4j") == {"graph": ("neo4j", "")})
-    check("--vector-store qdrant → only the vector role", plan("", "qdrant") == {"vector": ("qdrant", "")})
-    check("--stores docker → every role's default", plan("docker") == {r: (n, "") for r, n in stores.DOCKER_DEFAULT.items()})
+    # (backend, url, how): how = "native" (downloaded, a service of this machine — 2026-11-07) or "docker"
+    check("--graph-store neo4j → only the graph", plan("", "", "neo4j") == {"graph": ("neo4j", "", "native")})
+    check("--vector-store qdrant → only the vector role", plan("", "qdrant") == {"vector": ("qdrant", "", "native")})
+    check("--stores docker → every role's default", plan("docker") == {r: (n, "", "docker") for r, n in stores.DOCKER_DEFAULT.items()})
+    check("--stores native → every role's default, without Docker",
+          plan("native") == {r: (n, "", "native") for r, n in stores.NATIVE_DEFAULT.items()})
     check("--stores docker --graph-store sqlite → the vector role only", plan("docker", "", "sqlite") == {
-        "vector": (stores.DOCKER_DEFAULT["vector"], "")})
+        "vector": (stores.DOCKER_DEFAULT["vector"], "", "docker")})
     check("NAME=URL → a server that runs already, nothing started",
-          plan("", "qdrant=http://db.example.com:6333") == {"vector": ("qdrant", "http://db.example.com:6333")})
+          plan("", "qdrant=http://db.example.com:6333")["vector"][:2] == ("qdrant", "http://db.example.com:6333"))
     for bad in (("", "neo4j"), ("", "", "qdrant"), ("", "no_such_db")):
         try:
             plan(*bad)
@@ -429,8 +432,17 @@ def installer() -> None:
     finally:
         install.DRY = False
     said = buf.getvalue()
-    check("a dry run of --graph-store neo4j would start the graph and nothing else",
-          "would start graph" in said and "vector" not in said.replace("vector search", ""), said.strip()[:160])
+    check("a dry run of --graph-store neo4j would install the graph and nothing else",
+          "would install graph" in said and "vector" not in said.replace("vector search", ""), said.strip()[:160])
+    buf = io.StringIO()
+    install.DRY = True
+    try:
+        with redirect_stdout(buf):
+            install.step_stores(plan("docker", "", "sqlite"))
+    finally:
+        install.DRY = False
+    check("★control★ — a dry run of --stores docker would start a container",
+          "would start vector" in buf.getvalue(), buf.getvalue().strip()[:160])
     check("…and touched nothing", not os.path.exists(dk.compose_path()))
 
     print("\n   starting one role in Docker keeps the other one's container")
