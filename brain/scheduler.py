@@ -53,14 +53,18 @@ class Scheduler:
                 log: str) -> dict:
         return {"ok": False, "why": "this platform has no scheduler"}
 
-    def install_service(self, label: str, command: List[str], log: str) -> dict:
+    def install_service(self, label: str, command: List[str], log: str,
+                        env: Optional[Dict[str, str]] = None, cwd: str = "") -> dict:
         """Keep `command` running: start it now, at every sign-in, and again if it exits with an error.
+
+        `env` and `cwd` are what the process starts with (a database's Java, its own folder) — values a
+        service manager otherwise leaves empty (launchd starts in `/` with a bare PATH).
 
         ⛔ (2026-11-04) The optional embedding service is a long-running process. Without this, it had
            to be started by hand after every reboot, and meaning-based recall stopped silently until then.
         """
         if os.name == "posix" and sys.platform != "darwin":
-            return _systemd_user_service(label, command, log)   # Linux without crontab still has systemd
+            return _systemd_user_service(label, command, log, env, cwd)   # Linux without crontab still has systemd
         return {"ok": False, "why": "this platform has no service manager"}
 
     def info(self) -> dict:
@@ -171,20 +175,28 @@ def _launchd_replace(label: str, plist: str, sleep=None, clock=None) -> "subproc
     return p
 
 
-def _launchd_service(label: str, command: List[str], log: str) -> dict:
+def _launchd_service(label: str, command: List[str], log: str,
+                     env: Optional[Dict[str, str]] = None, cwd: str = "") -> dict:
     plist = os.path.expanduser("~/Library/LaunchAgents/%s.plist" % label)
     args = "".join("    <string>%s</string>\n" % _xml(a) for a in command)
+    extra = ""
+    if env:
+        extra += ("  <key>EnvironmentVariables</key><dict>\n%s  </dict>\n"
+                  % "".join("    <key>%s</key><string>%s</string>\n" % (_xml(k), _xml(v))
+                            for k, v in sorted(env.items())))
+    if cwd:
+        extra += "  <key>WorkingDirectory</key><string>%s</string>\n" % _xml(cwd)
     body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
             '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
             '<plist version="1.0"><dict>\n'
             '  <key>Label</key><string>%s</string>\n'
-            '  <key>ProgramArguments</key><array>\n%s  </array>\n'
+            '  <key>ProgramArguments</key><array>\n%s  </array>\n%s'
             '  <key>RunAtLoad</key><true/>\n'
             '  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n'
             '  <key>StandardOutPath</key><string>%s</string>\n'
             '  <key>StandardErrorPath</key><string>%s</string>\n'
-            '</dict></plist>\n' % (_xml(label), args, _xml(log), _xml(log)))
+            '</dict></plist>\n' % (_xml(label), args, extra, _xml(log), _xml(log)))
     try:
         os.makedirs(os.path.dirname(plist), exist_ok=True)
         with open(plist, "w", encoding="utf-8") as fh:
@@ -246,9 +258,13 @@ class Schtasks(Scheduler):
         return {"ok": p.returncode == 0, "why": (p.stderr or p.stdout or "").strip()[:120]}
 
 
-def _schtasks_service(label: str, command: List[str], log: str) -> dict:
+def _schtasks_service(label: str, command: List[str], log: str,
+                      env: Optional[Dict[str, str]] = None, cwd: str = "") -> dict:
     quoted = " ".join('"%s"' % a if " " in a else a for a in command)
-    wrapped = 'cmd /c %s >> "%s" 2>&1' % (quoted, log)
+    pre = "".join('set "%s=%s" && ' % (k, v) for k, v in sorted((env or {}).items()))
+    if cwd:
+        pre += 'cd /d "%s" && ' % cwd
+    wrapped = 'cmd /c %s%s >> "%s" 2>&1' % (pre, quoted, log)
     try:
         p = subprocess.run(["schtasks", "/create", "/tn", label, "/tr", wrapped, "/sc", "onlogon", "/f"],
                            capture_output=True, text=True, errors="replace", timeout=TIMEOUT)
@@ -262,16 +278,20 @@ def _schtasks_service(label: str, command: List[str], log: str) -> dict:
 Schtasks.install_service = staticmethod(_schtasks_service)  # type: ignore[assignment]
 
 
-def _systemd_user_service(label: str, command: List[str], log: str) -> dict:
+def _systemd_user_service(label: str, command: List[str], log: str,
+                          env: Optional[Dict[str, str]] = None, cwd: str = "") -> dict:
     """Linux: a systemd user unit (restarts on failure, starts at sign-in)."""
     if not _which("systemctl"):
         return {"ok": False, "why": "no systemd — start it yourself: %s" % " ".join(command)}
     unit_dir = os.path.expanduser("~/.config/systemd/user")
     unit = os.path.join(unit_dir, "%s.service" % label)
     q = " ".join('"%s"' % a.replace('"', '\\"') if " " in a else a for a in command)
-    body = ("[Unit]\nDescription=%s\n\n[Service]\nExecStart=%s\nRestart=on-failure\n"
+    extra = "".join('Environment="%s=%s"\n' % (k, v.replace('"', '\\"')) for k, v in sorted((env or {}).items()))
+    if cwd:
+        extra += "WorkingDirectory=%s\n" % cwd
+    body = ("[Unit]\nDescription=%s\n\n[Service]\nExecStart=%s\n%sRestart=on-failure\n"
             "StandardOutput=append:%s\nStandardError=append:%s\n\n[Install]\nWantedBy=default.target\n"
-            % (label, q, log, log))
+            % (label, q, extra, log, log))
     try:
         os.makedirs(unit_dir, exist_ok=True)
         with open(unit, "w", encoding="utf-8") as fh:

@@ -518,7 +518,10 @@ def measure(db: sqlite3.Connection) -> dict:
 #       path is unchanged; bumped because `vecstore`/`graphstore` changed.
 #   44 (2026-11-07) `stores.sync_source` (a host's copy, with the same health note) and `health`/`record` that
 #       work on a host's plain database. The notes' path is unchanged; bumped because `stores` changed.
-CODE_GENERATION = 44
+#   45 (2026-11-07)  `stores.Native` and `managed: native` (Qdrant and Neo4j installed without Docker): a
+#                    native database uses the credential brain generated for it, like a Docker one. No
+#                    scoring change; bumped because `stores` is a ruler module.
+CODE_GENERATION = 45
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

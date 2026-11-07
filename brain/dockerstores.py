@@ -316,9 +316,12 @@ def status() -> List[dict]:
     return rows
 
 
-def stop() -> bool:
-    """Stop the containers. ⛔ The data stays — this never passes `-v`, and never removes a folder."""
+def stop(services: Sequence[str] = ()) -> bool:
+    """Stop the containers (or only `services`). ⛔ The data stays — this never passes `-v`, and never
+    removes a folder. A machine without Docker has nothing to stop: False."""
+    if not shutil.which("docker"):
+        return False
     try:
-        return _docker(["compose", "-p", project(), "stop"], timeout=120).returncode == 0
+        return _docker(["compose", "-p", project(), "stop"] + list(services), timeout=120).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False

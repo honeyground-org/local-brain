@@ -630,7 +630,7 @@
  "cli.stores.last_error": "last error {at}: {error}",
  "cli.stores.secret_hint": "password  {env}, or \"{field}\" in {path}",
  "cli.stores.choices": "choices   {choices}",
- "cli.stores.how_to_change": "change    brain stores --set vector=qdrant --url http://localhost:6333   ·   --docker graph=NAME   ·   --sync   ·   --check",
+ "cli.stores.how_to_change": "change    brain stores --set vector=qdrant --url http://localhost:6333   ·   --native   ·   --docker graph=NAME   ·   --sync   ·   --check",
  "cli.stores.set": "set {role} → {entry}",
  "cli.stores.one_role_for_options": "--url and backend options apply to one role at a time",
  "cli.stores.sync.title": "sync",
@@ -651,7 +651,7 @@
  "cli.stores.check.differ": "differ",
  "cli.status.store_fallback": "storage — {role} → {backend} is not answering; the local copy answers instead ({error}). See `brain stores`.",
  "cli.status.store_unsynced": "storage — {role} → {backend} is not in sync yet; the local copy answers until `brain stores --sync`.",
- "install.stores_title": "Dedicated databases in Docker (vector search · graph)",
+ "install.stores_title": "Dedicated databases (vector search · graph)",
  "install.would_docker_store": "start {role} ({image}) in Docker, keeping its data in {data}",
  "install.stores_up": "{role} running in Docker ({version}) — data in {data}",
  "install.stores_failed": "Docker databases not ready: {why} — the local copy keeps answering",
@@ -791,5 +791,14 @@
  "obs.otherSectors": "Other topics",
  "obs.shownBubbles": "Visible bubbles",
  "memory.validity": "Validity: {status} · current: {current} · previous: {previous} · change: {reason}",
- "memory.feedback_demoted": "Search priority reduced by feedback; factual validity is separate."
+ "memory.feedback_demoted": "Search priority reduced by feedback; factual validity is separate.",
+ "install.would_native_store": "install {role} ({backend} {version}) without Docker, as a service of this machine, keeping its data in {data}",
+ "install.stores_native_up": "{role} installed without Docker and running ({version}) — starts by itself after a restart; data in {data}",
+ "install.stores_native_failed": "databases not installed without Docker: {why} — the local copy keeps answering",
+ "install.stores_no_native": "{backend} has no native install in brain — use --stores docker, or give its address: --{role}-store {backend}=URL",
+ "install.stores_docker_retired": "stopped the Docker container(s) that served this before: {services} (their data folder stays)",
+ "cli.stores.native_line": "native    {version} · service {service} (starts at sign-in) · data in {data}",
+ "cli.stores.native_up": "installed without Docker and running: {roles}",
+ "cli.stores.native_failed": "databases not installed without Docker: {why}",
+ "cli.stores.bad_native": "not a role or a backend brain installs without Docker: {token} — roles: {roles}; backends: {backends}"
 }

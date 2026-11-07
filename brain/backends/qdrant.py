@@ -112,6 +112,25 @@ class QdrantVectors:
         return int((r.get("result") or {}).get("count") or 0)
 
 
+QDRANT_RELEASE = "https://github.com/qdrant/qdrant/releases/download/v1.19.2/"
+
+
+def native_layout(ctx: dict) -> dict:
+    """Qdrant without Docker: the official binary, one config file, nothing else (§nativestores)."""
+    import json as _json
+    import os as _os
+    cfg = _os.path.join(ctx["data"][""], "config.yaml")
+    q = lambda v: _json.dumps(v)                     # a JSON string is a valid YAML scalar on every platform
+    text = ("# Written by local-brain (`brain stores --native`).\n"
+            "storage:\n  storage_path: %s\n  snapshots_path: %s\n"
+            "service:\n  host: \"127.0.0.1\"\n  http_port: %d\n  grpc_port: %d\n"
+            "telemetry_disabled: true\n"
+            % (q(_os.path.join(ctx["data"][""], "storage")), q(_os.path.join(ctx["data"][""], "snapshots")),
+               ctx["ports"]["api"], ctx["ports"]["grpc"]))
+    exe = _os.path.join(ctx["home"], "qdrant.exe" if ctx["platform"].startswith("windows") else "qdrant")
+    return {"argv": [exe, "--config-path", cfg], "cwd": ctx["data"][""], "files": {cfg: text}}
+
+
 BACKEND = stores.Backend(
     name="qdrant", role="vector", title="Qdrant", make=QdrantVectors, url="http://localhost:6333",
     secret=stores.Secret(env="QDRANT_API_KEY", field="qdrant_api_key"),
@@ -121,4 +140,20 @@ BACKEND = stores.Backend(
                          ports=(stores.Port("api", 6333, "BRAIN_QDRANT_PORT"),),
                          data=(("", "/qdrant/storage"),),
                          telemetry_off=("QDRANT__TELEMETRY_DISABLED=true",)),   # on by default
+    # Without Docker: the official release binary, checksums from the GitHub release (2026-11-07).
+    native=stores.Native(
+        version="1.19.2",
+        files={"darwin-arm64": (QDRANT_RELEASE + "qdrant-aarch64-apple-darwin.tar.gz",
+                                "d24dfd25f4584684b337dd30ee016472cd25f53fc2501f1cd058ab3d7ee0b019"),
+               "darwin-x64": (QDRANT_RELEASE + "qdrant-x86_64-apple-darwin.tar.gz",
+                              "e095b682ad7460baff43827eaa13647b5ec97c48edcb676646ae2f4108395044"),
+               "linux-x64": (QDRANT_RELEASE + "qdrant-x86_64-unknown-linux-musl.tar.gz",
+                             "50b253243309ed0ae50a19f678f0d0adcc4f0b567b3bd2c5c0c7e02fa8404bb6"),
+               "linux-arm64": (QDRANT_RELEASE + "qdrant-aarch64-unknown-linux-musl.tar.gz",
+                               "6970b93b56fa1203f0cea47d2f330fdb654988fd56617aa77e8478cffd3c0ccb"),
+               "windows-x64": (QDRANT_RELEASE + "qdrant-x86_64-pc-windows-msvc.zip",
+                               "7d86596f16c6e85d45a50312f5e16ccb51e059b62e3d7308110cb65b4c799a4d")},
+        ports=(stores.Port("api", 6333, "BRAIN_QDRANT_PORT"), stores.Port("grpc", 6334, "BRAIN_QDRANT_GRPC_PORT")),
+        data=("",), layout=native_layout,
+        telemetry="telemetry_disabled: true in the config file"),
 )

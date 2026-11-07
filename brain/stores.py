@@ -163,14 +163,43 @@ class Docker:
         return env, tuple(args)
 
 
+class Native:
+    """How `brain stores --native` installs and runs a backend ★without Docker★ (§nativestores).
+
+    version     pinned — the upstream release, never "latest"
+    files       {platform: (url, sha256)} — the official archive for each platform (§nativestores.platform);
+                a platform missing here has no native build, and the installer says so instead of guessing
+    ports       `Port`s, bound to 127.0.0.1 only (`container` is the port it listens on, moved by `env`)
+    data        subfolders of `<brain home>/stores/native/<name>/`
+    runtime     a runtime brain downloads first (pinned too), e.g. "java21" for Neo4j — or ""
+    layout      layout(ctx) → {"argv": [...], "env": {...}, "cwd": str, "files": {path: text},
+                "init": [argv, ...]} — how to start it, given ctx = {home, data, ports, secret, secret_file,
+                runtime_home, platform}. `files` are written before `init` runs; `init` runs once, before the
+                first start (an empty data folder). ⛔ A credential is never put on a command line (`ps`
+                shows it): `layout` reads it from `secret_file` (0600, deleted afterwards) or a config file.
+    generate_secret   create the credential once into secrets.json when there is none (shared with Docker:
+                the same database keeps the same password whichever way it runs)
+    telemetry   ★required★, like Docker's: a short note on how `layout` turns the upstream usage report off
+    """
+
+    def __init__(self, version: str, files: Dict[str, Tuple[str, str]], ports: Sequence[Port],
+                 data: Sequence[str], layout: Callable, runtime: str = "", scheme: str = "http",
+                 url_port: str = "", generate_secret: bool = False, telemetry: Optional[str] = None):
+        self.version, self.files, self.ports, self.data = version, dict(files), tuple(ports), tuple(data)
+        self.layout, self.runtime, self.scheme = layout, runtime, scheme
+        self.url_port = url_port or (ports[0].name if ports else "")
+        self.generate_secret, self.telemetry = generate_secret, telemetry
+
+
 class Backend:
     """One storage backend — everything brain needs to know about it, in the file that implements it."""
 
     def __init__(self, name: str, role: str, make: Optional[Callable] = None, title: str = "",
                  url: str = "", secret: Optional[Secret] = None, options: Sequence[Option] = (),
-                 docker: Optional[Docker] = None):
+                 docker: Optional[Docker] = None, native: Optional[Native] = None):
         self.name, self.role, self.make, self.title = name, role, make, title or name
         self.url, self.secret, self.options, self.docker = url, secret, tuple(options), docker
+        self.native = native
         self.module = ""
 
     def serves(self, role: str) -> bool:
@@ -188,8 +217,9 @@ ROLE_OPTIONS: Dict[str, Tuple[Option, ...]] = {
 }
 RESERVED = ("backend", "url", "managed")      # config keys that are not options
 
-# What `--stores docker` and `brain stores --docker ROLE` start when no backend is named.
+# What `--stores docker|native` and `brain stores --docker|--native ROLE` start when no backend is named.
 DOCKER_DEFAULT = {"vector": "qdrant", "graph": "neo4j"}
+NATIVE_DEFAULT = DOCKER_DEFAULT
 
 
 # ── the registry: discovered from brain/backends/, never listed by hand ─────
@@ -388,7 +418,7 @@ def is_local(c: dict) -> bool:
 def secret(c: dict) -> str:
     """The backend's credential: its variable → `secrets.json`. "" when there is none.
 
-    A container brain runs itself (`managed: docker`) uses the credential brain generated for it first —
+    A database brain runs itself (`managed: docker` or `managed: native`) uses the credential brain generated for it first —
     a variable meant for another server of the same kind must not lock brain out of its own.
     """
     if c.get("secret"):
@@ -404,7 +434,9 @@ def secret(c: dict) -> str:
             from_file = (json.load(fh).get(s.field) or "").strip()
     except (OSError, ValueError, AttributeError):
         from_file = ""
-    own = (c.get("options") or {}).get("managed") == "docker" and b.docker and b.docker.generate_secret
+    managed = (c.get("options") or {}).get("managed")
+    own = ((managed == "docker" and b.docker and b.docker.generate_secret)
+           or (managed == "native" and b.native and b.native.generate_secret))
     return (from_file or from_env) if own else (from_env or from_file)
 
 

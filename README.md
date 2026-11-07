@@ -610,20 +610,25 @@ and the local SQLite copy always stays, so a database or engine that goes away n
 |---|---|---|---|
 | Index and word search | SQLite (standard library) | same | — |
 | Meaning-based search (`embed`) | off — word search only | **`embeddinggemma`**: `google/embeddinggemma-300m` on this machine | `gemini` · `openai` · any OpenAI-compatible server (Ollama, LM Studio, vLLM) · `none` |
-| Vector database (`vector`) | the local SQLite copy | **Qdrant** in Docker | `chroma` · `pgvector` · `milvus` · any of them at a URL you already run |
-| Graph database (`graph`) | the local SQLite copy | **Neo4j** in Docker | `memgraph` · a server you already run |
+| Vector database (`vector`) | the local SQLite copy | **Qdrant** 1.19.2, installed on this machine (no Docker) | Qdrant in Docker · `chroma` · `pgvector` · `milvus` · any of them at a URL you already run |
+| Graph database (`graph`) | the local SQLite copy | **Neo4j** 5.26.31 Community, installed on this machine (no Docker) | Neo4j in Docker · `memgraph` · a server you already run |
 | Candidate judge (`judge`) | off | off | `gemini` · `openai` · `anthropic` · OpenAI-compatible |
 | Scheduler for daily jobs | detected: launchd (macOS) · Task Scheduler (Windows) · systemd user / cron (Linux) | same | `BRAIN_SCHEDULER=…` |
 | Host | detected: Claude Code · Codex | both | any MCP client (`brain-mcp`) |
 
 ```bash
-./install.sh --recommended          # = --all --stores docker --embed embeddinggemma
+./install.sh --recommended          # = --all --stores native --embed embeddinggemma
 ```
 
 What `--recommended` does, and the one step it cannot do for you:
 
-1. **Docker** starts Qdrant and Neo4j with their data under the brain's home. No Docker → a warning,
-   and both roles keep answering from the local copy.
+1. **Qdrant and Neo4j are downloaded and installed on this machine — no Docker.** The official
+   release archives (and, for Neo4j, a Java 21 runtime) are pinned to one version and checked against
+   their SHA-256 before anything is unpacked, then installed under the brain's home and registered with
+   the platform's service manager, like the EmbeddingGemma service below: they start at sign-in, so
+   **after a restart the brain works without anyone opening anything**, and they restart after a crash.
+   No administrator rights, nothing system-wide. A platform with no official build gets a warning, and
+   both roles keep answering from the local copy (`--stores docker` is the other way).
 2. **EmbeddingGemma** gets its own Python 3.11+ environment under the brain's home (with `uv` when it is
    installed, otherwise any Python 3.11+ on the machine), never touching the core's Python.
 3. **The model needs no token.** The installer downloads revision `57c266a` (about 1.27 GB, once) from
@@ -647,7 +652,7 @@ What `--recommended` does, and the one step it cannot do for you:
    evaluation set (`brain eval-init`), that set replaces the label-free measurement.
 
 To swap a part later: `brain engines --set embed=…` (then `brain vec build`), or
-`brain stores --set vector=… --url …` / `--docker graph=…` (then `brain stores --sync`).
+`brain stores --set vector=… --url …` / `--native` / `--docker graph=…` (then `brain stores --sync`).
 
 ### Other ways to install
 
@@ -656,8 +661,9 @@ To swap a part later: `brain engines --set embed=…` (then `brain vec build`), 
 ./install.sh --with-hook --with-guard   # fully local: no AI engine, nothing leaves the machine
 ./install.sh --all --embed gemini --judge gemini        # + meaning-based search (GEMINI_API_KEY)
 ./install.sh --all --embed openai --judge anthropic     # mix providers (OPENAI_API_KEY, ANTHROPIC_API_KEY)
-./install.sh --all --stores docker      # + vector search on Qdrant and the graph on Neo4j, both in Docker
-./install.sh --all --graph-store neo4j  # + only the graph, in Docker — each role is chosen on its own
+./install.sh --all --stores native      # + Qdrant and Neo4j installed on this machine, no Docker
+./install.sh --all --stores docker      # + the same two, in Docker instead
+./install.sh --all --graph-store neo4j  # + only the graph (natively) — each role is chosen on its own
 ./install.sh --help                     # choose what to enable
 ```
 
@@ -745,11 +751,43 @@ Measured on the author's notes (1,909 documents, 9,590 chunks, 3,376 links; 2026
 on the same machine): identical answers on every question compared, similarity search **188 ms → 12 ms**
 with Qdrant, and one-hop neighbours for every document **3.4 s → 0.48 s** with Neo4j.
 
+### Install them without Docker (recommended)
+
+```bash
+./install.sh --stores native               # at install time: every role's default (Qdrant, Neo4j)
+brain stores --native                      # any time later: both defaults — also moves them off Docker
+brain stores --native graph                # or one role; the other keeps running where it is
+```
+
+- **What it fetches**, each pinned and checksummed in the backend's own file (`BACKEND.native`):
+
+  | | Version | Platforms with an official build |
+  |---|---|---|
+  | Qdrant | 1.19.2 (GitHub release binary) | macOS arm64/x64 · Linux x64/arm64 · Windows x64 |
+  | Neo4j Community | 5.26.31 (dist.neo4j.org) | the same five |
+  | Java runtime for Neo4j | Eclipse Temurin 21.0.9+10 JRE | the same five |
+
+  A checksum that differs stops the install before anything is unpacked; an archive path that leaves its
+  folder is refused.
+- **Where things live:** the programs under `<home>/runtime/<name>/<version>/`, the data under
+  `<home>/stores/native/<backend>/`, the logs next to it (`qdrant.log`, `neo4j.log`).
+- **They run by themselves:** one service each (`com.local-brain.qdrant`, `com.local-brain.neo4j`) with
+  launchd on macOS, a systemd user unit on Linux, a sign-in task on Windows. Measured on macOS
+  (2026-11-07): unloading and loading the services the way a sign-in does brought both back and in sync
+  in 18 s; Qdrant killed with `kill -9` was running again 6 s later.
+- **Small and private:** ports bound to 127.0.0.1 only, usage reporting off in each config, Neo4j kept to
+  a 512 MB heap and a 128 MB page cache (measured: about 430 MB for Qdrant and 600 MB for Neo4j, against
+  the 8 GB Docker Desktop's virtual machine held for the same two). Neo4j's password is the one in
+  `secrets.json`, set from a 0600 file that is deleted right after — never on a command line.
+- **Moving from Docker:** `brain stores --native` stops the Docker container of the same backend (it is
+  not removed, and its data folder stays) and fills the new database from the local copy — nothing is
+  migrated, because the local copy is canonical.
+
 ### Run them in Docker
 
 ```bash
 ./install.sh --stores docker               # at install time: every role's default (Qdrant, Neo4j)
-./install.sh --graph-store neo4j           # or one role on its own; NAME=URL for a server that already runs
+./install.sh --stores docker --graph-store neo4j   # or one role on its own; NAME=URL for a server that already runs
 brain stores --docker                      # any time later: both defaults
 brain stores --docker graph=memgraph       # or one role, with the backend you name; the other keeps running
 brain stores --docker-stop                 # stop them; the data stays, and the local copy answers meanwhile
@@ -779,10 +817,11 @@ brain stores --docker-stop                 # stop them; the data stays, and the 
   connects out and must be seen. With reporting on, Qdrant and Memgraph were caught connecting to their
   telemetry servers within a minute; with brain's settings, nothing.
 - After a reboot the containers come back as soon as Docker starts. On macOS and Windows, turn on
-  *Start Docker Desktop when you sign in*; until Docker is up, the local copy answers.
+  *Start Docker Desktop when you sign in*; until Docker is up, the local copy answers. (The native install
+  above has no such step.)
 
 Adding another database is one file in `brain/backends/` and nothing else: its choice, its option flags,
-its Docker container, the installer's `--vector-store` / `--graph-store` and the status screen all come
+its Docker container, its native install, the installer's `--vector-store` / `--graph-store` and the status screen all come
 from that file, and `tests/verify_store_adapters.py` proves it by dropping two new backends into a copy
 of brain and running the whole contract against them. How to write one: [docs/STORAGE.md](docs/STORAGE.md).
 
@@ -861,6 +900,7 @@ python3 tests/verify_server_refresh.py  # a long-running MCP server answers with
 python3 tests/verify_stores.py          # vector and graph databases are replaceable: sync, diff, fallback
 python3 tests/verify_stores_live.py     # Qdrant and Neo4j, live: the same answers as the local copy
 python3 tests/verify_docker_stores.py   # Docker: data survives restarts and removed containers, refills itself
+python3 tests/verify_native_stores.py   # no Docker: pinned checksums, safe unpacking, services that survive a restart
 python3 tests/verify_pr_report.py       # the pull-request rules, the review gate and CODEOWNERS can each fail
 ```
 
@@ -882,6 +922,7 @@ python3 tests/verify_pr_report.py       # the pull-request rules, the review gat
 | `brain/stores.py` | Storage backends — which database serves each role, the sync ledger, the fallback |
 | `brain/vecstore.py` | Vector stores — the local scan and Qdrant |
 | `brain/graphstore.py` | Graph stores — the local link table and Neo4j |
+| `brain/nativestores.py` | Qdrant and Neo4j without Docker — pinned downloads, checked, run as services of this machine |
 | `brain/dockerstores.py` | Qdrant and Neo4j in Docker, with the data in folders of your own |
 | `brain/vectors.py` | Meaning-based search — chunks, vectors, and the gate measured from your notes |
 | `brain/proxy.py` | The label-free sample — fragments of your notes against neutral probes |

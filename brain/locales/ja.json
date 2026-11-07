@@ -628,7 +628,7 @@
  "cli.stores.last_error": "最後のエラー {at}: {error}",
  "cli.stores.secret_hint": "パスワード  {env}、または {path} の \"{field}\"",
  "cli.stores.choices": "選択肢    {choices}",
- "cli.stores.how_to_change": "変更      brain stores --set vector=qdrant --url http://localhost:6333   ·   --docker graph=名前   ·   --sync   ·   --check",
+ "cli.stores.how_to_change": "変更      brain stores --set vector=qdrant --url http://localhost:6333   ·   --native   ·   --docker graph=名前   ·   --sync   ·   --check",
  "cli.stores.set": "{role} を設定 → {entry}",
  "cli.stores.one_role_for_options": "--url とバックエンドのオプションは一度に一つの役割にだけ適用される",
  "cli.stores.sync.title": "同期",
@@ -649,7 +649,7 @@
  "cli.stores.check.differ": "不一致",
  "cli.status.store_fallback": "ストレージ — {role} → {backend} が応答せず、代わりにローカルの写しが答えている ({error})。`brain stores` を参照。",
  "cli.status.store_unsynced": "ストレージ — {role} → {backend} はまだ未同期。`brain stores --sync` まではローカルの写しが答える。",
- "install.stores_title": "Docker で動かす専用DB (ベクトル検索 · グラフ)",
+ "install.stores_title": "専用DB (ベクトル検索 · グラフ)",
  "install.would_docker_store": "{role} を Docker で起動 ({image})、データは {data} に保管",
  "install.stores_up": "{role} は Docker で稼働中 ({version}) — データは {data}",
  "install.stores_failed": "Docker のDBが準備できていない: {why} — ローカルの写しが引き続き答える",
@@ -789,5 +789,14 @@
  "obs.otherSectors": "その他のテーマ",
  "obs.shownBubbles": "表示バブル",
  "memory.validity": "有効状態: {status} · 現在: {current} · 以前: {previous} · 変更: {reason}",
- "memory.feedback_demoted": "検索フィードバックにより優先度が下がっています。事実の有効性とは別です。"
+ "memory.feedback_demoted": "検索フィードバックにより優先度が下がっています。事実の有効性とは別です。",
+ "install.would_native_store": "{role} ({backend} {version}) を Docker なしでこのマシンのサービスとして入れ、データは {data} に置く",
+ "install.stores_native_up": "{role} を Docker なしで導入・実行中 ({version}) — 再起動後も自動で起動。データは {data}",
+ "install.stores_native_failed": "Docker なしの導入が完了しません: {why} — その間はローカルコピーが答える",
+ "install.stores_no_native": "{backend} には brain の Docker なし導入がありません — --stores docker か、アドレスを指定: --{role}-store {backend}=URL",
+ "install.stores_docker_retired": "以前この役割だった Docker コンテナを停止: {services} (データフォルダは残る)",
+ "cli.stores.native_line": "ネイティブ {version} · サービス {service} (サインイン時に起動) · データは {data}",
+ "cli.stores.native_up": "Docker なしで導入・実行中: {roles}",
+ "cli.stores.native_failed": "Docker なしの導入に失敗: {why}",
+ "cli.stores.bad_native": "Docker なしで導入できる役割・バックエンドではありません: {token} — 役割: {roles}; バックエンド: {backends}"
 }
