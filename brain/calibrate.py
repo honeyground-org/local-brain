@@ -972,12 +972,39 @@ def _calibrate_locked(db: sqlite3.Connection, force: bool = False) -> dict:
                     print("[brain] ↩︎ %s" % i18n.t(
                         "guard.restored", before=prev_raw or "-", after="%.2f" % best_t),
                         file=sys.stderr)
+                _restamp_corpus(db, best_t, result.get("docs"))
                 return result
         store.set_meta(db, _META_BLOCKED, "")         # it passed — clear the alarm
     _remember_move(db, result)                       # record the movement ★before overwriting★
     store.set_meta(db, _META_KEY, str(result["threshold"]))
     store.set_meta(db, _META_DETAIL, json.dumps(result, ensure_ascii=False))
     return result
+
+
+def _restamp_corpus(db: sqlite3.Connection, kept: float, docs) -> None:
+    """A rejected calibration still ★re-validated the kept threshold on today's corpus★ — record that corpus.
+
+    ⛔ Without this the hook recalibrated on ★every prompt★ (measured 2026-11-08): the detail said 290
+    documents, the corpus had grown to 347 (+20%, over the 10% tolerance), so `threshold()` distrusted the
+    stored 7.32 and calibrated again; the guard kept 7.32 and returned ★without touching the detail★, so the
+    next prompt saw the same 290 and paid the same ~3.5 s — against a 5 s hook timeout. The bench that kept
+    7.32 measured it on the current corpus, so the stored value is valid for that corpus: say so.
+    """
+    try:
+        docs = int(docs or 0)
+    except (ValueError, TypeError):
+        return
+    if docs <= 0:
+        return
+    raw = store.get_meta(db, _META_DETAIL, "")
+    try:
+        detail = json.loads(raw) if raw else {}
+    except ValueError:
+        detail = {}
+    if not isinstance(detail, dict):
+        detail = {}
+    detail.update(threshold=kept, docs=docs, revalidated_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+    store.set_meta(db, _META_DETAIL, json.dumps(detail, ensure_ascii=False))
 
 
 CORPUS_DRIFT_TOLERANCE = 0.10          # a corpus change this large makes the stored threshold untrustworthy
