@@ -449,6 +449,7 @@
  "install.gemma_stopped": "embeddinggemma 가 \"{step}\" 단계에서 멈춤: {why} — 나머지는 그대로 동작합니다(낱말 검색)",
  "install.gemma_next": "할 일 (한 번만):",
  "install.gemma_rerun": "그다음 설치기를 다시 실행하세요 — 끝난 단계는 건너뜁니다",
+ "install.unfinished": "끝나지 않음: 요청한 {roles} 엔진이 아직 돌지 않습니다(종료 코드 {code}). 위 단계를 해결하고 설치기를 다시 실행하세요.",
  "install.vectors_title": "뜻 검색 — 벡터 · 문턱 · 벡터 DB",
  "install.vectors_paid": "{provider} 는 원격 엔진이라 설치기가 호출하지 않습니다. 준비되면: brain vec build",
  "install.vectors_wait_service": "임베딩 서비스가 아직 응답하지 않습니다 — 응답하면 매일 작업이 벡터를 만듭니다 (또는: brain vec build)",

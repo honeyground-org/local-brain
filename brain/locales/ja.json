@@ -449,6 +449,7 @@
  "install.gemma_stopped": "embeddinggemma が「{step}」の段階で停止: {why} — それ以外はそのまま動きます(キーワード検索)",
  "install.gemma_next": "やること(一度だけ):",
  "install.gemma_rerun": "その後インストーラーをもう一度実行してください — 済んだ段階は飛ばされます",
+ "install.unfinished": "未完了: 指定した {roles} エンジンはまだ動いていません(終了コード {code})。上の段階を解決してからインストーラーをもう一度実行してください。",
  "install.vectors_title": "意味検索 — ベクトル・しきい値・ベクトル DB",
  "install.vectors_paid": "{provider} はリモートのエンジンなのでインストーラーは呼びません。準備ができたら: brain vec build",
  "install.vectors_wait_service": "埋め込みサービスがまだ応答しません — 応答し次第、日次ジョブがベクトルを作ります(または: brain vec build)",

@@ -11,6 +11,9 @@ Measured on a real installation (macOS, Docker Qdrant + Neo4j, EmbeddingGemma):
   ④ with no embedding engine, a vector database got an empty collection named after "none",
      reported as in sync
   ⑤ a daily job whose engine nobody chose was registered anyway (and then shown as stopped)
+  ⑥ (2026-11-08) an install cut off while packages went in left a venv behind, and every later run
+     failed at `uv venv` ("already exists") — and the installer exited 0 when the embedding engine
+     it was asked for never came up, so a caller (Cosmos) had no reason to try again
 
 Every check that a fix holds sits beside a ★control★ showing the check can fail.
 Nothing here reaches the network, Docker, a scheduler or Hugging Face.
@@ -331,6 +334,72 @@ def jobs_follow_engines() -> None:
           out[-200:])
 
 
+def resume_and_exit_code() -> None:
+    print("\n" + "=" * 72 + "\n⑥ a half-built venv resumes · an engine that did not come up is a non-zero exit\n" + "=" * 72)
+    import shutil as _sh
+    rt = os.path.join(_TMP, "rt6")
+    saved = (embedruntime.runtime_dir, embedruntime._run)
+    embedruntime.runtime_dir = lambda: rt
+    seen = []
+
+    def rec(argv, timeout=0, env=None):
+        seen.append(list(argv))
+        return _P(0)
+    embedruntime._run = rec
+    try:
+        os.makedirs(os.path.join(rt, "venv"), exist_ok=True)          # what an interrupted run leaves
+        r = embedruntime.step_env(lambda m: None)
+        venv_calls = [a for a in seen if a[1:2] == ["venv"]]
+        if venv_calls:
+            check("uv is asked to keep a venv that is already there (--allow-existing)",
+                  "--allow-existing" in venv_calls[0], str(venv_calls[0]))
+            check("…and the packages are installed into it", r.get("ok") and
+                  any(a[1:3] == ["pip", "install"] for a in seen), str(seen)[-200:])
+        else:
+            check("(no uv on this machine — the stdlib venv path tolerates an existing folder)", True)
+    finally:
+        embedruntime.runtime_dir, embedruntime._run = saved
+
+    uv = _sh.which("uv")
+    py311 = embedruntime.find_python()
+    if uv and py311:
+        d = os.path.join(_TMP, "uv6")
+        os.makedirs(d, exist_ok=True)
+        v = os.path.join(d, "venv")
+        first = subprocess.run([uv, "venv", "--python", py311, v], capture_output=True, text=True, errors="replace")
+        again = subprocess.run([uv, "venv", "--python", py311, v], capture_output=True, text=True, errors="replace")
+        check("★control★ — on this uv, plain `uv venv` over an existing venv fails",
+              first.returncode == 0 and again.returncode != 0, (again.stderr or "").strip()[-120:])
+        kept = subprocess.run([uv, "venv", "--python", py311, "--allow-existing", v], capture_output=True, text=True, errors="replace")
+        check("…and the same call with --allow-existing succeeds", kept.returncode == 0, kept.stderr[-120:])
+    else:
+        print("   (uv or Python 3.11 not here — the real-uv control is skipped)")
+
+    names = ("step_prereq", "step_config", "step_index", "step_stores", "step_vectors", "step_mcp",
+             "step_hooks", "step_schedule", "_setup_embeddinggemma")
+    saved = {n: getattr(install, n) for n in names}
+    try:
+        for n in names[:3]:
+            setattr(install, n, lambda *a, **k: True)
+        for n in names[3:8]:
+            setattr(install, n, lambda *a, **k: None)
+        install._setup_embeddinggemma = lambda: False
+        with redirect_stdout(io.StringIO()) as buf:
+            code = install.main(["--embed", "embeddinggemma"])
+        check("the embedding engine asked for did not come up → exit %d" % install.EXIT_UNFINISHED,
+              code == install.EXIT_UNFINISHED, "%s %s" % (code, buf.getvalue()[-160:]))
+        install._setup_embeddinggemma = lambda: True
+        with redirect_stdout(io.StringIO()):
+            code = install.main(["--embed", "embeddinggemma"])
+        check("★control★ — it came up → exit 0 (and the earlier failure is not carried over)", code == 0, code)
+        with redirect_stdout(io.StringIO()):
+            code = install.main([])
+        check("no engine asked for → exit 0", code == 0, code)
+    finally:
+        for n, f in saved.items():
+            setattr(install, n, f)
+
+
 def main() -> int:
     mcp_argv()
     true_case()
@@ -339,6 +408,7 @@ def main() -> int:
     uv_bootstrap()
     no_engine_no_collection()
     jobs_follow_engines()
+    resume_and_exit_code()
     print("\n" + ("❌ %d failed" % len(FAILS) if FAILS else "✅ all passed"))
     return 1 if FAILS else 0
 

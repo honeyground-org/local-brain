@@ -150,7 +150,11 @@ def step_env(say: Callable[[str], None]) -> dict:
         uv = got["uv"]
     say("creating the runtime environment (Python 3.11+, torch, sentence-transformers — a few minutes, once)")
     if uv:
-        p = _run([uv, "venv", "--python", "3.11", venv], timeout=900)
+        # ★--allow-existing★ (2026-11-08) — an install cut off while the packages were going in leaves the
+        #  venv behind; plain `uv venv` then fails with "already exists" on every later run, so the
+        #  install could never finish. Keeping what is there lets `uv pip install` pick up where it stopped
+        #  (nothing is deleted: the folder may be in use by the running embedding service).
+        p = _run([uv, "venv", "--python", "3.11", "--allow-existing", venv], timeout=900)
         if p.returncode == 0:
             p = _run([uv, "pip", "install", "--python", venv_python(), "-r", req], timeout=3600)
     else:

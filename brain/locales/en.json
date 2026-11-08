@@ -451,6 +451,7 @@
  "install.gemma_stopped": "embeddinggemma stopped at step \"{step}\": {why} — everything else works without it (keyword search)",
  "install.gemma_next": "what to do (once):",
  "install.gemma_rerun": "then run the installer again — finished steps are skipped",
+ "install.unfinished": "Not finished: the {roles} engine you asked for is not running yet (exit code {code}). Fix the step above and run the installer again.",
  "install.vectors_title": "Meaning-based search — vectors, gate, vector database",
  "install.vectors_paid": "{provider} is a remote engine — the installer does not call it. When you are ready: brain vec build",
  "install.vectors_wait_service": "the embedding service is not answering yet — the daily job builds the vectors once it is (or: brain vec build)",
