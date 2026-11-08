@@ -449,6 +449,7 @@
  "install.gemma_stopped": "embeddinggemma hielt bei Schritt \"{step}\" an: {why} — alles andere funktioniert ohne (Stichwortsuche)",
  "install.gemma_next": "was zu tun ist (einmal):",
  "install.gemma_rerun": "dann den Installer erneut starten — erledigte Schritte werden übersprungen",
+ "install.unfinished": "Nicht fertig: die gewünschte {roles}-Engine läuft noch nicht (Exit-Code {code}). Den Schritt oben beheben und den Installer erneut starten.",
  "install.vectors_title": "Bedeutungssuche — Vektoren, Schwelle, Vektordatenbank",
  "install.vectors_paid": "{provider} ist eine entfernte Engine — der Installer ruft sie nicht auf. Wenn Sie bereit sind: brain vec build",
  "install.vectors_wait_service": "der Embedding-Dienst antwortet noch nicht — der tägliche Job baut die Vektoren, sobald er antwortet (oder: brain vec build)",

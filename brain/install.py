@@ -235,6 +235,13 @@ def step_index() -> bool:
 
 
 # ── 3b. AI engines ──────────────────────────────────────────────────────────
+# Engines a person named on the command line that could not be set up. ★The exit code says so★
+# (2026-11-08): a caller (Cosmos, a script) reads only the code — a 0 here meant "installed" while
+# meaning-based search had nothing behind it, so nothing ever tried again.
+UNFINISHED: List[str] = []
+EXIT_UNFINISHED = 3
+
+
 def step_engines(embed: str, judge: str) -> None:
     """Record the engines a person named, then show every role and what it would send.
 
@@ -252,7 +259,8 @@ def step_engines(embed: str, judge: str) -> None:
             _would(i18n.t("install.would_set_engine", role=role, provider=prov))
             continue
         if role == "embed" and prov == "embeddinggemma":
-            _setup_embeddinggemma()
+            if not _setup_embeddinggemma():
+                UNFINISHED.append("embed")
             continue
         try:
             engines.set_choice(role, prov)
@@ -699,6 +707,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     a = ap.parse_args(argv)
     global DRY
     DRY = a.dry_run
+    del UNFINISHED[:]
     if a.recommended:
         a.all = True
         a.stores = a.stores or "native"
@@ -746,6 +755,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     say("  brain status        " + i18n.t("install.hint_status"))
     say("  brain dashboard     " + i18n.t("install.hint_dashboard"))
     say("  brain recall <text> " + i18n.t("install.hint_recall"))
+    if UNFINISHED:
+        say("")
+        say(i18n.t("install.unfinished", roles=", ".join(UNFINISHED), code=EXIT_UNFINISHED))
+        return EXIT_UNFINISHED
     return 0
 
 

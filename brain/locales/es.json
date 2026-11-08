@@ -449,6 +449,7 @@
  "install.gemma_stopped": "embeddinggemma se detuvo en el paso \"{step}\": {why} — todo lo demás funciona sin él (búsqueda por palabras)",
  "install.gemma_next": "qué hacer (una vez):",
  "install.gemma_rerun": "después vuelva a ejecutar el instalador — los pasos terminados se omiten",
+ "install.unfinished": "Sin terminar: el motor {roles} que pidió aún no está en marcha (código de salida {code}). Resuelva el paso de arriba y vuelva a ejecutar el instalador.",
  "install.vectors_title": "Búsqueda por significado — vectores, umbral, base vectorial",
  "install.vectors_paid": "{provider} es un motor remoto — el instalador no lo llama. Cuando esté listo: brain vec build",
  "install.vectors_wait_service": "el servicio de embeddings aún no responde — la tarea diaria construirá los vectores cuando lo haga (o: brain vec build)",
