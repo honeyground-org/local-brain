@@ -18,7 +18,7 @@ db=store.connect();store.reindex(db,full=True,recalibrate=False,refresh_history=
 for i in range(10):
  server.call_tool(db,"remember",dict(name="background_"+str(i),description="unrelated reference",type="reference",body="Reference archive unrelated astronomy cooking travel music insurance "+str(i)),_measure=True)
 results=[]
-for lang,topic,old,new in [("ko","생활","산책은 월요일입니다.","산책은 금요일입니다."),("en","routine","Walk on Monday.","Walk on Friday."),("ja","日常","散歩は月曜日です。","散歩は金曜日です。"),("ar","روتين","المشي يوم الاثنين.","المشي يوم الجمعة."),("es","rutina","Caminar el lunes.","Caminar el viernes.")]:
+for lang,topic,old,new in [("ko","\uc0dd\ud65c","\uc0b0\ucc45\uc740 \uc6d4\uc694\uc77c\uc785\ub2c8\ub2e4.","\uc0b0\ucc45\uc740 \uae08\uc694\uc77c\uc785\ub2c8\ub2e4."),("en","routine","Walk on Monday.","Walk on Friday."),("ja","\u65e5\u5e38","\u6563\u6b69\u306f\u6708\u66dc\u65e5\u3067\u3059\u3002","\u6563\u6b69\u306f\u91d1\u66dc\u65e5\u3067\u3059\u3002"),("ar","\u0631\u0648\u062a\u064a\u0646","\u0627\u0644\u0645\u0634\u064a \u064a\u0648\u0645 \u0627\u0644\u0627\u062b\u0646\u064a\u0646.","\u0627\u0644\u0645\u0634\u064a \u064a\u0648\u0645 \u0627\u0644\u062c\u0645\u0639\u0629."),("es","rutina","Caminar el lunes.","Caminar el viernes.")]:
  def save(name,body,meta):
   args=dict(name=name,description=body,type="user",body=body,lifecycle=meta,project_id=lang)
   prep=json.loads(server.call_tool(db,"remember",dict(args,prepare_only=True),_measure=True))
