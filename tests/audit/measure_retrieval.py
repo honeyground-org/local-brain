@@ -6,9 +6,12 @@ are the default; --gold-match substring explicitly enables historical labels.
 --snapshot pins the input DB; otherwise a read-only live DB is backed up first.
 --reindex re-reads source files into the private copy with external sync disabled;
 it refuses corpus drift. Use --config for the configured engines/source roots.
+--stores snapshot (default) freezes vector/graph reads in SQLite. Use configured for
+live-backend observations; actual vector routes are recorded, including fallback.
 --compare checks identities before producing paired changes, never causal claims.
 """
 import argparse
+from collections import Counter
 import hashlib
 import json
 import math
@@ -72,6 +75,8 @@ def paired(before, after):
     for arm in after['arms']:
         wins, losses, diffs = [], [], []
         for i, (a, b) in enumerate(zip(before['cases'], after['cases'])):
+            if not b.get('gold'):
+                continue
             x, y = a['arms'][arm]['hit3'], b['arms'][arm]['hit3']
             diffs.append(y - x)
             if y > x:
@@ -79,11 +84,13 @@ def paired(before, after):
             elif y < x:
                 losses.append(i)
         rng = random.Random(0)
-        boot = [statistics.mean(rng.choices(diffs, k=len(diffs))) for _ in range(1000)]
+        boot = [statistics.mean(rng.choices(diffs, k=len(diffs))) for _ in range(1000)] if diffs else []
+        same_routes = set(before['arms'][arm].get('vector_routes', {})) == set(after['arms'][arm].get('vector_routes', {}))
         result[arm] = {'improved_case_indices': wins, 'regressed_case_indices': losses,
-                       'hit3_delta': statistics.mean(diffs),
+                       'answerable_pairs': len(diffs), 'hit3_delta': statistics.mean(diffs) if diffs else None,
                        'paired_bootstrap_95': [percentile(boot, .025), percentile(boot, .975)],
-                       'p50_delta_ms': after['arms'][arm]['p50_ms'] - before['arms'][arm]['p50_ms']}
+                       'same_vector_routes': same_routes,
+                       'p50_delta_ms': (after['arms'][arm]['p50_ms'] - before['arms'][arm]['p50_ms']) if same_routes else None}
     return {'arms': result, 'meaning': 'Paired empirical uncertainty on these cases, not population or held-out validation.'}
 
 
@@ -93,9 +100,13 @@ def self_check():
     assert not score({'gold': 'a'}, ['aa'], 'exact')['hit3']
     assert score({'gold': 'a'}, ['aa'], 'substring')['hit3']
     a = {'identity': {k: 'same' for k in ('corpus', 'evaluation', 'protocol', 'configuration', 'embedding')},
-         'arms': {'words': {'p50_ms': 1}}, 'cases': [{'arms': {'words': {'hit3': 0}}}]}
+         'arms': {'words': {'p50_ms': 1}}, 'cases': [{'gold': 'answer', 'arms': {'words': {'hit3': 0}}}]}
     b = json.loads(json.dumps(a)); b['cases'][0]['arms']['words']['hit3'] = 1
     assert paired(a, b)['arms']['words']['improved_case_indices'] == [0]
+    b['arms']['words']['vector_routes'] = {'sqlite:local:dirty': 1}
+    assert paired(a, b)['arms']['words']['p50_delta_ms'] is None
+    b['cases'][0]['gold'] = None
+    assert paired(a, b)['arms']['words']['hit3_delta'] is None
     b['identity']['corpus'] = 'changed'
     try:
         paired(a, b)
@@ -113,6 +124,8 @@ def main():
     parser.add_argument('--snapshot', type=Path)
     parser.add_argument('--config', type=Path)
     parser.add_argument('--reindex', action='store_true')
+    parser.add_argument('--stores', choices=('snapshot', 'configured'), default='snapshot',
+                        help='snapshot: frozen SQLite vectors/graph; configured: live backends, observational only')
     parser.add_argument('--repeat', type=int, default=3)
     parser.add_argument('--warmup', type=int, default=1)
     parser.add_argument('--arms', nargs='+', choices=ARMS, default=list(ARMS))
@@ -131,6 +144,8 @@ def main():
         if (not isinstance(c, dict) or not isinstance(c.get('q'), str) or not c['q'].strip()
                 or not (c.get('gold') or c.get('expect_no_answer'))):
             parser.error('each case needs q and gold, or explicit expect_no_answer')
+        if c.get('gold') and c.get('expect_no_answer'):
+            parser.error('gold and expect_no_answer are mutually exclusive')
         for key in ('gold', 'forbidden'):
             if any(not isinstance(x, str) or not x for x in labels(c.get(key))):
                 parser.error(key + ' must contain nonempty names')
@@ -140,6 +155,9 @@ def main():
         parser.error('output already has snapshot.db; use a new directory to preserve prior evidence')
     if args.config:
         os.environ['BRAIN_CONFIG'] = str(args.config.resolve())
+    if args.stores == 'snapshot':
+        os.environ['BRAIN_VECTOR_STORE'] = 'sqlite'
+        os.environ['BRAIN_GRAPH_STORE'] = 'sqlite'
     sys.path.insert(0, str(args.repo.resolve()))
     # Resolve the live source before isolating home; engine configuration is explicit.
     from brain import store, textindex, calibrate, vectors, search, server, lifecycle
@@ -177,22 +195,34 @@ def main():
                     'protocol': fingerprint({'arms': args.arms, 'repeat': args.repeat,
                                              'warmup': args.warmup, 'gold_match': args.gold_match,
                                              'personalization': 'measurement path', 'version': 2,
+                                             'stores': args.stores,
                                              'measurement_code': hashlib.sha256(Path(__file__).read_bytes()).hexdigest()})}
         try:
             commit = subprocess.check_output(['git', '-C', str(args.repo), 'rev-parse', 'HEAD'], text=True).strip()
         except (OSError, subprocess.CalledProcessError):
             commit = None
+        # Capture actual vector routing, including silent remote-to-local fallback.
+        vector_trace = []
+        original_search = vectors.search
+        def traced_search(*pos, **kw):
+            try:
+                return original_search(*pos, **kw)
+            finally:
+                vector_trace.append(vectors.last_search())
+        vectors.search = traced_search
         records = []; all_names = [r[0] for r in db.execute('SELECT name FROM docs')]
         for i, c in enumerate(cases):
             entry = {'index': i, 'q': c['q'], 'gold': c.get('gold'),
                      'language': c.get('language', 'unlabelled'), 'intent': c.get('intent', 'unlabelled'),
                      'gold_present': any(matches(c.get('gold'), n, args.gold_match) for n in all_names), 'arms': {}}
             samples = {a: [] for a in args.arms}; rankings = {a: [] for a in args.arms}
+            routes = {a: Counter() for a in args.arms}
             for turn in range(-args.warmup, args.repeat):
                 # Rotate first/last position to reduce systematic cache/order advantage.
                 shift = (i + turn + args.warmup) % len(args.arms)
                 order = args.arms[shift:] + args.arms[:shift]
                 for arm in order:
+                    vector_trace.clear()
                     start = time.perf_counter(); extra = []; partial = False
                     with lifecycle.view(c.get('view', 'current'), c.get('as_of')):
                         if arm in ('words', 'words_graph'):
@@ -215,11 +245,12 @@ def main():
                     elapsed = (time.perf_counter() - start) * 1000
                     if turn >= 0:
                         samples[arm].append(elapsed); rankings[arm].append(names)
+                        routes[arm].update(':'.join(str(t.get(k) or '') for k in ('store', 'by', 'why')) for t in vector_trace)
                         if turn == 0:
                             entry['arms'][arm] = dict(score(c, names, args.gold_match), names=names,
                                                      related=extra, partial=partial)
             for arm in args.arms:
-                entry['arms'][arm].update(ms=samples[arm], stable=all(n == rankings[arm][0] for n in rankings[arm]))
+                entry['arms'][arm].update(ms=samples[arm], vector_routes=dict(routes[arm]), stable=all(n == rankings[arm][0] for n in rankings[arm]))
             records.append(entry)
             if (i + 1) % 10 == 0: print('measured', i + 1, '/', len(cases), flush=True)
         report = {'schema': 2, 'identity': identity, 'commit': commit,
@@ -230,6 +261,7 @@ def main():
             answerable = [r for r, c in zip(rs, cases) if c.get('gold')]
             report['arms'][arm] = {'answerable': len(answerable), 'hit3': sum(r['hit3'] for r in answerable),
                 'hit8': sum(r['hit8'] for r in answerable), 'mrr': statistics.mean(r['rr'] for r in answerable) if answerable else None,
+                'vector_routes': dict(sum((Counter(r['vector_routes']) for r in rs), Counter())),
                 'p50_ms': statistics.median(timing), 'p95_ms': percentile(timing, .95),
                 'forbidden_exposures': sum(r['forbidden'] for r in rs), 'partial_cases': sum(r['partial'] for r in rs),
                 'unstable_cases': sum(not r['stable'] for r in rs),
@@ -239,14 +271,14 @@ def main():
                 for value in sorted({r[dimension] for r in records}):
                     subset = [r for r in records if r[dimension] == value]
                     report['groups'].setdefault(dimension + ':' + value, {})[arm] = {
-                        'n': len(subset), 'hit3': sum(r['arms'][arm]['hit3'] for r in subset),
+                        'n': len(subset), 'answerable': sum(bool(r.get('gold')) for r in subset), 'hit3': sum(r['arms'][arm]['hit3'] for r in subset),
                         'forbidden_exposures': sum(r['arms'][arm]['forbidden'] for r in subset)}
         report['missing_gold_indices'] = [i for i, (r, c) in enumerate(zip(records, cases)) if c.get('gold') and not r['gold_present']]
         report['limitations'] = ['Local personal labels are not a global-language benchmark.',
             'First measured repetition determines quality; repeated queries are not independent labels.',
             'Warmup and rotated ordering reduce but do not eliminate cache effects; not cold-start latency.',
             'Measurement path excludes policy reranking/logging; feedback weights in the snapshot remain.',
-            'External databases are live read paths, not frozen copies; partial results are reported.',
+            'Snapshot mode freezes vector/graph reads; configured mode uses live databases and is observational. Different vector routes suppress latency deltas.',
             'A name hit is evidence retrieval, not answer factual accuracy; forbidden labels must be supplied.',
             'Bootstrap intervals describe this sample, not held-out model selection.']
         if calibrate.code_fingerprint() != initial_code:
