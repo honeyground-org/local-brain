@@ -521,7 +521,7 @@ def measure(db: sqlite3.Connection) -> dict:
 #   45 (2026-11-07)  `stores.Native` and `managed: native` (Qdrant and Neo4j installed without Docker): a
 #                    native database uses the credential brain generated for it, like a Docker one. No
 #                    scoring change; bumped because `stores` is a ruler module.
-CODE_GENERATION = 45
+CODE_GENERATION = 46
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

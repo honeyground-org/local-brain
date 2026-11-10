@@ -20,6 +20,7 @@ Small enough that a full scan needs no shortcuts, and ranking is 100% under our 
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 import os
 import re
 import unicodedata
@@ -31,7 +32,8 @@ from typing import Dict, Iterable, List, Tuple
 # Bump it whenever `words()` / `grams_of_word()` change which terms a text produces.
 #   1 = Hangul 2·3-grams + ASCII words (2026-08-10)
 #   2 = + Latin letters with diacritics · Japanese by script · full-width fold · NFC (2026-09-08)
-TOKENIZER_VERSION = 2
+#   3 = Unicode letter/number runs with combining marks; legacy script boundaries retained
+TOKENIZER_VERSION = 3
 
 # ---------------------------------------------------------------- scripts
 # ★Scripts, not languages★ (2026-09-08 · §4 of the public-release plan)
@@ -70,6 +72,10 @@ _KATA = "\u30a1-\u30fa\u30fc-\u30fe\u31f0-\u31ff\uff66-\uff9f"  # letters + ー 
 _TOKEN = re.compile(
     "(?P<hangul>[%s]+)|(?P<han>[%s]+)|(?P<hira>[%s]+)|(?P<kata>[%s]+)|(?P<latin>[%s][%s.#-]*)"
     % (_HANGUL, _HAN, _HIRA, _KATA, _LATIN, _LATIN))
+# Fast-path the already supported scripts. Punctuation/symbols outside these
+# ranges do not require Unicode word scanning; unsupported letters/marks do.
+_OUTSIDE = re.compile("[^\\x00-\\x7f%s%s%s%s%s]" % (_LATIN, _HANGUL, _HAN, _HIRA, _KATA))
+
 _SCRIPT_RE = tuple((name, re.compile("[%s]" % cls)) for name, cls in
                    (("hangul", _HANGUL), ("han", _HAN), ("hira", _HIRA), ("kata", _KATA), ("latin", _LATIN)))
 
@@ -176,22 +182,81 @@ def is_stop(word: str) -> bool:
     return key in _EN_STOP or key in _JA_STOP
 
 
-def words(text: str) -> List[str]:
-    """The unit of search intent. An n-gram is a byproduct cut from this.
+@lru_cache(maxsize=4096)
+def _shape(char: str) -> str:
+    """Classify a character, retaining the existing script-specific search rules."""
+    if char.isascii():
+        return "latin" if char.isalnum() or char == "_" else ""
+    for name, rx in _SCRIPT_RE:
+        if rx.match(char):
+            return name
+    category = unicodedata.category(char)
+    if category[0] == "M":
+        return "mark"
+    if category[0] in ("L", "N"):
+        return "unicode"
+    return ""
 
-    ★Coverage is judged at this unit★ — "how many of the query's words were reached" is closer to
-    a human's own judgement than "how many grams were reached" (§search.score).
+
+def words(text: str) -> List[str]:
+    """Retain every Unicode letter/number script instead of silently dropping it.
+
+    Existing Hangul/Han/kana boundaries and Latin identifier punctuation stay intact.
+    Other scripts use exact word runs, not a claim of stemming or dictionary-based
+    segmentation. Combining marks stay attached to their base, never become terms.
     """
-    out: List[str] = []
-    for m in _TOKEN.finditer(_fold(text)):
-        t = m.group()
-        if m.lastgroup == "latin":
-            t = t.strip(".-#").lower()
-            if len(t) < _MIN_ASCII:
+    normal = _fold(text)
+    if not any(unicodedata.category(m.group())[0] in "LMN" or m.group() in ("\u200c", "\u200d")
+               for m in _OUTSIDE.finditer(normal)):
+        out = []
+        for match in _TOKEN.finditer(normal):
+            token = match.group()
+            if match.lastgroup == "latin":
+                token = token.strip(".-#").lower()
+                if len(token) < _MIN_ASCII:
+                    continue
+            elif match.lastgroup == "hira" and len(token) < _MIN_HIRAGANA:
                 continue
-        elif m.lastgroup == "hira" and len(t) < _MIN_HIRAGANA:
+            out.append(token)
+        return out
+    out: List[str] = []
+    run: List[str] = []
+    shape = ""
+
+    def flush():
+        if not run:
+            return
+        token = "".join(run)
+        if shape == "latin":
+            token = token.strip(".-#").lower()
+            if len(token) < _MIN_ASCII:
+                return
+        elif shape == "hira" and len(token) < _MIN_HIRAGANA:
+            return
+        elif shape == "unicode":
+            token = token.lower()
+        out.append(token)
+
+    for char in normal:
+        kind = _shape(char)
+        if kind == "mark":
+            if run:
+                run.append(char)
             continue
-        out.append(t)
+        # Join controls inside words do not create a false word boundary. Other
+        # format characters remain separators; do not glue words across bidi marks.
+        if char in ("\u200c", "\u200d") and run:
+            continue
+        if shape == "latin" and run and char in ".#-":
+            run.append(char)
+            continue
+        if not kind or kind != shape:
+            flush()
+            run = []
+        shape = kind
+        if kind:
+            run.append(char)
+    flush()
     return out
 
 
