@@ -49,20 +49,41 @@ def matches(wanted, name, mode):
     return any(w == name if mode == 'exact' else w in name for w in labels(wanted))
 
 
-def score(case, names, mode):
+def score(case, names, mode, related=()):
     rank = next((i + 1 for i, n in enumerate(names) if matches(case.get('gold'), n, mode)), None)
     return {'rank': rank, 'hit3': int(rank is not None and rank <= 3),
             'hit8': int(rank is not None and rank <= 8),
             'rr': 1.0 / rank if rank else 0.0,
-            'forbidden': sum(matches(case.get('forbidden'), n, mode) for n in names),
-            'abstained': not names}
+            'forbidden': sum(matches(case.get('forbidden'), n, mode) for n in list(names) + list(related)),
+            'abstained': not names and not related}
+
+
+def frozen_inputs_id(db):
+    """Hash retrieval inputs, including vector bytes and graph/alias relationships.
+
+    Postings/terms/skeletons are tokenizer-derived output and may intentionally
+    differ across versions. Query/log caches and timestamps are not source facts.
+    """
+    tables = ('vectors', 'links', 'path_links', 'aliases', 'alias_decl',
+              'kind_aliases', 'triggers', 'lexicon')
+    existing = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    identities = {}
+    for table in tables:
+        rows = []
+        if table in existing:
+            for row in db.execute('SELECT * FROM ' + table):
+                rows.append(fingerprint([{'blob_sha256': hashlib.sha256(v).hexdigest()}
+                                         if isinstance(v, bytes) else v for v in row]))
+        identities[table] = fingerprint(sorted(rows))
+    return fingerprint(identities)
 
 
 def corpus_id(db):
-    # File mtime/index timestamp are not content identity. Include scope and validity.
-    return fingerprint([list(r) for r in db.execute(
-        'SELECT name,path,sha,title,description,body,project_id,lifecycle,weight,prior '
-        'FROM docs ORDER BY path')])
+    # IDs bind graph/vector rows to documents; source/kind/evidence date affect retrieval.
+    return fingerprint({'docs': [list(r) for r in db.execute(
+        'SELECT id,name,path,source,kind,sha,title,description,body,project_id,lifecycle,'
+        'weight,prior,evidence_date FROM docs ORDER BY path')],
+        'frozen_inputs': frozen_inputs_id(db)})
 
 
 def paired(before, after):
@@ -85,7 +106,10 @@ def paired(before, after):
                 losses.append(i)
         rng = random.Random(0)
         boot = [statistics.mean(rng.choices(diffs, k=len(diffs))) for _ in range(1000)] if diffs else []
-        same_routes = set(before['arms'][arm].get('vector_routes', {})) == set(after['arms'][arm].get('vector_routes', {}))
+        same_routes = before['arms'][arm].get('vector_routes', {}) == after['arms'][arm].get('vector_routes', {})
+        same_routes = same_routes and all(
+            a['arms'][arm].get('vector_routes_by_repeat', []) == b['arms'][arm].get('vector_routes_by_repeat', [])
+            for a, b in zip(before['cases'], after['cases']))
         result[arm] = {'improved_case_indices': wins, 'regressed_case_indices': losses,
                        'answerable_pairs': len(diffs), 'hit3_delta': statistics.mean(diffs) if diffs else None,
                        'paired_bootstrap_95': [percentile(boot, .025), percentile(boot, .975)],
@@ -97,6 +121,8 @@ def paired(before, after):
 def self_check():
     assert percentile([1, 2, 100], .95) == 100
     assert score({'gold': 'a', 'forbidden': ['old']}, ['old', 'a'], 'exact')['forbidden'] == 1
+    assert score({'gold': 'a', 'forbidden': ['old']}, ['a'], 'exact', ['old'])['forbidden'] == 1
+    assert not score({'expect_no_answer': True}, [], 'exact', ['related'])['abstained']
     assert not score({'gold': 'a'}, ['aa'], 'exact')['hit3']
     assert score({'gold': 'a'}, ['aa'], 'substring')['hit3']
     a = {'identity': {k: 'same' for k in ('corpus', 'evaluation', 'protocol', 'configuration', 'embedding')},
@@ -107,6 +133,25 @@ def self_check():
     assert paired(a, b)['arms']['words']['p50_delta_ms'] is None
     b['cases'][0]['gold'] = None
     assert paired(a, b)['arms']['words']['hit3_delta'] is None
+    a['arms']['words']['vector_routes'] = {'remote': 99, 'local': 1}
+    b['arms']['words']['vector_routes'] = {'remote': 1, 'local': 99}
+    assert paired(a, b)['arms']['words']['p50_delta_ms'] is None
+    b['arms']['words']['vector_routes'] = dict(a['arms']['words']['vector_routes'])
+    a['cases'][0]['arms']['words']['vector_routes_by_repeat'] = [{'remote': 1}, {'local': 1}]
+    b['cases'][0]['arms']['words']['vector_routes_by_repeat'] = [{'local': 1}, {'remote': 1}]
+    assert paired(a, b)['arms']['words']['p50_delta_ms'] is None
+    db = sqlite3.connect(':memory:')
+    db.executescript('CREATE TABLE links(src_id, dst_name); CREATE TABLE vectors(doc_id, vec BLOB);')
+    initial = frozen_inputs_id(db)
+    db.execute("INSERT INTO links VALUES(1, 'other')")
+    assert frozen_inputs_id(db) != initial
+    initial = frozen_inputs_id(db)
+    db.execute('INSERT INTO vectors VALUES(1, ?)', (b'first',))
+    assert frozen_inputs_id(db) != initial
+    initial = frozen_inputs_id(db)
+    db.execute('UPDATE vectors SET vec=?', (b'changed',))
+    assert frozen_inputs_id(db) != initial
+    db.close()
     b['identity']['corpus'] = 'changed'
     try:
         paired(a, b)
@@ -217,6 +262,7 @@ def main():
                      'gold_present': any(matches(c.get('gold'), n, args.gold_match) for n in all_names), 'arms': {}}
             samples = {a: [] for a in args.arms}; rankings = {a: [] for a in args.arms}
             routes = {a: Counter() for a in args.arms}
+            route_repeats = {a: [] for a in args.arms}
             for turn in range(-args.warmup, args.repeat):
                 # Rotate first/last position to reduce systematic cache/order advantage.
                 shift = (i + turn + args.warmup) % len(args.arms)
@@ -245,12 +291,14 @@ def main():
                     elapsed = (time.perf_counter() - start) * 1000
                     if turn >= 0:
                         samples[arm].append(elapsed); rankings[arm].append(names)
-                        routes[arm].update(':'.join(str(t.get(k) or '') for k in ('store', 'by', 'why')) for t in vector_trace)
+                        observed_routes = Counter(':'.join(str(t.get(k) or '') for k in ('store', 'by', 'why')) for t in vector_trace)
+                        routes[arm].update(observed_routes)
+                        route_repeats[arm].append(dict(observed_routes))
                         if turn == 0:
-                            entry['arms'][arm] = dict(score(c, names, args.gold_match), names=names,
+                            entry['arms'][arm] = dict(score(c, names, args.gold_match, extra), names=names,
                                                      related=extra, partial=partial)
             for arm in args.arms:
-                entry['arms'][arm].update(ms=samples[arm], vector_routes=dict(routes[arm]), stable=all(n == rankings[arm][0] for n in rankings[arm]))
+                entry['arms'][arm].update(ms=samples[arm], vector_routes=dict(routes[arm]), vector_routes_by_repeat=route_repeats[arm], stable=all(n == rankings[arm][0] for n in rankings[arm]))
             records.append(entry)
             if (i + 1) % 10 == 0: print('measured', i + 1, '/', len(cases), flush=True)
         report = {'schema': 2, 'identity': identity, 'commit': commit,
@@ -278,7 +326,7 @@ def main():
             'First measured repetition determines quality; repeated queries are not independent labels.',
             'Warmup and rotated ordering reduce but do not eliminate cache effects; not cold-start latency.',
             'Measurement path excludes policy reranking/logging; feedback weights in the snapshot remain.',
-            'Snapshot mode freezes vector/graph reads; configured mode uses live databases and is observational. Different vector routes suppress latency deltas.',
+            'Snapshot mode freezes vector/graph reads; configured mode uses live databases and is observational. Changed per-question/per-repeat route counts suppress latency deltas.',
             'A name hit is evidence retrieval, not answer factual accuracy; forbidden labels must be supplied.',
             'Bootstrap intervals describe this sample, not held-out model selection.']
         if calibrate.code_fingerprint() != initial_code:
