@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""★Does a query in each of the six languages reach its own document★ — the tokenizer's per-language fixture. (local · budget 0)
+"""★Does a query in each covered script reach its own document★ — the tokenizer's per-language fixture. (local · budget 0)
 
 ## What this check is, and what it is not (2026-09-08 · §4 of the public-release plan)
 
-It builds a ★synthetic★ corpus — two short documents per language (en · de · es · fr · ja · ko) — in a
+It builds a ★synthetic★ corpus — two documents per legacy language (en · de · es · fr · ja · ko),
+plus one each for Arabic, Cyrillic, Devanagari, Thai, Greek and Hebrew — in a
 temporary `BRAIN_HOME`, indexes it with the real `store.reindex`, and asks the real `search.recall`
 whether each language's queries put ★their own★ document first.
 
@@ -100,6 +101,19 @@ QUERIES = [
     ("de", "geprüfte Größen", "de-a", False),
 ]
 
+# Additional scripts: exact terms are a coverage check, not a segmentation benchmark.
+UNICODE_CASES = [
+    ("ar", "\u0627\u0644\u0645\u0634\u064a \u064a\u0648\u0645 \u0627\u0644\u062c\u0645\u0639\u0629", "\u0627\u0644\u0645\u0634\u064a"),
+    ("ru", "\u0412\u0441\u0442\u0440\u0435\u0447\u0430 \u0432 \u043f\u044f\u0442\u043d\u0438\u0446\u0443", "\u0432\u0441\u0442\u0440\u0435\u0447\u0430"),
+    ("hi", "\u0936\u0941\u0915\u094d\u0930\u0935\u093e\u0930 \u0915\u094b \u092c\u0948\u0920\u0915", "\u092c\u0948\u0920\u0915"),
+    ("th", "\u0e1b\u0e23\u0e30\u0e0a\u0e38\u0e21\u0e27\u0e31\u0e19\u0e28\u0e38\u0e01\u0e23\u0e4c", "\u0e1b\u0e23\u0e30\u0e0a\u0e38\u0e21\u0e27\u0e31\u0e19\u0e28\u0e38\u0e01\u0e23\u0e4c"),
+    ("el", "\u03a3\u03c5\u03bd\u03ac\u03bd\u03c4\u03b7\u03c3\u03b7 \u03c4\u03b7\u03bd \u03a0\u03b1\u03c1\u03b1\u03c3\u03ba\u03b5\u03c5\u03ae", "\u03c3\u03c5\u03bd\u03ac\u03bd\u03c4\u03b7\u03c3\u03b7"),
+    ("he", "\u05e4\u05d2\u05d9\u05e9\u05d4 \u05d1\u05d9\u05d5\u05dd \u05e9\u05d9\u05e9\u05d9", "\u05e4\u05d2\u05d9\u05e9\u05d4"),
+]
+for lang, sentence, query in UNICODE_CASES:
+    DOCS.append((lang + "-a", sentence, sentence + ". " + sentence))
+    QUERIES.append((lang, query, lang + "-a", True))
+
 FAILS: list[str] = []
 
 
@@ -141,7 +155,7 @@ def main() -> int:
     for name, _, body in DOCS:
         row = db.execute("SELECT id FROM docs WHERE name LIKE ?", ("%" + name + "%",)).fetchone()
         n_terms = db.execute("SELECT COUNT(*) FROM postings WHERE doc_id=?", (row["id"],)).fetchone()[0] if row else 0
-        ok = n_terms >= 5
+        ok = n_terms >= (1 if name[:2] in {r[0] for r in UNICODE_CASES} else 5)
         if not ok:
             FAILS.append("%s has only %d terms — the text is invisible to search" % (name, n_terms))
     print("  %s every document has terms of its own (the Japanese sentence used to produce zero)"
@@ -167,6 +181,19 @@ def main() -> int:
               % (mark, lang, q, want, pos or "-", "" if is_strict else "   (known gap · not counted)"))
     print("-" * 74)
     print("  strict rows first-ranked: %d / %d" % (passed, strict))
+
+    # The old regex is a negative control: these scripts really were invisible.
+    for lang, sentence, query in UNICODE_CASES:
+        if list(textindex._TOKEN.finditer(textindex._fold(sentence))):
+            FAILS.append("negative control unexpectedly reaches " + lang)
+    for original, expected in [
+        ("ads#888 v1.2 foo-bar", ["ads#888", "v1.2", "foo-bar"]),
+        ("\u0301 !!!", []),
+        ("q\u0301z", ["q\u0301z"]),
+        ("\u0939\u093f\u0928\u094d\u0926\u0940", ["\u0939\u093f\u0928\u094d\u0926\u0940"]),
+    ]:
+        if textindex.words(original) != expected:
+            FAILS.append("normalization/boundary: " + repr(original))
 
     # ③ ★the rebuild trigger★ — an index built by an older tokenizer must be re-read once, and only once,
     #    and never from the hook path (a full pass measured 22s on 1,393 documents against a 200ms budget).
@@ -200,7 +227,7 @@ def main() -> int:
         for f in FAILS:
             print("  · " + f)
         return 1
-    print("✅ the tokenizer reaches all six languages — quality in de·es·fr·ja is ★unmeasured★ (no real sample)")
+    print("✅ every strict script fixture is reachable; real multilingual quality remains unmeasured")
     return 0
 
 
