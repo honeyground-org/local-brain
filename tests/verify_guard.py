@@ -447,4 +447,74 @@ finally:
     import shutil as _sh
     _sh.rmtree(_tmp, ignore_errors=True)
 
+print("\n" + "="*72 + "\n⑨ a rule id that holds a path is still said ★once★ a session (2026-11-11)\n" + "="*72)
+# Learned edit rules are named after the path they match (`auto-worktrees/`). The marker used the id as a file
+# name, so the write failed silently and the rule fired on every matching edit. Control: an id with no `/`.
+_tmp = _tf.mkdtemp(prefix="brain-guardpath-")
+_sd = guard.STATE_DIR
+try:
+    guard.STATE_DIR = os.path.join(_tmp, "guard")
+    _said = [guard._already_said("S9", "auto-worktrees/") for _ in range(3)]
+    check("a rule id with '/' is said once, then held (False, True, True)", _said == [False, True, True], str(_said))
+    _ctl = [guard._already_said("S9", "auto-git fetch") for _ in range(2)]
+    check("control: an id without '/' behaves the same (False, True)", _ctl == [False, True], str(_ctl))
+    _files = sorted(os.listdir(guard.STATE_DIR))
+    check("both markers are plain files directly in the state folder",
+          len(_files) == 2 and all(os.path.isfile(os.path.join(guard.STATE_DIR, f)) for f in _files), str(_files))
+    check("an existing marker name without unsafe characters is unchanged (running sessions keep theirs)",
+          "S9.auto-git fetch" in _files, str(_files))
+    check("both count toward the session budget", guard._session_spent("S9") == 2, str(guard._session_spent("S9")))
+    _esc = [guard._already_said("S9", "../../outside")]
+    check("an id cannot point outside the state folder",
+          not os.path.exists(os.path.join(_tmp, "outside")) and _esc == [False]
+          and len(os.listdir(guard.STATE_DIR)) == 3, str(sorted(os.listdir(guard.STATE_DIR))))
+    _pair = [guard._already_said("S9x", "a/b"), guard._already_said("S9x", "a%2Fb")]
+    check("two ids that differ only by an escaped character never share a marker (each says once)",
+          _pair == [False, False], str(_pair))
+    _win = [guard._already_said("S9", 'auto-C:\\x*?"<>|') for _ in range(2)]
+    check("characters a Windows file name cannot hold are escaped too (False, True)", _win == [False, True], str(_win))
+finally:
+    guard.STATE_DIR = _sd
+    _sh.rmtree(_tmp, ignore_errors=True)
+
+# End to end through the real hook: three edits under a matching folder in one session → the lines once.
+# ⛔ Its own home, memory and config — the shared fixture (FIX) is already removed above, and a rule whose
+#    memory does not resolve is silent by design, which would make this check pass for the wrong reason.
+_PATH_FIX = _tf.mkdtemp(prefix="brain-guardpath-")
+try:
+    _ph, _pm = os.path.join(_PATH_FIX, "home"), os.path.join(_PATH_FIX, "memory")
+    _pc = os.path.join(_PATH_FIX, "config.json")
+    os.makedirs(_ph)
+    os.makedirs(_pm)
+    with open(os.path.join(_pm, "note_dir.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: note_dir\ndescription: zzpath-line the folder's own rule\n---\n\nbody\n")
+    with open(_pc, "w", encoding="utf-8") as fh:
+        json.dump({"sources": [{"name": "memory", "path": _pm, "include": ["*.md"], "max_depth": 1}]}, fh)
+    _saved = {k: os.environ.get(k) for k in ("BRAIN_HOME", "BRAIN_CONFIG")}
+    os.environ["BRAIN_HOME"], os.environ["BRAIN_CONFIG"] = _ph, _pc
+    try:
+        ruledisc.save({"version": 1, "dismissed": [], "disabled": [], "learned": [
+            {"id": "fx-dir/", "why": "editing inside the fixture folder", "tools": ["edit_file"],
+             "match": ["zzfixture-dir/"], "memories": ["note_dir"], "once": "session"}]})
+        ruledisc.sync_shell()
+    finally:
+        for k, v in _saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    _edit = {"tool_name": EDIT_TOOL, "session_id": "S9-e2e",
+             "tool_input": {"file_path": "/tmp/zzfixture-dir/a.py", "old_string": "a", "new_string": "b"}}
+    _outs = []
+    for _ in range(3):
+        _p = subprocess.run(HOOK, input=json.dumps(_edit), capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", env=dict(os.environ, BRAIN_HOME=_ph, BRAIN_CONFIG=_pc))
+        _outs.append(_p.stdout.strip())
+    check("hook: an edit rule named after a folder speaks on the first edit", "zzpath-line" in _outs[0],
+          _outs[0][:120])
+    check("hook: …and is silent on the next two edits in the same session", _outs[1] == "" and _outs[2] == "",
+          "%r · %r" % (_outs[1][:60], _outs[2][:60]))
+finally:
+    _sh.rmtree(_PATH_FIX, ignore_errors=True)
+
 sys.exit(0 if ok else 1)
