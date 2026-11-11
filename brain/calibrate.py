@@ -521,7 +521,10 @@ def measure(db: sqlite3.Connection) -> dict:
 #   45 (2026-11-07)  `stores.Native` and `managed: native` (Qdrant and Neo4j installed without Docker): a
 #                    native database uses the credential brain generated for it, like a Docker one. No
 #                    scoring change; bumped because `stores` is a ruler module.
-CODE_GENERATION = 46
+#   47 (2026-11-11)  `stores.serve(heal=)` / `stores.resync`: a database whose push failed while it was down is
+#                    pushed to again once it answers, instead of staying unused until the next local change.
+#                    The answer is the local copy's either way; bumped because `stores` is a ruler module.
+CODE_GENERATION = 47
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

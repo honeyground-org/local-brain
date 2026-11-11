@@ -829,7 +829,8 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
         be = vecstore.make(c)
         order = stores.serve(db, "vector", be.target(model_tag(), DIM),
                              lambda: be.search(db, q, model_tag(), DIM, n),
-                             lambda: local.search(db, q, model_tag(), DIM, n))
+                             lambda: local.search(db, q, model_tag(), DIM, n),
+                             heal=lambda: stores.resync(db, "vector", be))
         served = stores.last_served("vector")
         _LAST_SEARCH.update(store=c["backend"] if served.get("by") == "remote" else "sqlite",
                             by=served.get("by"), why=served.get("why"))
