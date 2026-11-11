@@ -120,12 +120,33 @@ def _rates() -> Dict[str, float]:
         return {}
 
 
+_UNSAFE = re.compile(r'[%/\\:*?"<>|\x00-\x1f]')
+
+
+def _safe(part: str) -> str:
+    """One part of a marker's file name. ⛔ A rule id is not a file name (2026-11-11).
+
+    A learned rule is named after what it matches, and an edit-side match is a path: `auto-worktrees/`,
+    `auto-realry-x/`, `auto-domains/aeris-social-intelligence`. Written as-is the marker became a path into a
+    folder that does not exist, the write failed, the failure was swallowed (a failed suppression still
+    attaches), and the rule fired ★on every matching edit★ instead of once a session — measured: three edits,
+    the same lines three times; eight enabled rules had a `/`. Percent-encode only what a file name cannot
+    hold (and `%` itself, so two ids never share a name); every name without those characters stays exactly
+    as it was, so markers already written keep working.
+    """
+    return _UNSAFE.sub(lambda m: "%%%02X" % ord(m.group()), part)
+
+
+def _mark_path(session: str, rule_id: str) -> str:
+    return os.path.join(STATE_DIR, "%s.%s" % (_safe(session), _safe(rule_id)))
+
+
 def _session_spent(session: str) -> int:
     """How many rules have already fired this session — counted from marker files (no separate state)."""
     if not session:
         return 0
     try:
-        pre = session + "."
+        pre = _safe(session) + "."
         return sum(1 for n in os.listdir(STATE_DIR) if n.startswith(pre))
     except OSError:
         return 0
@@ -145,7 +166,7 @@ def within_budget(session: str, rule_id: str, rates: Optional[Dict[str, float]] 
 def _already_said(session: str, rule_id: str) -> bool:
     if not session:
         return False
-    mark = os.path.join(STATE_DIR, "%s.%s" % (session, rule_id))
+    mark = _mark_path(session, rule_id)
     if os.path.exists(mark):
         return True
     try:
