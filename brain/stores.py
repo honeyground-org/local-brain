@@ -620,13 +620,23 @@ def invalidate(db, roles=ROLES):
 
 
 def serve(db: sqlite3.Connection, role: str, target: str, remote: Callable[[], object],
-          local: Callable[[], object]):
+          local: Callable[[], object], heal: Optional[Callable[[], object]] = None):
     """Ask the dedicated database — ★only if it is known to hold this target in sync★ — else the local copy.
 
     ⛔ A failure is recorded (so `brain stores` shows it) and this process uses the local copy for
        `DOWN_RETRY_SEC`, so a database that is down costs one timeout, not one per question.
+    `heal` — how the caller pushes its copy again (§resync). Given, a database whose last contact failed and
+    which is not known to hold this copy is pushed to again, at most once per `DOWN_RETRY_SEC` in this process,
+    and answers as soon as that succeeds. Not given (a host's own copy), nothing is pushed from here.
+    ⛔ (2026-11-11) Without it a push that failed while a database was down — a restart, a reboot, a crash its
+       service manager recovers from in seconds — left that database unused until the next local change: the
+       graph answered from the local copy for good after Neo4j was down for 15 s during indexing.
     """
     h = health(db, role)
+    if (heal is not None and h.get("synced") != target and h.get("ok") is False
+            and time.time() - _DOWN.get(role, 0.0) >= DOWN_RETRY_SEC):
+        heal()
+        h = health(db, role)
     if h.get("synced") != target:
         _SERVED[role] = {"by": "local", "why": "not_synced"}
         return local()
@@ -681,9 +691,24 @@ def sync(db: sqlite3.Connection, roles: Tuple[str, ...] = ROLES, full: bool = Fa
             record(db, role, ok=True, error="", synced=out[role]["target"])
             _DOWN.pop(role, None)
         except StoreError as exc:
+            _DOWN[role] = time.time()                    # a heal waits out the same window a question does
             record(db, role, ok=False, error=str(exc)[:300])
             out[role] = {"backend": c["backend"], "error": str(exc)[:300]}
     return out
+
+
+def resync(db: sqlite3.Connection, role: str, backend) -> bool:
+    """Push the brain's own copy of `role` again — if `backend` answers a ping now (§serve `heal`).
+
+    ⛔ The ping has a question's time-out, not a sync's: a database that is still down costs a question
+       `QUERY_TIMEOUT` once per `DOWN_RETRY_SEC`, never `SYNC_TIMEOUT`.
+    """
+    try:
+        backend.ping()
+    except StoreError:
+        _DOWN[role] = time.time()
+        return False
+    return "error" not in sync(db, (role,)).get(role, {})
 
 
 def sync_source(db: sqlite3.Connection, role: str, backend, source, full: bool = False,

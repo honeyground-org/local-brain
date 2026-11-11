@@ -93,7 +93,7 @@ def ask(db: sqlite3.Connection, question: str, *args):
         return getattr(LOCAL, question)(db, *args)
     be = make(c)
     return stores.serve(db, "graph", be.target(), lambda: getattr(be, question)(db, *args),
-                        lambda: getattr(LOCAL, question)(db, *args))
+                        lambda: getattr(LOCAL, question)(db, *args), heal=lambda: stores.resync(db, "graph", be))
 
 
 class NotesGraphSource:

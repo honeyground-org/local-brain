@@ -16,6 +16,8 @@ In-memory stand-ins play the dedicated databases, so the contract is checked any
   ⑦ a database that lost its data (a Docker reset, a deleted collection) is noticed and refilled
   ⑧ document names are the role's decision, not the backend's: none unless `names` is on, and then
      scrubbed before any backend sees them
+  ⑨ a push that failed while the database was down is retried once it answers — by a question, at most once
+     per retry window, after a ping — and a host's own copy is never pushed from there
 
 Every backend in `brain/backends/` is held to the same contract by `tests/verify_store_adapters.py`.
 
@@ -101,46 +103,60 @@ class FakeGraph:
     backend, remote = "neo4j", True
 
     def __init__(self):
-        self.nodes, self.E, self.calls, self.fail = set(), set(), {"ask": 0, "write": 0}, False
+        self.nodes, self.E, self.calls, self.fail = set(), set(), {"ask": 0, "write": 0, "ping": 0}, False
         self.labels = {}                                 # what it was told each node is called
+        self.down = False                                # ★not running★: every call is refused, writes too
+
+    def _up(self):
+        if self.down:
+            raise stores.StoreError("POST http://127.0.0.1:7474/db/neo4j/tx/commit → [Errno 61] Connection refused")
 
     def target(self):
         return "fake-graph"
 
     def ping(self):
+        self.calls["ping"] += 1
+        self._up()
         return {"ok": True, "version": "fake"}
 
     def ensure(self):
-        pass
+        self._up()
 
     def reset(self):
+        self._up()
         self.nodes.clear()
         self.E.clear()
 
     def upsert_nodes(self, nodes):
+        self._up()
         self.calls["write"] += 1
         self.nodes |= {d for d, _ in nodes}
         self.labels.update(dict(nodes))
 
     def delete_nodes(self, ids):
+        self._up()
         self.calls["write"] += 1
         gone = set(ids)
         self.nodes -= gone
         self.E = {e for e in self.E if not (set(e) & gone)}     # DETACH
 
     def add_edges(self, pairs):
+        self._up()
         self.calls["write"] += 1
         self.E |= {p for p in pairs if p[0] in self.nodes and p[1] in self.nodes}
 
     def remove_edges(self, pairs):
+        self._up()
         self.calls["write"] += 1
         self.E -= set(pairs)
 
     def counts(self):
+        self._up()
         return len(self.nodes), len(self.E)
 
     def _ask(self):
         self.calls["ask"] += 1
+        self._up()
         if self.fail:
             raise stores.StoreError("fake graph database is down")
 
@@ -273,6 +289,45 @@ def main() -> int:
     r = stores.sync(db)
     check("a database missing even one chunk is rebuilt", r["vector"].get("healed")
           and len(FV.points) == vecstore.SqliteVectors().count(db, vectors.model_tag(), vectors.DIM))
+
+    print("\n⑨ a push that failed while the database was down is retried once it answers")
+    stores._DOWN.clear()
+    FG.down = True                                       # Neo4j restarting: a reboot, a crash KeepAlive recovers
+    fx.write_note(mem, "eta_missed", "Written while the graph database was down; links to [[alpha_overview]].")
+    index(db)
+    eta = db.execute("SELECT id FROM docs WHERE name='eta_missed'").fetchone()[0]
+    h = stores.health(db, "graph")
+    check("the incident: indexing could not push, and the copy is no longer known to be there",
+          h.get("ok") is False and h.get("synced") != FG.target() and not any(eta in e for e in FG.E),
+          str({k: h.get(k) for k in ("ok", "synced")}))
+    pings, asks = FG.calls["ping"], FG.calls["ask"]
+    got = graphstore.ask(db, "edges")
+    check("right after, a question is answered locally and nothing is retried (the window of the failure)",
+          got == graphstore.LOCAL.edges(db) and (FG.calls["ping"], FG.calls["ask"]) == (pings, asks))
+    stores._DOWN["graph"] = 0.0                          # the window passes, the database still down
+    writes = FG.calls["write"]
+    got = graphstore.ask(db, "edges")
+    check("…then one ping, refused: no push, the local copy answers",
+          FG.calls["ping"] == pings + 1 and FG.calls["write"] == writes and got == graphstore.LOCAL.edges(db))
+    graphstore.ask(db, "edges")
+    check("…and no second ping in the same window", FG.calls["ping"] == pings + 1)
+    FG.down = False                                      # it is back
+    stores._DOWN["graph"] = 0.0
+    asks = FG.calls["ask"]
+    got = graphstore.ask(db, "edges")
+    h = stores.health(db, "graph")
+    check("★once it answers, the next question pushes what it missed and is answered by it★",
+          stores.last_served("graph").get("by") == "remote" and FG.calls["ask"] == asks + 1
+          and any(eta in e for e in FG.E) and got == graphstore.LOCAL.edges(db),
+          str(stores.last_served("graph")))
+    check("…and the health note says it is in sync again", h.get("ok") is True and h.get("synced") == FG.target())
+    stores.record(db, "graph", ok=False, synced=None)    # the same state, met by a host's own copy
+    stores._DOWN.clear()
+    pings, writes = FG.calls["ping"], FG.calls["write"]
+    got = stores.serve(db, "graph", FG.target(), lambda: FG.edges(db), lambda: graphstore.LOCAL.edges(db))
+    check("a caller that passes no `heal` (a host) is never pushed to from a question",
+          (FG.calls["ping"], FG.calls["write"]) == (pings, writes) and stores.last_served("graph").get("by") == "local")
+    stores.sync(db, ("graph",))
 
     print("\n⑥ a choice is a person's")
     for k in ("BRAIN_VECTOR_STORE", "BRAIN_GRAPH_STORE"):
