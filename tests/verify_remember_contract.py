@@ -206,6 +206,40 @@ def revision_checks(db):
         _j(db, **cross["save_arguments"])
         check("query in predecessor language resolves to the new-language fact",
               names(cross_old,"cross")=={"cross_new"})
+    # Different languages can assign different identifiers to the SAME untracked root.
+    # The root's competing replacements, not only same-identity facts, are the guard.
+    _j(db, name="shared_legacy", description="Orchid watering", body="Water on Monday orchidlegacyanchor", type="user", project_id="shared")
+    common = dict(predecessor="shared_legacy", name="owner_a", description="Water Friday", body="Water Friday",
+                  type="user", project_id="shared", topic="orchid", facet="watering", status="active",
+                  valid_from="2026-11-01", change_reason="User correction", evidence=["User confirmed"], replace_whole_record=True)
+    first = prep(**common)
+    second_request = dict(common,name="owner_b",topic="\u862d",facet="\u6c34\u3084\u308a")
+    second = prep(**second_request)
+    check("different-identity clients may prepare before any owner exists", first.get("ok") and second.get("ok"))
+    if first.get("ok") and second.get("ok"):
+        _j(db, **first["save_arguments"])
+        from brain import lifecycle
+        fresh = lifecycle.prepare(db,"owner_b",second["save_arguments"])
+        check("legacy-family snapshot changes across fact identities", fresh["expected_fact_sha"]!=second["save_arguments"]["expected_fact_sha"])
+        denied = _j(db, **second["save_arguments"])
+        check("different-identity second whole replacement is refused", not denied.get("ok") and not os.path.exists(os.path.join(_MEM,"owner_b.md")))
+        check("repreparing cannot bypass an established legacy identity", not prep(**second_request).get("ok"))
+        check("legacy current state has exactly one replacement", names("orchidlegacyanchor","shared")=={"owner_a"})
+    # A saved proposal must not become a back door when later promoted to active.
+    _j(db,name="branch_root",description="Orchid arrangement",body="Water Monday",type="user",project_id="branches")
+    draft_args = dict(common, predecessor="branch_root",name="branch_draft",project_id="branches",status="proposed",topic="\u862d",facet="\u6c34\u3084\u308a")
+    draft = prep(**draft_args)
+    winner = prep(**dict(common,predecessor="branch_root",name="branch_winner",project_id="branches"))
+    check("alternative proposal and active request can be prepared", draft.get("ok") and winner.get("ok"))
+    if draft.get("ok") and winner.get("ok"):
+        _j(db,**draft["save_arguments"])
+        check("new proposal invalidates earlier legacy-family snapshot", not _j(db,**winner["save_arguments"]).get("ok"))
+        winner = prep(**dict(common,predecessor="branch_root",name="branch_winner",project_id="branches"))
+        check("reviewed proposal does not prevent an explicit active choice", winner.get("ok"))
+        if winner.get("ok"):
+            _j(db,**winner["save_arguments"])
+            promotion = dict(draft_args,predecessor="branch_draft",name="branch_promoted",status="active")
+            check("different-identity proposal promotion cannot fork the legacy root", not prep(**promotion).get("ok"))
     for patch in ({"topic": []},{"status": "archived"},{"replace_whole_record": "yes"},{"evidence": []}):
         check("malformed preparation is an error, not an exception", prep(**dict(request,**patch)).get("ok") is False)
 

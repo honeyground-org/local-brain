@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.2.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.2.1"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
