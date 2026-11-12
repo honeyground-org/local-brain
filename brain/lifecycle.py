@@ -28,6 +28,33 @@ def identity(meta):
     return tuple(unicodedata.normalize('NFC', meta.get(k) or '') for k in ('topic', 'facet'))
 
 
+def legacy_family(snap, names, scope):
+    """Whole-record replacement binds one legacy root, including proposed branches.
+
+    Walk ancestors to find untracked roots, then include every descendant. This
+    catches a differently named fact and a proposal promoted after another client
+    claimed that root; matching topic/facet alone cannot see either case.
+    """
+    pending = [did for name in names for did in snap.by_name.get((scope, name), [])]
+    seen, roots = set(), set()
+    while pending:
+        did = pending.pop()
+        if did in seen:
+            continue
+        seen.add(did)
+        if not snap.docs[did]['meta']:
+            roots.add(did)
+        pending.extend(snap.prev.get(did, set()))
+    family, pending = set(), list(roots)
+    while pending:
+        did = pending.pop()
+        if did in family:
+            continue
+        family.add(did)
+        pending.extend(snap.next.get(did, set()))
+    return family
+
+
 def prepare(db, name, args):
     """Bounded review of one fact. Similar prose is never replacement authority."""
     from brain import remembercontract
@@ -35,8 +62,10 @@ def prepare(db, name, args):
     scope = args.get('project_id') or ''
     records, versions = [], []
     snap = snapshot(db)
+    family = legacy_family(snap, meta.get('supersedes', []), scope)
     for did, record in snap.docs.items():
-        if record['project_id'] != scope or not meta.get('topic') or identity(record['meta']) != identity(meta):
+        if (record['project_id'] != scope or not meta.get('topic')
+                or (identity(record['meta']) != identity(meta) and did not in family)):
             continue
         actual_sha = remembercontract.file_sha(record['path'])
         versions.append((record['name'], record['path'], record['sha'], actual_sha))
@@ -50,7 +79,7 @@ def prepare(db, name, args):
             'expected_fact_sha': hashlib.sha256(raw.encode('utf-8')).hexdigest() if meta.get('topic') else None,
             'records': records[:50], 'total': len(records), 'truncated': len(records) > 50,
             'untracked': not bool(meta), 'source_matches_index': all(r['source_matches_index'] for r in records),
-            'coverage': 'indexed records with the same exact scope and Unicode-normalized topic/facet; semantic equivalence is not inferred',
+            'coverage': 'indexed records with the same exact scope and Unicode-normalized topic/facet, plus untracked predecessor families; semantic equivalence is not inferred',
             'next': 'Use recall to discover identifiers across languages, then reuse topic/facet. Keep one fact per memory. Read memory_history for omitted records. Confirm evidence before superseding; use proposed or disputed when uncertain.'}
 
 
@@ -280,6 +309,12 @@ def check_write(db, name, args, current):
     if value.get('superseded_by'):
         return 'write the successor with supersedes; do not create a forward link from the write API'
     snap = snapshot(db)
+    scope = args.get('project_id') or ''
+    family = legacy_family(snap, value.get('supersedes', []), scope)
+    for did in family:
+        other = snap.docs[did]['meta']
+        if other and other.get('status', 'active') == 'active' and identity(other) != identity(value):
+            return 'a whole-record predecessor already belongs to another active fact; reuse its identity and revise its successor'
     for predecessor in value.get('supersedes', []):
         ids = snap.by_name.get((args.get('project_id') or '', predecessor), [])
         if predecessor == name or len(ids) != 1:

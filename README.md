@@ -1043,7 +1043,10 @@ request remains a `noop`.
 
 For an untracked predecessor, additionally provide `topic`, `facet`, and `replace_whole_record: true`
 **only after reading and confirming replacement of the entire old record**. The returned request pins
-that record's exact SHA. A partial correction to a mixed-topic note needs separate facts instead; this
+that record's exact SHA and the indexed replacement family. Once an active replacement establishes a
+fact identity, later revisions must reuse it, even across languages. Competing proposals are also
+included in the snapshot; promoting a differently identified proposal cannot silently create a second
+current replacement for the same legacy root. A partial correction to a mixed-topic note needs separate facts instead; this
 tool does not migrate or delete legacy notes automatically. Omitting `project_id` selects only unscoped
 records. Choose `status` explicitly: tentative changes remain `proposed` or `disputed`. Effective dates
 are supplied by the caller and never inferred from save time. The capability flag is
