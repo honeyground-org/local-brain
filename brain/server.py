@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.1.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.2.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -47,8 +47,8 @@ _LANG_EN = {"en": "English", "ko": "Korean", "de": "German", "es": "Spanish",
             "fr": "French", "ja": "Japanese"}
 
 _REMEMBER_DESC = (
-    "Writes a new memory to a file and indexes it immediately. Keep only what stays true later "
-    "(never a point-in-time number or a one-off state). "
+    "Writes a new memory to a file and indexes it immediately. Keep reusable facts, preferences and decisions; "
+    "record effective dates and evidence when facts change. Avoid transient telemetry or raw event logs. "
     "JSON is the default. Repeating an unchanged request is a noop; changing an existing memory requires "
     "expected_sha from recall or a prior save. project_id is always persisted when supplied. "
     "Connect related memories with links. format=text changes presentation, never overwrite protection."
@@ -239,7 +239,7 @@ def tools_for(db) -> List[Dict[str, Any]]:
             props = t["inputSchema"]["properties"]
             props["type"]["description"] = (props["type"]["description"].replace("{kinds}", kinds_txt)
                                             + ("" if kinds_txt else "; any short word"))
-        if t["name"] in ("recall", "remember"):
+        if t["name"] in ("recall", "remember", "prepare_revision"):
             from brain import i18n
             t["description"] += " " + i18n.host_language_instruction()
     return out
@@ -279,11 +279,31 @@ for _tool in TOOLS:
             "Read the prior memory first; save confirmed changes under a new name with supersedes, valid_from and change_reason. "
             "Never infer replacement from recency alone. Use proposed for tentative ideas; never silently turn them into facts. "
             "Before saving a changing fact, recall related memories in the user's language and reuse their topic/facet identifiers across languages. "
-            "Call remember with prepare_only=true, review the records, then save with expected_fact_sha. "
+            "Use prepare_revision for an explicitly identified predecessor, review its save_arguments, then send them to remember. "
+            "Alternatively call remember with prepare_only=true, review the records, then save with expected_fact_sha. "
             "Resolve competing active facts with explicit supersedes and evidence, or store an uncertain claim as disputed. "
             "Do not translate identifiers or infer a replacement from semantic similarity. Stored does not mean verified current: inspect validity in the acknowledgement.")
 TOOLS.append({"name": "memory_history", "description": "Read current state, previous revisions and change evidence for a memory, including everyday life and work. Old names also resolve to the current topic history. document_history preserves observed file edits, with diffs; observation time is not a fact validity date.",
               "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "scope": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "required": ["name"]}})
+
+# Revision preparation shares content validation and the existing protected remember writer.
+_revision_properties = {k: dict(next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"][k])
+                        for k in ("name", "description", "type", "body", "project_id", "source", "observed_at", "links", "search_aliases")}
+_revision_properties["type"] = {"type": "string", "description": "Memory kind; any short single-line word"}
+_revision_properties.update({
+    "predecessor": {"type": "string", "description": "Exact indexed memory name in project_id; omitted project_id means unscoped only"},
+    "topic": {"type": "string", "description": "Required for untracked predecessors; inherited unchanged for tracked facts"},
+    "facet": {"type": "string", "description": "One independently changing fact; inherited for tracked predecessors"},
+    "status": {"type": "string", "enum": ["active", "proposed", "disputed"]},
+    "valid_from": {"type": "string", "description": "When the change becomes effective, not when it is saved"},
+    "valid_to": {"type": "string"}, "change_reason": {"type": "string"},
+    "evidence": {"type": "array", "items": {"type": "string"}},
+    "replace_whole_record": {"type": "boolean", "description": "Only for an untracked predecessor: explicitly confirm replacement of its entire content, never a partial correction"}})
+TOOLS.append({"name": "prepare_revision",
+    "description": "Prepare a change to an explicitly identified memory without saving. Reuses tracked topic/facet across languages and returns guarded save_arguments for remember, with predecessor and fact snapshot checks. Requires a new name, explicit status, effective date, reason and evidence. Untracked notes additionally require topic/facet and whole-record confirmation. Never infer replacement from similar wording or recency; retain unrelated facts. Review the returned request before saving.",
+    "annotations": {"readOnlyHint": True},
+    "inputSchema": {"type": "object", "additionalProperties": False, "properties": _revision_properties,
+                    "required": ["predecessor", "name", "description", "type", "body", "status", "valid_from", "change_reason", "evidence"]}})
 
 
 def _fmt_recall(rows: List[dict]) -> str:
@@ -579,6 +599,9 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
                 reordered=reordered, embed_cached=cached, t0=t0, shown=SHOWN,
                 scope=args.get("scope") or None, scope_applied=bool(args.get("scope"))), ensure_ascii=False)
         return head + _fmt_recall(rows) + more + hint
+    if name == "prepare_revision":
+        from brain import remembercontract
+        return json.dumps(remembercontract.prepare_revision(db, args), ensure_ascii=False)
     if name == "remember":
         return _do_remember(db, args)
     if name == "memory_history":

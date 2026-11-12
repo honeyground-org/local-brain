@@ -75,6 +75,7 @@ def tool_flags(tools: List[dict]) -> Dict[str, Any]:
             "source": "source" in rm,
             "lifecycle": "lifecycle" in rm,
             "prepare_only": "prepare_only" in rm,
+            "prepare_revision": bool(_props(tools, "prepare_revision")),
             "expected_fact_sha": "expected_fact_sha" in rm,
             "observed_at": "observed_at" in rm,
             "embed_now": "embed_now" in rm,

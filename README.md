@@ -1016,6 +1016,39 @@ within an exact `project_id` scope. A scope can represent a person or household 
 Keep a future intention, a confirmed decision and the actual situation in distinct facets; for
 example `move_plan` and `current_address`. Do not automatically equate a decision with implementation.
 
+When the predecessor is known, use **`prepare_revision`** (server 2.2+) to prepare the change:
+
+```json
+{
+  "predecessor": "watering_schedule_v1",
+  "name": "watering_schedule_v2",
+  "project_id": "household",
+  "description": "Water the orchid on Fridays",
+  "type": "user",
+  "body": "The orchid is now watered on Fridays instead of Mondays.",
+  "status": "active",
+  "valid_from": "2026-11-12",
+  "change_reason": "The user changed the weekly arrangement",
+  "evidence": ["The user explicitly confirmed Friday"]
+}
+```
+
+It inherits a tracked predecessor's exact topic/facet and returns its content, validity and a
+**`save_arguments`** object. Review it, then pass that object unchanged to **`remember`**. Preparation
+writes no memory, performs no inference or remote-store calls, and does not refresh the index. An
+out-of-date source returns `index_pending`; refresh the local index before preparing again. A source
+or competing fact changed after preparation is rejected by the existing save guards. Keep the returned
+request for retries: re-preparing an already saved name returns `name_taken`, while retrying the saved
+request remains a `noop`.
+
+For an untracked predecessor, additionally provide `topic`, `facet`, and `replace_whole_record: true`
+**only after reading and confirming replacement of the entire old record**. The returned request pins
+that record's exact SHA. A partial correction to a mixed-topic note needs separate facts instead; this
+tool does not migrate or delete legacy notes automatically. Omitting `project_id` selects only unscoped
+records. Choose `status` explicitly: tentative changes remain `proposed` or `disputed`. Effective dates
+are supplied by the caller and never inferred from save time. The capability flag is
+`tools.remember.prepare_revision`.
+
 Before changing a fact, use `recall` to discover related records and reuse their topic/facet identifiers,
 including when the new conversation is in a different language. Call `remember` with the proposed
 payload and `prepare_only: true`: it writes no memory and returns same-scope fact revisions, source

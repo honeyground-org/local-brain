@@ -96,6 +96,83 @@ def validate(args: dict) -> Optional[Dict[str, Any]]:
     return None
 
 
+# Inputs accepted by the read-only revision planner; save arguments use the existing contract.
+REVISION_CONTENT = ("name", "description", "type", "body", "project_id", "source", "observed_at",
+                    "links", "search_aliases")
+REVISION_FIELDS = REVISION_CONTENT + ("predecessor", "topic", "facet", "status", "valid_from",
+                                      "valid_to", "change_reason", "evidence", "replace_whole_record")
+
+
+def prepare_revision(db, args: dict) -> dict:
+    """Build a reviewable remember request from explicit authority, without saving or inference."""
+    from brain import lifecycle
+    if not isinstance(args, dict) or set(args) - set(REVISION_FIELDS):
+        return error("invalid_argument", "Use only the declared revision preparation fields")
+    predecessor = args.get("predecessor")
+    if not isinstance(predecessor, str) or not predecessor.strip() or len(predecessor) > 2000:
+        return error("invalid_argument", "predecessor must be an existing memory name")
+    if "replace_whole_record" in args and not isinstance(args["replace_whole_record"], bool):
+        return error("invalid_argument", "replace_whole_record must be a boolean")
+    if args.get("status") not in ("active", "proposed", "disputed"):
+        return error("invalid_argument", "Explicitly choose active, proposed or disputed for the new claim")
+    save = {k: args[k] for k in REVISION_CONTENT if k in args}
+    bad = validate(save)
+    if bad:
+        return bad
+    if save["name"] == predecessor:
+        return error("invalid_argument", "Use a new name; the predecessor must remain in history")
+    scope = save.get("project_id") or ""
+    snap = lifecycle.snapshot(db)
+    ids = snap.by_name.get((scope, predecessor), [])
+    if len(ids) != 1:
+        return error("predecessor_unavailable", "Select one indexed predecessor in the exact project_id scope")
+    if snap.by_name.get((scope, save["name"])):
+        return error("name_taken", "Choose an unused name for the new revision")
+    prior = snap.docs[ids[0]]
+    if file_sha(prior["path"]) != prior["sha"]:
+        return dict(error("index_pending", "The predecessor source changed; refresh the index and prepare again"), retryable=True)
+    old = prior["meta"]
+    if old and lifecycle.validate(old):
+        return error("invalid_predecessor", "The predecessor has invalid or incomplete validity metadata")
+    meta = {k: args[k] for k in ("topic", "facet", "status", "valid_from", "valid_to", "change_reason", "evidence") if k in args}
+    for k in ("topic", "facet"):
+        if k in meta and not isinstance(meta[k], str):
+            return error("invalid_argument", k + " must be a string")
+    if old:
+        for k in ("topic", "facet"):
+            if k in meta and lifecycle.identity({k: meta[k]}) != lifecycle.identity({k: old[k]}):
+                return error("invalid_argument", "A revision must reuse its predecessor's topic and facet")
+            meta[k] = old[k]
+    elif not args.get("replace_whole_record"):
+        return error("whole_record_confirmation_required",
+                     "Read the entire untracked predecessor. Confirm whole-record replacement explicitly; "
+                     "do not retire unrelated facts in a mixed-topic note. Supply topic and facet for this fact.")
+    meta["supersedes"] = [predecessor]
+    if not old:
+        meta["legacy_whole_record_sha"] = {predecessor: prior["sha"]}
+    save["lifecycle"] = meta
+    bad = validate(save)
+    if bad:
+        return bad
+    issue = lifecycle.check_write(db, save["name"], save, {})
+    if issue:
+        return error("invalid_argument", issue)
+    review = lifecycle.prepare(db, save["name"], save)
+    if not review["source_matches_index"]:
+        return dict(error("index_pending", "A fact source changed; refresh the index and prepare again"), retryable=True)
+    save["expected_fact_sha"] = review["expected_fact_sha"]
+    code, conflict = lifecycle.reconcile_write(db, save["name"], save)
+    if code:
+        return error(code, "Resolve competing current facts before preparing this revision", conflict)
+    row = db.execute("SELECT body FROM docs WHERE id=?", (ids[0],)).fetchone()
+    body = row["body"] or ""
+    return dict(review, save_tool="remember", save_arguments=save,
+                predecessor={"name": predecessor, "sha": prior["sha"], "body": body[:2000],
+                             "body_truncated": len(body) > 2000, "lifecycle": snap.info(ids[0])},
+                next="Review the predecessor and proposed content, then send save_arguments to remember. "
+                     "If a source or competing fact changes, prepare again. This does not certify semantic truth.")
+
+
 def prepared(args: dict) -> dict:
     """Give ordinary clients stable retries without requiring a caller-generated key."""
     out = dict(args)
