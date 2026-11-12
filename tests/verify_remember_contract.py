@@ -80,6 +80,136 @@ def _strip(d):
     return {k: v for k, v in d.items() if k not in ("meta", "index")}
 
 
+def revision_checks(db):
+    """Controlled everyday changes: the same query, explicit revision vs unrelated saves."""
+    from brain import capabilities
+    langs = [
+        ("en", "Orchid watering on Monday", "Orchid watering on Friday"),
+        ("ko", "\ub09c\ucd08 \ubb3c\uc8fc\uae30\ub294 \uc6d4\uc694\uc77c", "\ub09c\ucd08 \ubb3c\uc8fc\uae30\ub294 \uae08\uc694\uc77c"),
+        ("ja", "\u862d\u306e\u6c34\u3084\u308a\u306f\u6708\u66dc\u65e5", "\u862d\u306e\u6c34\u3084\u308a\u306f\u91d1\u66dc\u65e5"),
+        ("ar", "\u0633\u0642\u064a \u0627\u0644\u0623\u0648\u0631\u0643\u064a\u062f \u064a\u0648\u0645 \u0627\u0644\u0627\u062b\u0646\u064a\u0646", "\u0633\u0642\u064a \u0627\u0644\u0623\u0648\u0631\u0643\u064a\u062f \u064a\u0648\u0645 \u0627\u0644\u062c\u0645\u0639\u0629"),
+        ("ru", "\u041f\u043e\u043b\u0438\u0432 \u043e\u0440\u0445\u0438\u0434\u0435\u0438 \u0432 \u043f\u043e\u043d\u0435\u0434\u0435\u043b\u044c\u043d\u0438\u043a", "\u041f\u043e\u043b\u0438\u0432 \u043e\u0440\u0445\u0438\u0434\u0435\u0438 \u0432 \u043f\u044f\u0442\u043d\u0438\u0446\u0443"),
+        ("hi", "\u0911\u0930\u094d\u0915\u093f\u0921 \u0915\u094b \u0938\u094b\u092e\u0935\u093e\u0930 \u092a\u093e\u0928\u0940", "\u0911\u0930\u094d\u0915\u093f\u0921 \u0915\u094b \u0936\u0941\u0915\u094d\u0930\u0935\u093e\u0930 \u092a\u093e\u0928\u0940"),
+        ("th", "\u0e23\u0e14\u0e19\u0e49\u0e33\u0e01\u0e25\u0e49\u0e27\u0e22\u0e44\u0e21\u0e49\u0e27\u0e31\u0e19\u0e08\u0e31\u0e19\u0e17\u0e23\u0e4c", "\u0e23\u0e14\u0e19\u0e49\u0e33\u0e01\u0e25\u0e49\u0e27\u0e22\u0e44\u0e21\u0e49\u0e27\u0e31\u0e19\u0e28\u0e38\u0e01\u0e23\u0e4c"),
+        ("es", "Regar la orqu\xeddea el lunes", "Regar la orqu\xeddea el viernes"),
+        ("el", "\u03a0\u03cc\u03c4\u03b9\u03c3\u03bc\u03b1 \u03bf\u03c1\u03c7\u03b9\u03b4\u03ad\u03b1\u03c2 \u03c4\u03b7 \u0394\u03b5\u03c5\u03c4\u03ad\u03c1\u03b1", "\u03a0\u03cc\u03c4\u03b9\u03c3\u03bc\u03b1 \u03bf\u03c1\u03c7\u03b9\u03b4\u03ad\u03b1\u03c2 \u03c4\u03b7\u03bd \u03a0\u03b1\u03c1\u03b1\u03c3\u03ba\u03b5\u03c5\u03ae"),
+        ("he", "\u05d4\u05e9\u05e7\u05d9\u05d9\u05ea \u05e1\u05d7\u05dc\u05d1 \u05d1\u05d9\u05d5\u05dd \u05e9\u05e0\u05d9", "\u05d4\u05e9\u05e7\u05d9\u05d9\u05ea \u05e1\u05d7\u05dc\u05d1 \u05d1\u05d9\u05d5\u05dd \u05e9\u05d9\u05e9\u05d9"),
+    ]
+    def prep(**args):
+        return json.loads(server.call_tool(db, "prepare_revision", args, _measure=True))
+    def names(query, scope, mode="current", at="2026-11-12"):
+        result = json.loads(server.call_tool(db, "recall", dict(query=query, scope=scope,
+                            view=mode, as_of=at, semantic_k=0, k=8), _measure=True))
+        return {r["name"] for r in result["results"]}
+    wins = 0
+    for lang, old, new in langs:
+        base_name, old_name, new_name = lang+"_baseline", lang+"_prior", lang+"_changed"
+        base_scope, scope = lang+"-control", lang+"-revision"
+        _j(db, name=base_name, description=old, type="user", body=old, project_id=base_scope)
+        _j(db, name=base_name+"_new", description=new, type="user", body=new, project_id=base_scope)
+        query = old + " " + new
+        baseline = names(query, base_scope)
+        check(lang+" control: independent saves expose both arrangements",
+              {base_name, base_name+"_new"} <= baseline)
+        saved = _j(db, name=old_name, description=old, type="user", body=old, project_id=scope)
+        original = _read(old_name)
+        request = dict(predecessor=old_name, name=new_name, description=new, type="user", body=new,
+                       project_id=scope, topic=old, facet="watering-day", status="active", valid_from="2026-11-01",
+                       change_reason="User changed the watering arrangement", evidence=["Explicit user correction"],
+                       replace_whole_record=True)
+        denied = prep(**dict(request, replace_whole_record=False))
+        check(lang+" control: no implicit whole-note retirement", denied.get("ok") is False)
+        changes_before = db.total_changes
+        preview = prep(**request)
+        check(lang+" preparation does not write the index", db.total_changes==changes_before)
+        check(lang+" preparation preserves the old file and creates no successor",
+              preview.get("ok") is True and preview.get("stored") is False and _read(old_name)==original
+              and not os.path.exists(os.path.join(_MEM,new_name+".md")), preview)
+        if not preview.get("ok"):
+            continue
+        write = preview["save_arguments"]
+        check(lang+" source SHA is pinned", write["lifecycle"]["legacy_whole_record_sha"]=={old_name:saved["sha"]})
+        result = _j(db, **write)
+        current = names(query, scope)
+        history = names(query, scope, "history")
+        past = names(query, scope, at="2026-10-15")
+        passed = (result.get("stored") is True and new_name in current and old_name not in current
+                  and {old_name,new_name} <= history and old_name in past and new_name not in past)
+        check(lang+" explicit revision: current, history and as-of retrieval", passed, result.get("error"))
+        wins += int(passed)
+        check(lang+" retry is a noop and old bytes remain", _j(db, **write).get("result")=="noop" and _read(old_name)==original)
+        next_request = dict(request, predecessor=new_name, name=new_name+"_proposal", status="proposed")
+        for key in ("topic", "facet", "replace_whole_record"):
+            next_request.pop(key)
+        next_preview = prep(**next_request)
+        check(lang+" tracked revision inherits identity without copying old evidence or SHA pins",
+              next_preview.get("ok") and next_preview["save_arguments"]["lifecycle"]["topic"]==old
+              and "legacy_whole_record_sha" not in next_preview["save_arguments"]["lifecycle"])
+        if next_preview.get("ok"):
+            _j(db, **next_preview["save_arguments"])
+            check(lang+" a proposal does not become current", new_name+"_proposal" not in names(query,scope))
+        check(lang+" other scopes cannot supply a predecessor", not prep(**dict(next_request,project_id="unrelated")).get("ok"))
+    print("Controlled current/history/as-of improvements: %d/%d; not a general-language benchmark" % (wins,len(langs)))
+    check("all script fixtures pass", wins==len(langs))
+    check("capabilities advertise preparation", capabilities.tool_flags(server.TOOLS)["remember"]["prepare_revision"])
+    # Two clients prepare the same tracked predecessor. Only the first may supersede it.
+    request = dict(predecessor="en_changed", name="race_first", description="New arrangement", type="user",
+                   body="Water orchids on Saturday", project_id="en-revision", status="active",
+                   valid_from="2026-11-02", change_reason="Confirmed change", evidence=["User said Saturday"])
+    a, b = prep(**request), prep(**dict(request,name="race_second"))
+    check("two clients can preview the same fact snapshot", a.get("ok") and b.get("ok"))
+    if a.get("ok") and b.get("ok"):
+        _j(db, **a["save_arguments"])
+        failed = _j(db, **b["save_arguments"])
+        check("concurrent successor invalidates the second snapshot", failed.get("error",{}).get("code")=="fact_changed"
+              and not os.path.exists(os.path.join(_MEM,"race_second.md")), failed)
+    future = prep(**dict(request, predecessor="race_first", name="future_fact", valid_from="2026-12-01"))
+    check("future revision can be prepared", future.get("ok"), future)
+    if future.get("ok"):
+        _j(db, **future["save_arguments"])
+        current = names("Water orchids Saturday", "en-revision")
+        later = names("Water orchids Saturday", "en-revision", at="2026-12-02")
+        check("scheduled change waits until its effective date", "race_first" in current and "future_fact" not in current
+              and "future_fact" in later and "race_first" not in later)
+    db.execute("UPDATE docs SET name='race_first' WHERE name='en_prior' AND project_id='en-revision'")
+    try:
+        check("ambiguous same-scope predecessors are refused", prep(**dict(request, predecessor="race_first", name="ambiguous_new"))
+              .get("error",{}).get("code")=="predecessor_unavailable")
+    finally:
+        db.execute("UPDATE docs SET name='en_prior' WHERE path=?", (os.path.join(_MEM,"en_prior.md"),))
+        db.commit()
+    for tracked in (False,True):
+        name = "race_first" if tracked else "legacy_note"
+        r = dict(request, predecessor=name, name="edited_"+str(tracked), valid_to="2026-12-01")
+        if not tracked:
+            r.pop("project_id");r.update(topic="legacy",facet="fact",replace_whole_record=True)
+        prepared = prep(**r)
+        check("prepare before source edit "+str(tracked), prepared.get("ok"), prepared)
+        path = os.path.join(_MEM,name+".md")
+        with open(path,"a",encoding="utf-8") as fh: fh.write("\nA person changed this source.\n")
+        stale = prep(**r)
+        check("stale indexed source is refused "+str(tracked), stale.get("error",{}).get("code")=="index_pending")
+        if prepared.get("ok"):
+            denied = _j(db, **prepared["save_arguments"])
+            check("write refuses a source changed after prepare "+str(tracked), not denied.get("ok")
+                  and not os.path.exists(os.path.join(_MEM,r["name"]+".md")), denied)
+        store.reindex(db,recalibrate=False)
+    cross_old = "\ub09c\ucd08\ub294 \uc6d4\uc694\uc77c\uc5d0 \ubb3c\uc744 \uc900\ub2e4"
+    _j(db, name="cross_old", description=cross_old, body=cross_old, type="user", project_id="cross",
+       lifecycle=dict(topic="\ub09c\ucd08",facet="\uae09\uc218",status="active",valid_from="2026-10-01"))
+    cross = prep(predecessor="cross_old", name="cross_new", description="Water the orchid on Friday",
+                 body="Water the orchid on Friday", type="user", project_id="cross", status="active",
+                 valid_from="2026-11-01", change_reason="Confirmed in another language", evidence=["User correction"])
+    check("cross-language preparation keeps the original identity", cross.get("ok") and
+          cross["save_arguments"]["lifecycle"]["topic"]=="\ub09c\ucd08")
+    if cross.get("ok"):
+        _j(db, **cross["save_arguments"])
+        check("query in predecessor language resolves to the new-language fact",
+              names(cross_old,"cross")=={"cross_new"})
+    for patch in ({"topic": []},{"status": "archived"},{"replace_whole_record": "yes"},{"evidence": []}):
+        check("malformed preparation is an error, not an exception", prep(**dict(request,**patch)).get("ok") is False)
+
+
 def main() -> int:
     db = _build()
     base = dict(description="harbour ledger rule", type="lesson", body="The ledger closes on friday.")
@@ -185,6 +315,7 @@ def main() -> int:
     finally:
         _cal.calibrate, _vec.recalibrate_if_free = real_cal, real_gate
 
+    revision_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
         print("❌ failed: %d — %s" % (len(FAILS), " · ".join(FAILS)))

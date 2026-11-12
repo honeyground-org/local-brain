@@ -90,6 +90,8 @@ def main() -> int:
           and without["tools"]["remember"]["idempotency_key"] is False, without["tools"])
     check("the live answer equals the answer for the live declaration",
           out["tools"] == base["tools"], "")
+    check("revision preparation follows its declaration", base["tools"]["remember"]["prepare_revision"]
+          and not capabilities.tool_flags([t for t in tools if t["name"] != "prepare_revision"])["remember"]["prepare_revision"])
     _ = recall_now
 
     print("\n" + "=" * 72 + "\n③ `unsupported` and the flags cannot disagree\n" + "=" * 72)
