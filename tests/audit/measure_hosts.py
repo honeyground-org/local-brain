@@ -41,6 +41,8 @@ def write_report(path, value):
 
 
 def validate(plan):
+    if not isinstance(plan.get('brain_revision'), str) or not plan['brain_revision'].strip():
+        raise ValueError('Record the Brain release or commit being compared')
     if set(plan.get('hosts', {})) != set(HOSTS):
         raise ValueError('Both codex and claude need explicit host configurations')
     if type(plan.get('repeats')) is not int or plan['repeats'] < 2:
@@ -274,7 +276,7 @@ def self_check():
         config = dict(command=[sys.executable,'-c',code],native_args=['native'],brain_args=['brain'],
                       model='synthetic',cli_version='fixture',reasoning='none',permissions='synthetic control',native_memory='notes.txt',
                       settings_identity='fixture',native_memory_preserved=True,format='adapter_json')
-        plan = dict(workspace=str(root),corpus_files=['notes.txt'],cases=[dict(id='schedule',question='Return JSON with day.',expected={'day':'Friday'},obsolete={'day':['Monday']})],
+        plan = dict(brain_revision='synthetic', workspace=str(root),corpus_files=['notes.txt'],cases=[dict(id='schedule',question='Return JSON with day.',expected={'day':'Friday'},obsolete={'day':['Monday']})],
                     hosts={host:dict(config) for host in HOSTS},repeats=2,timeout_s=10,controls_reviewed=True)
         validate(plan)
         result = execute(plan,root.parent/'results')
@@ -314,7 +316,7 @@ def main():
                              command=(['codex','exec','--json','--model','PIN_MODEL','--sandbox','read-only','-'] if host=='codex' else ['claude','--print','--output-format','json','--model','PIN_MODEL','--permission-mode','dontAsk']),
                              native_args=(['-c','mcp_servers.brain.enabled=false'] if host=='codex' else ['--disallowedTools','mcp__brain__*']),brain_args=(['-c','mcp_servers.brain.enabled=true'] if host=='codex' else []),
                              native_env={'BRAIN_HOOK_DISABLED':'1'},brain_env={'BRAIN_HOOK_DISABLED':''},format=('codex_jsonl' if host=='codex' else 'claude_json'))
-        print(json.dumps(dict(workspace='/path/to/isolated-workspace',corpus_files=['notes/schedule.md'],repeats=2,timeout_s=180,controls_reviewed=False,hosts=hosts,
+        print(json.dumps(dict(brain_revision='RECORD_BRAIN_COMMIT', workspace='/path/to/isolated-workspace',corpus_files=['notes/schedule.md'],repeats=2,timeout_s=180,controls_reviewed=False,hosts=hosts,
                              cases=[dict(id='schedule',language='en',intent='current_and_history',question='Read notes/schedule.md. Return only JSON with day and previous_day.',expected={'day':'Friday','previous_day':'Monday'},obsolete={'day':['Monday']})]),indent=2));return
     if not args.plan:parser.error('--plan is required')
     plan=validate(json.loads(args.plan.read_text(encoding='utf-8')))

@@ -213,6 +213,7 @@ Plan fields (JSON):
 
 | Field | Required value |
 |---|---|
+| `brain_revision` | The Brain release or commit being compared; verify it against the running copy |
 | `workspace`, `corpus_files` | An isolated workspace and the relative input files to fingerprint before/after every trial |
 | `repeats`, `timeout_s` | At least 2 repetitions; explicit per-trial limit, at most 3600 seconds |
 | `cases` | Objects with unique `id`, `question`, `expected` answer-field object, optional `obsolete` field-to-values lists and `language` / `intent` group labels |
