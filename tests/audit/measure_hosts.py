@@ -118,7 +118,8 @@ def grade(answer, case):
         return dict(correct=False, obsolete=None, parse_ok=False)
     if not isinstance(value, dict):
         return dict(correct=False, obsolete=None, parse_ok=False)
-    return dict(correct=all(key in value and value[key] == expected for key, expected in case['expected'].items()),
+    fields = {key: key in value and digest(value[key]) == digest(expected) for key, expected in case['expected'].items()}
+    return dict(correct=all(fields.values()), field_correct=fields,
                 obsolete=any(key in value and value[key] in values for key, values in case.get('obsolete', {}).items()), parse_ok=True)
 
 
@@ -159,7 +160,9 @@ def summarize(rows):
             for key in sorted(usage_keys):
                 values = [r['usage'][key] for r in selected if isinstance((r.get('usage') or {}).get(key), (int, float)) and not isinstance(r['usage'][key], bool) and math.isfinite(r['usage'][key])]
                 usage_summary[key] = dict(observed=len(values), mean=statistics.mean(values))
-            arms[arm] = dict(usage_fields=usage_summary,attempted=len(selected), correct=sum(r.get('correct', False) for r in selected),
+            field_names = {key for r in selected for key in r.get('field_correct', {})}
+            field_summary = {key: dict(graded=sum(key in r.get('field_correct', {}) for r in selected), correct=sum(r['status'] == 'ok' and r.get('field_correct', {}).get(key, False) for r in selected)) for key in sorted(field_names)}
+            arms[arm] = dict(answer_fields=field_summary, usage_fields=usage_summary,attempted=len(selected), correct=sum(r.get('correct', False) for r in selected),
                              failed=sum(r['status'] != 'ok' for r in selected), obsolete=sum(r.get('obsolete') is True for r in selected),
                              ungraded=sum(not r.get('parse_ok', False) for r in selected),
                              p50_seconds=statistics.median(durations) if durations else None,
@@ -251,6 +254,8 @@ def execute(plan, output):
 def self_check():
     assert grade('{"day":"Friday","previous":"Monday"}',dict(expected={'day':'Friday'},obsolete={'day':['Monday']}))['obsolete'] is False
     assert grade('{"day":"Monday"}',dict(expected={'day':'Friday'},obsolete={'day':['Monday']}))['obsolete'] is True
+    assert not grade({'count': True}, dict(expected={'count': 1}))['correct']
+    assert grade({'current': 'Friday', 'previous': 'wrong'}, dict(expected={'current': 'Friday', 'previous': 'Monday'}))['field_correct'] == {'current': True, 'previous': False}
     assert not grade('invalid',dict(expected={'day':'Friday'}))['correct']
     raw='{"type":"item.completed","item":{"type":"agent_message","text":"answer"}}\n{"type":"turn.completed","usage":{"input_tokens":7}}'
     assert parse_output(raw,'codex_jsonl')[:2]==('answer',{'input_tokens':7})
