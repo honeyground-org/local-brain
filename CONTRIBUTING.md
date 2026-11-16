@@ -44,6 +44,16 @@ The principles are in [docs/ROADMAP.md](docs/ROADMAP.md#principles-every-change-
 | **Nothing tuned to one person** | Every number is measured on the user's own data or chosen by them — never copied from someone's notes. |
 | **Test against a copy** | Point `BRAIN_HOME` and `BRAIN_CONFIG` at a temporary folder. A command run against your real config changes the brain you are using. |
 
+## Native-host comparison is a standing release criterion
+
+Claims that Brain improves users' answers or work efficiency require paired evidence against native
+Codex and native Claude Code with their normal memory preserved. Compare within each host, with the
+same model, inputs, permissions and initial memory; report wins and losses, stale-current answers,
+history accuracy, failures, latency and observed usage. Component benchmarks do not substitute for
+this comparison. If a host study was not run, explicitly say that the user-level benefit is unmeasured.
+Use `tests/audit/measure_hosts.py` and the README protocol for repeatable receipts; independently review
+configuration and traces before claiming causality. Model calls are opt-in and never part of ordinary CI.
+
 ## Running the checks
 
 ```bash
