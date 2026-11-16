@@ -181,6 +181,7 @@ class Snapshot:
     def __init__(self, db):
         self.docs = {}
         self.by_name = {}
+        self.by_fact = {}
         self.next = {}
         self.prev = {}
         self.issues = {}
@@ -192,6 +193,8 @@ class Snapshot:
                 d['meta'] = {'status': 'invalid'}
             self.docs[d['id']] = d
             self.by_name.setdefault((d['project_id'], d['name']), []).append(d['id'])
+            if d['meta'].get('topic'):
+                self.by_fact.setdefault((d['project_id'], identity(d['meta'])), []).append(d['id'])
         for did, d in self.docs.items():
             m = d['meta']
             for name in m.get('supersedes', []):
@@ -217,6 +220,10 @@ class Snapshot:
         x, y = self.docs[a], self.docs[b]
         return (x['project_id'] == y['project_id'] and x['meta'].get('topic')
                 and identity(x['meta']) == identity(y['meta']))
+
+    def fact_members(self, did):
+        d = self.docs[did]
+        return self.by_fact.get((d['project_id'], identity(d['meta'])), ())
 
     def edge(self, old, new):
         self.next.setdefault(old, set()).add(new)
@@ -266,7 +273,7 @@ class Snapshot:
         elif did not in resolved and any(started(self.docs[n]['meta'], day) and self.docs[n]['meta'].get('status', 'active') != 'proposed' for n in self.next.get(did, ())):
             status = 'superseded'
         with view('current', at):
-            peers = [n for n in self.docs if n != did and self.same_fact(did, n)
+            peers = [n for n in self.fact_members(did) if n != did
                      and self.eligible(n, day) and self.resolve(n) == [n]] if m.get('topic') and did in resolved else []
         if did in resolved and peers:
             status = 'disputed'
@@ -383,7 +390,7 @@ def history(db, name, scope=None, offset=0, limit=25):
     if len(seeds) != 1:
         return {'ok': False, 'error': {'code': 'ambiguous_or_missing', 'message': 'Specify the exact memory name and scope'}}
     seed = seeds[0]
-    members = {seed} | {n for n in snap.docs if snap.same_fact(seed, n)}
+    members = {seed} | set(snap.fact_members(seed))
     pending = list(members)
     while pending:
         did = pending.pop()
@@ -391,43 +398,49 @@ def history(db, name, scope=None, offset=0, limit=25):
             if linked not in members:
                 members.add(linked)
                 pending.append(linked)
-    rows = []
-    for did in members:
-        r = db.execute('SELECT name,path,body,sha,evidence_date FROM docs WHERE id=?', (did,)).fetchone()
-        record = dict(r, lifecycle=snap.info(did))
-        record['body_truncated'] = len(record['body']) > 4000
-        record['body'] = record['body'][:4000]
-        record['changes'] = []
-        predecessors = sorted(snap.prev.get(did, ()))
-        record['changes_truncated'] = len(predecessors) > 5
-        for predecessor in predecessors[:5]:
-            before = db.execute('SELECT name,body FROM docs WHERE id=?', (predecessor,)).fetchone()
-            delta = list(difflib.unified_diff(before['body'].splitlines(), r['body'].splitlines(),
-                                            fromfile=before['name'], tofile=r['name'], lineterm=''))
-            record['changes'].append({'from': before['name'], 'to': r['name'],
-                                      'diff': '\n'.join(delta[:40])[:1000],
-                                      'truncated': len(delta) > 40 or len('\n'.join(delta)) > 1000})
-        rows.append(record)
-    def history_order(record):
-        effective = record['lifecycle'].get('valid_from')
-        # ISO strings with different timezone offsets must not be sorted lexically.
+    # Order lightweight metadata before fetching bodies or calculating diffs. The
+    # full current-name summary still covers every revision, including other pages.
+    def history_order(did):
+        effective = snap.docs[did]['meta'].get('valid_from')
         at = instant(effective) if effective else datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
-        did = next(n for n in members if snap.docs[n]['path'] == record['path'])
         ancestors, pending = set(), list(snap.prev.get(did, ()))
         while pending:
             previous = pending.pop()
             if previous not in ancestors:
                 ancestors.add(previous)
                 pending.extend(snap.prev.get(previous, ()))
-        return at, len(ancestors), record['name']
-    rows.sort(key=history_order)
-    current = [r['name'] for r in rows if r['lifecycle'].get('current')]
+        return at, len(ancestors), snap.docs[did]['name']
+    ordered = sorted(members, key=history_order)
+    states = {did: snap.info(did) for did in ordered}
+    current = [snap.docs[did]['name'] for did in ordered if states[did].get('current')]
+    bodies = {}
+    def body_row(did):
+        if did not in bodies:
+            bodies[did] = db.execute('SELECT name,path,body,sha,evidence_date FROM docs WHERE id=?', (did,)).fetchone()
+        return bodies[did]
+    rows = []
+    for did in ordered[offset:offset+limit]:
+        r = body_row(did)
+        record = dict(r, lifecycle=states[did])
+        record['body_truncated'] = len(record['body']) > 4000
+        record['body'] = record['body'][:4000]
+        record['changes'] = []
+        predecessors = sorted(snap.prev.get(did, ()))
+        record['changes_truncated'] = len(predecessors) > 5
+        for predecessor in predecessors[:5]:
+            before = body_row(predecessor)
+            delta = list(difflib.unified_diff(before['body'].splitlines(), r['body'].splitlines(),
+                                            fromfile=before['name'], tofile=r['name'], lineterm=''))
+            record['changes'].append({'from': before['name'], 'to': r['name'],
+                                      'diff': '\n'.join(delta[:40])[:1000],
+                                      'truncated': len(delta) > 40 or len('\n'.join(delta)) > 1000})
+        rows.append(record)
     from brain import revisions
     observed = revisions.history(snap.docs[seed]['path'], snap.docs[seed]['project_id'], offset, limit)
     return {'ok': True, 'name': name, 'current_names': current, 'unresolved': not bool(current),
-            'revisions': rows[offset:offset+limit], 'document_history': observed, 'total': len(rows), 'offset': offset,
-            'has_more': offset + limit < len(rows) or observed.get('has_more', False),
-            'revision_has_more': offset + limit < len(rows), 'history_complete': False,
+            'revisions': rows, 'document_history': observed, 'total': len(ordered), 'offset': offset,
+            'has_more': offset + limit < len(ordered) or observed.get('has_more', False),
+            'revision_has_more': offset + limit < len(ordered), 'history_complete': False,
             'coverage': 'explicitly linked or same-topic/facet indexed records; unrecorded conversations are unknown'}
 
 

@@ -1135,6 +1135,11 @@ for a verified evidence date and separate facts with different lifetimes.
 
 ### Changed memories: current facts and observed history
 
+`memory_history` fetches revision bodies and computes their diffs only for the requested page.
+Its current-state summary and total still cover the entire linked history, including revisions outside
+that page. Exact scope/topic/facet groups are indexed within the local snapshot to avoid scanning
+unrelated documents for every conflict check; this does not infer semantic equivalence.
+
 `memory_history` returns explicit replacement chains and `document_history`: bodies observed when
 indexing the same file, with diffs, SHA values and observation times. The shared offset/limit pages
 both lists; top-level `has_more` stays true while either has another page, and `revision_has_more`

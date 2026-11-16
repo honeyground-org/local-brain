@@ -243,6 +243,31 @@ def revision_checks(db):
     for patch in ({"topic": []},{"status": "archived"},{"replace_whole_record": "yes"},{"evidence": []}):
         check("malformed preparation is an error, not an exception", prep(**dict(request,**patch)).get("ok") is False)
 
+    # A page must not fetch and diff every body in a long fact history.
+    for i in range(12):
+        meta = dict(topic="pagination", facet="schedule", valid_from="2026-11-01",
+                    change_reason="Confirmed correction", evidence=["User confirmation"])
+        if i:
+            meta["supersedes"] = ["paged_"+str(i-1)]
+        args = dict(name="paged_"+str(i), description="Schedule", type="user", body="Revision "+str(i),
+                    project_id="paged", lifecycle=meta)
+        preview = _j(db, **dict(args, prepare_only=True))
+        check("history fixture saved "+str(i), _j(db, **dict(args, expected_fact_sha=preview["expected_fact_sha"])).get("stored"))
+    with lifecycle.view("current", "2026-11-16"):
+        full = lifecycle.history(db, "paged_0", "paged", 0, 25)
+        statements = []
+        db.set_trace_callback(statements.append)
+        try:
+            page = lifecycle.history(db, "paged_0", "paged", 4, 3)
+        finally:
+            db.set_trace_callback(None)
+        body_reads = [sql for sql in statements if "SELECT " in sql and "body" in sql and "FROM docs" in sql]
+        check("history page preserves bodies, changes and metadata", page["revisions"]==full["revisions"][4:7])
+        check("history page keeps current names outside the page", page["current_names"]==["paged_11"] and page["total"]==12)
+        check("three history revisions read at most four bodies", len(body_reads)<=4, len(body_reads))
+        empty = lifecycle.history(db, "paged_0", "paged", 12, 3)
+        check("empty revision page still reports current state", empty["revisions"]==[] and empty["current_names"]==["paged_11"] and not empty["revision_has_more"])
+
 
 def main() -> int:
     db = _build()
