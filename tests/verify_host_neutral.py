@@ -278,6 +278,12 @@ def main() -> int:
     memory_folder()
     host_facts()
 
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("host_audit", os.path.join(ROOT, "tests", "audit", "measure_hosts.py"))
+    audit = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(audit)
+    audit.self_check()
+
     print("=" * 72)
     print("❌ %d failure(s): %s" % (len(FAILS), " · ".join(FAILS)) if FAILS
           else "✅ all passed — each host reads its own log, and every path comes from one rule")

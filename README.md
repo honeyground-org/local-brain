@@ -186,6 +186,71 @@ A value measured on one person's notes is not another person's optimum.
   indexes in the same transaction. Retrieval uses the local copy until sync succeeds. Stale local
   vectors whose content hash no longer matches the document are excluded from similarity search.
 
+### Compare with native Codex and Claude, repeatedly
+
+User-level benefit must be measured against **Codex with its normal memory vs Codex + Brain**, and
+**Claude Code with its normal memory vs Claude Code + Brain**, separately. Internal retrieval or
+history speedups are not evidence that either assistant gives better answers. Keep the corpus,
+questions, model, reasoning, permissions and native-memory starting state fixed within each pair;
+change only Brain integration. Preserve losing questions, failures and missing observations.
+
+`tests/audit/measure_hosts.py` runs explicit CLI argument arrays in alternating arm order and retains
+raw transcripts, elapsed time, provider-reported usage and exact structured-answer grades. Expected
+answer fields and obsolete values are authored before execution and are never sent in the prompt.
+Plans/results must be outside the agent workspace. The same labelled questions can then be rerun
+against later releases; the report records plan, corpus and measurement-code hashes. Start fresh
+sessions and independently review tool traces for source leakage, settings and normal-memory parity.
+Matching declared settings is not proof of a fair trial.
+
+```bash
+python3 tests/audit/measure_hosts.py --example > /private/host-plan.json  # edit all placeholders and controls
+python3 tests/audit/measure_hosts.py --plan /private/host-plan.json
+# Validation only; no model call. Explicit execution consumes the configured CLI quotas:
+python3 tests/audit/measure_hosts.py --plan /private/host-plan.json --execute --output /private/run-001
+```
+
+Plan fields (JSON):
+
+| Field | Required value |
+|---|---|
+| `workspace`, `corpus_files` | An isolated workspace and the relative input files to fingerprint before/after every trial |
+| `repeats`, `timeout_s` | At least 2 repetitions; explicit per-trial limit, at most 3600 seconds |
+| `cases` | Objects with unique `id`, `question`, `expected` answer-field object, optional `obsolete` field-to-values lists and `language` / `intent` group labels |
+| `hosts` | Both `codex` and `claude`, each configured as below |
+| `controls_reviewed` | `true` only after reviewing the execution controls; required for `--execute` |
+
+Each host has one shared `command` argument array and separate `native_args` / `brain_args` arrays.
+Both receive the **same question on stdin**. Configure native JSON event output for Codex
+(`format: "codex_jsonl"`) or Claude's final JSON (`format: "claude_json"`). An explicitly provided
+adapter may return `{ "answer": {...}, "usage": {...}, "model": "..." }` with `format: "adapter_json"`.
+Pin the model in the shared command and declare `model`, `cli_version`, `reasoning`, `permissions`,
+`native_memory`, `settings_identity`, and `native_memory_preserved: true`. The runner does not inspect
+or rewrite global host configuration. `--bare` and `--ignore-user-config` are rejected: removing normal
+memory is not the requested baseline. Supply fresh, equivalent starting memories when a host learns
+between sessions. Turn off unrelated integrations equally in both arms. Point Brain at a frozen copy containing only
+the same declared corpus; do not connect an unrestricted personal index to a restricted native arm.
+
+Only integration arguments should differ: disable Brain MCP access for the native arm and enable it
+for the Brain arm. Optional `native_env` / `brain_env` may set `BRAIN_HOOK_DISABLED` (`"1"` / `""`) so
+native trials do not receive Brain's automatic recall. Verify every installed Brain access path, including
+plugins, before marking controls reviewed. Orbit is off in both arms to measure Brain's contribution.
+Do not put credentials in the plan or argument arrays; subprocesses inherit the configured login.
+
+Questions must request JSON answer fields, for example `day` and `previous_day`; grade current facts
+and history independently. Obsolete values are checked in their designated field, so correctly citing
+an old value as history is not a stale-answer error. Exact labels are suitable for objective fixtures;
+open-ended work requires a separately designed, blinded grading protocol. Add language and everyday
+work cases to the question set rather than assuming one language represents all users.
+
+`trials.jsonl` survives an interrupted run and `report.json` shows planned vs recorded trials, paired
+wins/losses/ties (also grouped by declared language/intent), obsolete answers, ungraded outputs, failures, p50/p95 wall time and observed usage
+fields. Timeouts remain in the denominator; missing usage is unknown, never zero. Token definitions
+remain provider-specific, so do not sum them into a cross-provider cost score. Corpus mutation makes
+trials invalid rather than silently measuring a different workload. Reports are descriptive: repeated
+runs of the same question are not independent new evidence. Inspect case-level losses and use held-out
+questions and uncertainty estimates before claiming a general improvement. No model runs in ordinary
+CI; synthetic subprocess controls test this measurement tool without proving Brain superiority.
+
 ### Automatic personalisation and policy selection
 
 Automatic personalisation is implemented: corpus calibration, learned vocabulary, feedback-based
