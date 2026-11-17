@@ -25,7 +25,7 @@ KEY_MAX = 128
 PROJECT_MAX = 128
 SOURCE_MAX = 512
 # The fields a retry is compared on — the date of saving is not one of them (a retry tomorrow is the same request).
-PAYLOAD_FIELDS = ("description", "type", "body", "links", "search_aliases", "project_id", "source", "observed_at", "lifecycle")
+PAYLOAD_FIELDS = ("description", "type", "body", "links", "search_aliases", "project_id", "source", "observed_at", "lifecycle", "extracted_from", "embed")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -39,6 +39,8 @@ def validate(args: dict) -> Optional[Dict[str, Any]]:
     """None when acceptable, else the error envelope — a bad argument is an answer, not an exception."""
     if not isinstance(args, dict):
         return error("invalid_argument", "arguments must be an object")
+    if "embed" in args and type(args["embed"]) is not bool:
+        return error("invalid_argument", "embed must be boolean")
     name = args.get("name")
     # Combining marks are letters' components in many scripts (including Indic text).
     # Preserve the supplied filename; filesystem aliases remain protected by the SHA write guard.
@@ -93,12 +95,16 @@ def validate(args: dict) -> Optional[Dict[str, Any]]:
         issue = lifecycle.validate(args["lifecycle"])
         if issue:
             return error("invalid_argument", issue)
+    if "extracted_from" in args:
+        issue = extraction_shape(args)
+        if issue:
+            return error("invalid_argument", issue)
     return None
 
 
 # Inputs accepted by the read-only revision planner; save arguments use the existing contract.
 REVISION_CONTENT = ("name", "description", "type", "body", "project_id", "source", "observed_at",
-                    "links", "search_aliases")
+                    "links", "search_aliases", "embed")
 REVISION_FIELDS = REVISION_CONTENT + ("predecessor", "topic", "facet", "status", "valid_from",
                                       "valid_to", "change_reason", "evidence", "replace_whole_record")
 
@@ -151,6 +157,10 @@ def prepare_revision(db, args: dict) -> dict:
     if not old:
         meta["legacy_whole_record_sha"] = {predecessor: prior["sha"]}
     save["lifecycle"] = meta
+    if requires_local_only(db, save):
+        if save.get("embed") is True:
+            return error("privacy_required", "Preserve embed:false from the predecessor")
+        save["embed"] = False
     bad = validate(save)
     if bad:
         return bad
@@ -227,6 +237,10 @@ def payload_sha(args: dict) -> str:
     body = {f: args.get(f) for f in PAYLOAD_FIELDS}
     if not args.get("lifecycle"):
         body.pop("lifecycle", None)  # Preserve retry hashes written before lifecycle support.
+    if "embed" not in args:
+        body.pop("embed", None)
+    if not args.get("extracted_from"):
+        body.pop("extracted_from", None)  # Keep existing retry hashes unchanged.
     body["search_aliases"] = aliases(args)
     body["links"] = [l for l in (args.get("links") or []) if isinstance(l, str)]
     raw = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -302,6 +316,10 @@ def render(name: str, args: dict, verified_at: str) -> str:
     """The file — the legacy shape with the contract's fields added in the frontmatter."""
     lines = ["---", "name: %s" % name, "description: %s" % args["description"].replace("\n", " "),
              "verified_at: %s" % verified_at]
+    if args.get("extracted_from") or "embed" in args:
+        lines.insert(1, "embed: " + ("false" if args.get("extracted_from") or args["embed"] is False else "true"))
+    if args.get("extracted_from"):
+        lines.append("extracted_from: " + json.dumps(args["extracted_from"], ensure_ascii=False, sort_keys=True))
     if args.get("lifecycle"):
         lines.append("lifecycle: " + json.dumps(args["lifecycle"], ensure_ascii=False, sort_keys=True))
     if args.get("idempotency_key"):
@@ -383,6 +401,7 @@ def ack(db: sqlite3.Connection, *, name: str, path: str, result: str, conflict: 
         "index": idx,
         "conflict": conflict,
         "lifecycle": args.get("lifecycle") or cur.get("lifecycle") or None,
+        "extracted_from": args.get("extracted_from"),
         "project_id": (args.get("project_id") or None) if result != "conflict" else cur.get("project_id"),
         "idempotency_key": key,
         "payload_sha": (payload_sha(args) if result != "conflict" else cur.get("payload_sha")),
@@ -393,3 +412,122 @@ def ack(db: sqlite3.Connection, *, name: str, path: str, result: str, conflict: 
                  if result == "conflict" else None,
         "meta": {"latency_ms": int((time.time() - t0) * 1000)},
     }
+
+
+# Extraction is a proposal, not replacement authority over a mixed source note.
+def extraction_shape(args):
+    value = args.get("extracted_from")
+    if args.get("embed") is True:
+        return "Extracted proposals must keep embed:false"
+    if not isinstance(value, dict) or set(value) != {"name", "sha", "spans"}:
+        return "extracted_from requires name, sha and spans"
+    if not isinstance(value["name"], str) or not 1 <= len(value["name"]) <= 200 or value["name"] == args.get("name"):
+        return "Use a distinct source name of at most 200 characters"
+    if not isinstance(value["sha"], str) or not _SHA.fullmatch(value["sha"]):
+        return "Pin the source SHA returned when read"
+    spans = value["spans"]
+    if not isinstance(spans, list) or not 1 <= len(spans) <= 10:
+        return "Provide 1..10 exact source spans"
+    for span in spans:
+        if not isinstance(span, dict) or set(span) != {"start", "end", "text"}:
+            return "Each span requires start, end and text"
+        if (type(span["start"]) is not int or type(span["end"]) is not int or span["start"] < 0
+                or not isinstance(span["text"], str) or not span["text"].strip()
+                or not 1 <= len(span["text"]) <= 1000 or span["end"]-span["start"] != len(span["text"])):
+            return "Spans use nonnegative Unicode code-point offsets and 1..1000 exact characters"
+    meta = args.get("lifecycle") or {}
+    if (meta.get("status") != "proposed" or meta.get("supersedes") or meta.get("superseded_by")
+            or meta.get("legacy_whole_record_sha")):
+        return "An extracted fact must remain proposed and cannot retire its source or any other memory"
+    return None
+
+
+def extraction_source(db, name, sha, scope):
+    from brain import lifecycle
+    snap = lifecycle.snapshot(db)
+    ids = snap.by_name.get((scope, name), [])
+    if len(ids) != 1:
+        return None, error("source_unavailable", "Select one indexed source in the exact project_id scope")
+    row = snap.docs[ids[0]]
+    try:
+        actual = current(row["path"])
+    except (OSError, UnicodeError):
+        return None, error("source_unavailable", "The source cannot be read")
+    if row["sha"] != sha or actual["sha"] != sha:
+        return None, error("source_changed", "Read the current source and refresh its index before preparing again")
+    return actual, None
+
+
+def check_extraction(db, args):
+    value = args.get("extracted_from")
+    if value is None:
+        return None
+    source, bad = extraction_source(db, value["name"], value["sha"], args.get("project_id") or "")
+    if bad:
+        return bad
+    for span in value["spans"]:
+        if source["body"][span["start"]:span["end"]] != span["text"]:
+            return error("quote_mismatch", "Every span must exactly match the pinned source body")
+    return None
+
+
+def prepare_fact(db, args):
+    """Prepare one host-authored proposal grounded in unique verbatim source passages."""
+    from brain import lifecycle
+    fields = {"source_name", "source_sha", "quotes", "name", "description", "type", "body", "project_id", "topic", "facet"}
+    if not isinstance(args, dict) or set(args) - fields:
+        return error("invalid_argument", "Use only declared fact preparation fields")
+    name, sha, quotes = args.get("source_name"), args.get("source_sha"), args.get("quotes")
+    if (not isinstance(name, str) or not name.strip() or len(name) > 200
+            or not isinstance(sha, str) or not _SHA.fullmatch(sha)
+            or not isinstance(quotes, list) or not 1 <= len(quotes) <= 10
+            or any(not isinstance(q, str) or not q.strip() or len(q) > 1000 for q in quotes)):
+        return error("invalid_argument", "Provide source_name, source_sha and 1..10 verbatim quotes of at most 1000 characters")
+    save = {k: args[k] for k in ("name", "description", "type", "body", "project_id") if k in args}
+    save["lifecycle"] = dict(topic=args.get("topic"), facet=args.get("facet"), status="proposed")
+    bad = validate(save)
+    if bad:
+        return bad
+    if save["name"] == name:
+        return error("invalid_argument", "Keep the mixed source; use a distinct new fact name")
+    scope = save.get("project_id") or ""
+    snap = lifecycle.snapshot(db)
+    if snap.by_name.get((scope, save["name"])):
+        return error("name_taken", "Choose an unused fact name; retry the previous save request if already saved")
+    source, bad = extraction_source(db, name, sha, scope)
+    if bad:
+        return bad
+    spans = []
+    for quote in quotes:
+        start = source["body"].find(quote)
+        if start < 0:
+            return error("quote_mismatch", "Quotes must match the source body verbatim, without translation or normalisation")
+        if source["body"].find(quote, start+1) >= 0:
+            return error("ambiguous_quote", "Include enough surrounding source text to identify one passage")
+        spans.append(dict(start=start, end=start+len(quote), text=quote))
+    save["extracted_from"] = dict(name=name, sha=sha, spans=spans)
+    save["links"] = [name]
+    save["embed"] = False
+    save["lifecycle"]["evidence"] = ["%s@%s [%s:%s]: %s" % (name, sha, s["start"], s["end"], s["text"]) for s in spans]
+    bad = validate(save)
+    if bad:
+        return bad
+    review = lifecycle.prepare(db, save["name"], save)
+    if not review["source_matches_index"]:
+        return error("index_pending", "Refresh changed fact sources before preparing again")
+    save["expected_fact_sha"] = review["expected_fact_sha"]
+    return dict(review, save_tool="remember", save_arguments=save,
+                extraction={"source_name": name, "source_sha": sha, "spans": spans, "status": "proposed"},
+                next="Review whether the passages support one independent claim. Quotation matching proves provenance, not truth or completeness. Save proposals individually; this is not a batch transaction. The original remains searchable and is never superseded. Confirmation requires a new explicit revision with effective time and evidence.")
+
+
+def requires_local_only(db, args):
+    """An explicit source opt-out must not disappear when a new revision is saved."""
+    from brain import lifecycle, privacy
+    snap = lifecycle.snapshot(db)
+    scope = args.get("project_id") or ""
+    for name in (args.get("lifecycle") or {}).get("supersedes", []):
+        for did in snap.by_name.get((scope, name), []):
+            if privacy.is_local_only(snap.docs[did]["path"]):
+                return True
+    return False

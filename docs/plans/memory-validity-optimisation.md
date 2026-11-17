@@ -1,6 +1,6 @@
 # Memory validity and classification optimisation
 
-> Status: Phase 1 implemented — 2026-11-17
+> Status: Phases 1 and 2 implemented — 2026-11-17
 > Owner: Maintainers
 
 ## Goal
@@ -21,12 +21,12 @@ Do not bulk rewrite, split, certify or delete existing private memories.
 
 | Phase | Deliverable | Completion evidence |
 |---|---|---|
-| 1 — this change | Read-only `memory_review` inventory of validity gaps, explicit conflicts, proposals, invalid/cyclic links and classification coverage | Labelled controls, no false flags for complete active facts or scheduled/expired records, exact scope, stable pagination, no writes/body reads/remote inference; installed API check |
-| 2 — follow-on | Host-assisted extraction of independent facts from mixed notes, with exact source passages and explicit uncertainty | Original notes retained; no partial correction retires an entire mixed record; reviewed proposed facts trace back to evidence |
+| 1 — implemented | Read-only `memory_review` inventory of validity gaps, explicit conflicts, proposals, invalid/cyclic links and classification coverage | Labelled controls, no false flags for complete active facts or scheduled/expired records, exact scope, stable pagination, no writes/body reads/remote inference; installed API check |
+| 2 — implemented | Host-assisted extraction of independent facts from mixed notes, with exact source passages and explicit uncertainty | Original notes retained; no partial correction retires an entire mixed record; reviewed proposed facts trace back to evidence |
 | 3 — follow-on | Reviewed identity reuse across languages and explicit disambiguation of similar subjects | Multilingual same-fact and different-fact controls; no semantic or spelling-based automatic merge; correction history retained |
 | 4 — follow-on | Paired native-host outcome study and targeted retrieval improvement | Same model, permissions, normal native memory and input material within each host; report losses and gains, current/history accuracy, time, usage and failures |
 
-Phases 2–4 are not delivered by the phase 1 inventory. Stage their implementation using what the
+Phases 3–4 remain follow-on work; phase 2 adds the source-bound proposal workflow below. Stage their implementation using what the
 inventory and paired studies actually reveal. A diagnostic feature is not evidence of better answers.
 
 ## Phase 1 API contract
@@ -48,6 +48,28 @@ not a guarantee that source files have not changed since indexing.
 - Items carry source paths and hashes, stable identity fields and bounded current/conflict references.
   Read the source or `memory_history` before making a judgement. Continue with existing
   `prepare_revision` / guarded `remember` only after confirming the change and its effective date.
+
+## Phase 2: source-bound proposals
+
+The host reads the mixed source and authors one candidate claim. `prepare_fact` checks an exact
+scope/name/SHA and unique verbatim source passages, returns a proposed lifecycle with structured
+`extracted_from` provenance, and does not write or infer. The existing `remember` writer validates
+source version and quote spans again before new writes. It persists provenance without changing the
+mixed original; successful identical retries remain noops after later source changes. Old retry
+hashes omit absent provenance and remain compatible.
+
+Extracted proposals are always `embed:false`. Revision preparation carries that opt-out forward,
+and the writer rejects a new revision that drops it. This avoids exporting derived quotations merely
+because the target memory source permits embeddings. The proposal is not a currently applicable fact. A reviewed confirmation uses `prepare_revision`
+against the proposal, with explicit dates, reasons and evidence. It never retires the entire mixed
+original. Quotes use Unicode code-point offsets into the parsed, trimmed source body. Repeated
+passages require more context. One call handles one proposed fact, not an atomic multi-fact migration.
+The host still judges semantic support, independent fact boundaries and source trustworthiness.
+Direct external editors do not participate in the writer lock; no cross-file transaction is claimed.
+
+Controls cover five languages, exact quotations, stale sources before preparation and saving,
+wrong scope, tampered spans, proposal-only writes, immutable originals, retry compatibility and
+confirmation of the proposal alone. These checks do not establish general answer-quality improvement.
 
 ## Measurement and acceptance
 
@@ -85,7 +107,9 @@ contradictions require host review. Unobserved conversations cannot be reconstru
 
 ## Related
 
-- [Implementation and release checks: PR #90](https://github.com/honeyground-org/local-brain/pull/90)
+- [Phase 2 implementation and release checks: PR #92](https://github.com/honeyground-org/local-brain/pull/92)
+
+- [Phase 1 implementation and release checks: PR #90](https://github.com/honeyground-org/local-brain/pull/90)
 
 - [Current facts and history](../../README.md#current-facts-and-change-history)
 - [Standing native-host comparison criterion](../../CONTRIBUTING.md#native-host-comparison-is-a-standing-release-criterion)

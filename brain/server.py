@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.3.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.4.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -297,9 +297,22 @@ TOOLS.append({"name": "memory_review",
         "only_attention": {"type": "boolean", "default": True},
         "expected_snapshot": {"type": "string", "description": "snapshot from first page; required with as_of for continuation"}}}})
 
+TOOLS.append({"name": "prepare_fact",
+    "description": "Prepare one host-authored proposed fact from a mixed note. Supply the exact source name/version and unique verbatim quotes, plus a stable topic/facet. Checks source passages without inference or writing. Review returned save_arguments then use remember. Never retires the original or certifies the extracted claim; later confirmation requires a separate explicit revision.",
+    "annotations": {"readOnlyHint": True},
+    "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
+        **{k: {"type": "string"} for k in ("source_name", "source_sha", "name", "description", "type", "body", "project_id", "topic", "facet")},
+        "quotes": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "string", "maxLength": 1000}}},
+        "required": ["source_name", "source_sha", "quotes", "name", "description", "type", "body", "topic", "facet"]}})
+next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"]["extracted_from"] = {
+    "type": "object", "description": "Provenance returned by prepare_fact: name, sha and spans with Unicode code-point start/end/text. Source and quotes are checked on new saves. Only proposed, non-replacing facts may use this field."}
+
+next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"]["embed"] = {
+    "type": "boolean", "description": "Explicit document embedding permission. Extracted proposals and revisions of embed:false predecessors must retain false."}
+
 # Revision preparation shares content validation and the existing protected remember writer.
 _revision_properties = {k: dict(next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"][k])
-                        for k in ("name", "description", "type", "body", "project_id", "source", "observed_at", "links", "search_aliases")}
+                        for k in ("name", "description", "type", "body", "project_id", "source", "observed_at", "links", "search_aliases", "embed")}
 _revision_properties["type"] = {"type": "string", "description": "Memory kind; any short single-line word"}
 _revision_properties.update({
     "predecessor": {"type": "string", "description": "Exact indexed memory name in project_id; omitted project_id means unscoped only"},
@@ -430,6 +443,11 @@ def _do_remember(db, args: dict) -> str:
                     store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False)
                 except Exception as exc:
                     return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
+                if rc.requires_local_only(db, args) and args.get("embed") is not False:
+                    return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
+                bad = rc.check_extraction(db, args)
+                if bad:
+                    return json.dumps(bad, ensure_ascii=False)
                 preview = lifecycle.prepare(db, name, args)
                 preview['write_issue'] = lifecycle.check_write(db, name, args, cur)
                 return json.dumps(preview, ensure_ascii=False)
@@ -465,6 +483,11 @@ def _do_remember(db, args: dict) -> str:
                            else (args.get("observed_at") or ("" if args.get("lifecycle") else time.strftime("%Y-%m-%d"))))
             stats: dict = {}
             if result in ("new", "updated"):
+                if rc.requires_local_only(db, args) and args.get("embed") is not False:
+                    return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
+                bad = rc.check_extraction(db, args)
+                if bad:
+                    return json.dumps(bad, ensure_ascii=False)
                 try:
                     rc.atomic_write(path, rc.render(name, args, verified_at), cur.get("sha"))
                 except FileExistsError:
@@ -613,6 +636,9 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
     if name == "memory_review":
         from brain import memoryreview
         return json.dumps(memoryreview.review(db, args), ensure_ascii=False)
+    if name == "prepare_fact":
+        from brain import remembercontract
+        return json.dumps(remembercontract.prepare_fact(db, args), ensure_ascii=False)
     if name == "prepare_revision":
         from brain import remembercontract
         return json.dumps(remembercontract.prepare_revision(db, args), ensure_ascii=False)
