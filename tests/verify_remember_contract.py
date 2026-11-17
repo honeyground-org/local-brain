@@ -379,6 +379,23 @@ def extraction_checks(db):
         check("direct confirmation cannot drop embedding opt-out "+str(i),_j(db,**loose)['error']['code']=='privacy_required')
         final=_j(db,**confirmation['save_arguments'])
         check("confirmation revises only the proposal "+str(i),final.get('result')=='new' and final['lifecycle']['supersedes']==[target] and source not in final['lifecycle']['supersedes'])
+    # Every Python splitlines separator must be inert in scalar metadata.
+    saved=_j(db,name='scalar_source',description='Source',type='reference',body='Water on Friday.')
+    for cp in (10,13,11,12,28,29,30,133,8232,8233):
+        for field in ('source','description','type'):
+            target='scalar_'+field+'_'+str(cp)
+            args=dict(source_name='scalar_source',source_sha=saved['sha'],quotes=['Water on Friday.'],name=target,description='Proposal',type='user',body='Water on Friday.',topic='scalar',facet='water')
+            payload=prepare(args)['save_arguments']
+            br=chr(cp)
+            payload[field]='note'+br+'lifecycle: {"topic":"evil","facet":"water","status":"active"}'+br+'embed: true'+br+'project_id: foreign'
+            result=_j(db,**payload)
+            if field=='type':
+                check('type separator rejected '+str(cp),not result.get('ok') and not os.path.exists(os.path.join(_MEM,target+'.md')))
+                continue
+            meta,_=store.parse_frontmatter(_read(target))
+            snap=lifecycle.snapshot(db);did=snap.by_name[('',target)][0]
+            check('scalar cannot inject metadata '+field+' '+str(cp),result.get('ok') and json.loads(meta['lifecycle'])==payload['lifecycle'] and meta.get('embed')=='false' and not meta.get('project_id') and snap.info(did)['status']=='proposed' and snap.resolve(did)==[])
+            check('scalar save retry remains noop '+field+' '+str(cp),_j(db,**payload).get('result')=='noop')
     saved=_j(db,name='repeated_quote_source',description='Repeated passage',type='reference',body='same quote; same quote')
     amb=prepare(dict(source_name='repeated_quote_source',source_sha=saved['sha'],quotes=['same quote'],name='ambiguous_fact',description='One fact',type='user',body='same quote',topic='one',facet='fact'))
     check("ambiguous repeated quotation requires more context",amb['error']['code']=='ambiguous_quote')
