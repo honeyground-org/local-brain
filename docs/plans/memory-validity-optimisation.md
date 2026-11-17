@@ -107,7 +107,9 @@ contradictions require host review. Unobserved conversations cannot be reconstru
 
 ## Related
 
-- [Implementation and release checks: PR #90](https://github.com/honeyground-org/local-brain/pull/90)
+- [Phase 2 implementation and release checks: PR #92](https://github.com/honeyground-org/local-brain/pull/92)
+
+- [Phase 1 implementation and release checks: PR #90](https://github.com/honeyground-org/local-brain/pull/90)
 
 - [Current facts and history](../../README.md#current-facts-and-change-history)
 - [Standing native-host comparison criterion](../../CONTRIBUTING.md#native-host-comparison-is-a-standing-release-criterion)
