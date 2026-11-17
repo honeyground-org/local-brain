@@ -337,6 +337,7 @@ def extraction_checks(db):
     import copy
     from brain import lifecycle, capabilities
     quotes=["The orchid needs water on Friday.","\uae08\uc694\uc77c\uc5d0 \ubb3c\uc744 \uc90d\ub2c8\ub2e4.","\u91d1\u66dc\u65e5\u306b\u6c34\u3092\u3084\u308b\u3002","\u0627\u0644\u0633\u0642\u064a \u064a\u0648\u0645 \u0627\u0644\u062c\u0645\u0639\u0629.","Le caf\u00e9 ouvre vendredi."]
+    quotes += ["Water" + chr(cp) + "on Friday." for cp in (0x2028, 0x2029, 0x85)]
     def prepare(args):
         return json.loads(server.call_tool(db,"prepare_fact",args,_measure=True))
     for i,quote in enumerate(quotes):
