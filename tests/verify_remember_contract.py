@@ -269,6 +269,70 @@ def revision_checks(db):
         check("empty revision page still reports current state", empty["revisions"]==[] and empty["current_names"]==["paged_11"] and not empty["revision_has_more"])
 
 
+def review_checks():
+    import sqlite3
+    from brain import lifecycle, memoryreview
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE docs(id INTEGER PRIMARY KEY,name TEXT,path TEXT,sha TEXT,source TEXT,kind TEXT,project_id TEXT,lifecycle TEXT)")
+    def add(name, meta=None, scope="household", kind="user"):
+        db.execute("INSERT INTO docs(name,path,sha,source,kind,project_id,lifecycle) VALUES(?,?,?,?,?,?,?)",
+                   (name, "/unopened/"+name, name, "memory", kind, scope, json.dumps(meta or {})))
+    def fact(topic, **kw):
+        return dict(topic=topic, facet="schedule", status="active", valid_from="2026-01-01", evidence=["confirmed"], **kw)
+    add("legacy")
+    add("current", fact("current"))
+    scheduled=fact("future");scheduled["valid_from"]="2027-01-01";add("scheduled", scheduled)
+    add("expired", fact("past", valid_to="2026-02-01"))
+    proposed=fact("proposal");proposed["status"]="proposed";add("proposal", proposed)
+    add("conflict_a", fact("conflict"));add("conflict_b", fact("conflict"))
+    add("broken", fact("broken",supersedes=["absent"]))
+    add("cycle_a", fact("cycle",supersedes=["cycle_b"]))
+    add("cycle_b", fact("cycle",supersedes=["cycle_a"]))
+    add("metadata_gap",dict(topic="gap",facet="schedule",status="active"),kind="")
+    add("invalid",dict(status="invalid",issue="bad metadata"))
+    add("other_private_name",scope="other")
+    add("unscoped",scope="")
+    for n, topic in enumerate(("\uadfc\ubb34", "\u65e5\u7a0b", "\u0645\u0648\u0639\u062f", "caf\u00e9", "\u092f\u094b\u091c\u0928\u093e")):
+        add("language_"+str(n), fact(topic))
+    db.commit()
+    statements=[]
+    db.set_trace_callback(statements.append)
+    writes={sqlite3.SQLITE_INSERT,sqlite3.SQLITE_UPDATE,sqlite3.SQLITE_DELETE,sqlite3.SQLITE_CREATE_TABLE,sqlite3.SQLITE_DROP_TABLE}
+    db.set_authorizer(lambda action,*unused: sqlite3.SQLITE_DENY if action in writes else sqlite3.SQLITE_OK)
+    args=dict(scope="household",as_of="2026-11-17",limit=100)
+    out=json.loads(server.call_tool(db,"memory_review",args))
+    found={r['name']:r for r in out['items']}
+    expected={"legacy","proposal","conflict_a","conflict_b","broken","cycle_a","cycle_b","metadata_gap","invalid"}
+    check("review finds every labelled issue and no healthy/scheduled/expired false flag",set(found)==expected,found.keys())
+    check("review distinguishes missing evidence, dates and category",set(found['metadata_gap']['reasons'])=={'missing_kind','missing_recorded_evidence','missing_effective_start'})
+    check("review detects cyclic history independently of superseded status",all('revision_cycle' in found[n]['reasons'] for n in ('cycle_a','cycle_b')))
+    check("review scope excludes other scopes even in counts",out['counts']['documents']==17 and 'other_private_name' not in json.dumps(out))
+    check("review uses metadata only and changes no rows",db.total_changes==19 and not any('body' in q.lower() for q in statements),statements)
+    all_rows=json.loads(server.call_tool(db,"memory_review",dict(args,only_attention=False)))
+    check("all-record mode retains healthy metadata",len(all_rows['items'])==17)
+    check("healthy Unicode facts stay current",all(r["current"] is True and not r["reasons"] for r in all_rows["items"] if r["name"].startswith("language_")) and out["counts"]["current"]==7)
+    first=memoryreview.review(db,dict(args,limit=2))
+    page=[]
+    for offset in range(0,first['total'],2):
+        r=memoryreview.review(db,dict(args,offset=offset,limit=2,as_of=first['as_of'],expected_snapshot=first['snapshot']))
+        page.extend(r['items'])
+    check("snapshot pages exactly reproduce full issue inventory",page==out['items'])
+    unscoped=memoryreview.review(db,dict(args,scope=""))
+    check("empty scope selects only unscoped records",unscoped['counts']['documents']==1 and unscoped['items'][0]['name']=='unscoped')
+    for bad in ({'offset':1},{'limit':True},{'scope':None},{'only_attention':1},{'as_of':'not-a-date'},{'unexpected':1}):
+        check("review rejects invalid arguments "+str(bad),memoryreview.review(db,bad).get('error',{}).get('code')=='invalid_argument')
+    db.set_authorizer(lambda *unused: sqlite3.SQLITE_OK)
+    db.execute("UPDATE docs SET kind='preference' WHERE name='legacy'")
+    changed=memoryreview.review(db,dict(args,as_of=first['as_of'],expected_snapshot=first['snapshot']))
+    check("changed metadata rejects stale pagination",changed.get('error',{}).get('code')=='snapshot_changed')
+    fresh=memoryreview.review(db,args)
+    check("restarting observes the category change",fresh['snapshot']!=first['snapshot'] and fresh['counts']['kinds']['preference']==1)
+    flags=__import__('brain.capabilities',fromlist=['tool_flags']).tool_flags
+    check("review capability follows declaration",flags(server.TOOLS)['memory_review']['available'] and not flags([t for t in server.TOOLS if t['name']!='memory_review'])['memory_review']['available'])
+    db.close()
+
+
 def main() -> int:
     db = _build()
     base = dict(description="harbour ledger rule", type="lesson", body="The ledger closes on friday.")
@@ -375,6 +439,7 @@ def main() -> int:
         _cal.calibrate, _vec.recalibrate_if_free = real_cal, real_gate
 
     revision_checks(db)
+    review_checks()
     print("\n" + "=" * 72)
     if FAILS:
         print("❌ failed: %d — %s" % (len(FAILS), " · ".join(FAILS)))
