@@ -58,7 +58,9 @@ source version and quote spans again before new writes. It persists provenance w
 mixed original; successful identical retries remain noops after later source changes. Old retry
 hashes omit absent provenance and remain compatible.
 
-The proposal is not a currently applicable fact. A reviewed confirmation uses `prepare_revision`
+Extracted proposals are always `embed:false`. Revision preparation carries that opt-out forward,
+and the writer rejects a new revision that drops it. This avoids exporting derived quotations merely
+because the target memory source permits embeddings. The proposal is not a currently applicable fact. A reviewed confirmation uses `prepare_revision`
 against the proposal, with explicit dates, reasons and evidence. It never retires the entire mixed
 original. Quotes use Unicode code-point offsets into the parsed, trimmed source body. Repeated
 passages require more context. One call handles one proposed fact, not an atomic multi-fact migration.

@@ -1121,6 +1121,11 @@ lifecycle evidence. Source scope, SHA and quote spans are checked again before a
 source returns `source_changed`; a changed related fact snapshot returns `fact_changed`. Reread and
 prepare again. An identical already successful save remains a noop even if its source later changes.
 
+Extracted proposals are saved with `embed:false`, so copying a passage cannot silently send it to
+an embedding provider. New revisions of an `embed:false` predecessor must retain that setting;
+`prepare_revision` supplies it and direct writes that omit it are rejected. This does not control
+what the calling host already sees through the authorised tool session.
+
 A proposed extraction is excluded from current recall. Confirm it with `prepare_revision` using the
 **proposal** as predecessor, a new name, explicit effective date, reason and confirmation evidence.
 Do not carry `extracted_from` into an active save: that field is only for non-replacing proposals.

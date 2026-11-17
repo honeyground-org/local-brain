@@ -353,6 +353,8 @@ def extraction_checks(db):
         check("extraction is proposed and never supersedes its mixed source "+str(i),payload['lifecycle']['status']=='proposed' and not payload['lifecycle'].get('supersedes'))
         first=_j(db,**payload);retry=_j(db,**payload)
         check("save and retry retain provenance "+str(i),first.get('result')=='new' and retry.get('result')=='noop' and first.get('extracted_from')==payload['extracted_from'])
+        from brain import privacy
+        check("extracted proposals never enter embedding "+str(i),privacy.is_local_only(os.path.join(_MEM,target+".md")))
         meta,_=store.parse_frontmatter(_read(target))
         check("provenance survives in the file "+str(i),json.loads(meta['extracted_from'])==payload['extracted_from'])
         snap=lifecycle.snapshot(db);did=snap.by_name[(scope,target)][0]
@@ -371,6 +373,9 @@ def extraction_checks(db):
         check("successful old request remains a noop after source edit "+str(i),_j(db,**payload).get('result')=='noop')
         # Confirm only the extracted proposal, never the mixed original.
         confirmation=json.loads(server.call_tool(db,'prepare_revision',dict(predecessor=target,name=target+'_confirmed',description='Confirmed schedule',type='user',body=quote,project_id=scope,status='active',valid_from='2026-11-17',change_reason='Explicit confirmation',evidence=['The source owner confirmed this fact']),_measure=True))
+        check("confirmation preserves embedding opt-out "+str(i),confirmation['save_arguments'].get('embed') is False)
+        loose=copy.deepcopy(confirmation['save_arguments']);loose.pop('embed',None)
+        check("direct confirmation cannot drop embedding opt-out "+str(i),_j(db,**loose)['error']['code']=='privacy_required')
         final=_j(db,**confirmation['save_arguments'])
         check("confirmation revises only the proposal "+str(i),final.get('result')=='new' and final['lifecycle']['supersedes']==[target] and source not in final['lifecycle']['supersedes'])
     saved=_j(db,name='repeated_quote_source',description='Repeated passage',type='reference',body='same quote; same quote')

@@ -307,9 +307,12 @@ TOOLS.append({"name": "prepare_fact",
 next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"]["extracted_from"] = {
     "type": "object", "description": "Provenance returned by prepare_fact: name, sha and spans with Unicode code-point start/end/text. Source and quotes are checked on new saves. Only proposed, non-replacing facts may use this field."}
 
+next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"]["embed"] = {
+    "type": "boolean", "description": "Explicit document embedding permission. Extracted proposals and revisions of embed:false predecessors must retain false."}
+
 # Revision preparation shares content validation and the existing protected remember writer.
 _revision_properties = {k: dict(next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"][k])
-                        for k in ("name", "description", "type", "body", "project_id", "source", "observed_at", "links", "search_aliases")}
+                        for k in ("name", "description", "type", "body", "project_id", "source", "observed_at", "links", "search_aliases", "embed")}
 _revision_properties["type"] = {"type": "string", "description": "Memory kind; any short single-line word"}
 _revision_properties.update({
     "predecessor": {"type": "string", "description": "Exact indexed memory name in project_id; omitted project_id means unscoped only"},
@@ -440,6 +443,8 @@ def _do_remember(db, args: dict) -> str:
                     store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False)
                 except Exception as exc:
                     return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
+                if rc.requires_local_only(db, args) and args.get("embed") is not False:
+                    return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
                 bad = rc.check_extraction(db, args)
                 if bad:
                     return json.dumps(bad, ensure_ascii=False)
@@ -478,6 +483,8 @@ def _do_remember(db, args: dict) -> str:
                            else (args.get("observed_at") or ("" if args.get("lifecycle") else time.strftime("%Y-%m-%d"))))
             stats: dict = {}
             if result in ("new", "updated"):
+                if rc.requires_local_only(db, args) and args.get("embed") is not False:
+                    return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
                 bad = rc.check_extraction(db, args)
                 if bad:
                     return json.dumps(bad, ensure_ascii=False)
