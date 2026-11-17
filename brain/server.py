@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.2.2"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.3.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -285,6 +285,17 @@ for _tool in TOOLS:
             "Do not translate identifiers or infer a replacement from semantic similarity. Stored does not mean verified current: inspect validity in the acknowledgement.")
 TOOLS.append({"name": "memory_history", "description": "Read current state, previous revisions and change evidence for a memory, including everyday life and work. Old names also resolve to the current topic history. document_history preserves observed file edits, with diffs; observation time is not a fact validity date.",
               "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "scope": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "required": ["name"]}})
+
+TOOLS.append({"name": "memory_review",
+    "description": "Read-only inventory of indexed memory validity and classification gaps. Reports untracked notes, conflicts, proposals, broken/cyclic revision links and missing metadata; never certifies truth or changes memories. Counts cover the selected scope, bodies are not returned. Read sources before using prepare_revision. For subsequent pages reuse as_of and snapshot as expected_snapshot; changed metadata requires restarting.",
+    "annotations": {"readOnlyHint": True},
+    "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
+        "scope": {"type": "string", "description": "Exact scope; omitted means all scopes, empty means unscoped only"},
+        "as_of": {"type": "string", "description": "Effective time, frozen and returned on the first page"},
+        "offset": {"type": "integer", "minimum": 0, "default": 0},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25},
+        "only_attention": {"type": "boolean", "default": True},
+        "expected_snapshot": {"type": "string", "description": "snapshot from first page; required with as_of for continuation"}}}})
 
 # Revision preparation shares content validation and the existing protected remember writer.
 _revision_properties = {k: dict(next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"][k])
@@ -599,6 +610,9 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
                 reordered=reordered, embed_cached=cached, t0=t0, shown=SHOWN,
                 scope=args.get("scope") or None, scope_applied=bool(args.get("scope"))), ensure_ascii=False)
         return head + _fmt_recall(rows) + more + hint
+    if name == "memory_review":
+        from brain import memoryreview
+        return json.dumps(memoryreview.review(db, args), ensure_ascii=False)
     if name == "prepare_revision":
         from brain import remembercontract
         return json.dumps(remembercontract.prepare_revision(db, args), ensure_ascii=False)

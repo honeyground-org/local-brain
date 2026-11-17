@@ -1,0 +1,91 @@
+# Memory validity and classification optimisation
+
+> Status: Phase 1 implemented; release verification in progress — 2026-11-17
+> Owner: Maintainers
+
+## Goal
+
+Long-term memory must distinguish what is currently applicable, what changed, what is only proposed,
+and what has not been verified. Work and everyday memories share the same controls in every language.
+A saved or recently mentioned statement is not automatically a verified current fact.
+
+## Decisions
+
+Keep semantic judgement in the calling host and deterministic validity checks in Brain. Keep one
+independently changing fact per tracked record. Reuse exact scope/topic/facet identifiers across
+languages; neither translated labels nor embedding similarity authorise merging facts. Memory kinds
+remain open vocabulary, and Observatory lenses remain interpretations rather than factual validity.
+Do not bulk rewrite, split, certify or delete existing private memories.
+
+## Ordered delivery
+
+| Phase | Deliverable | Completion evidence |
+|---|---|---|
+| 1 — this change | Read-only `memory_review` inventory of validity gaps, explicit conflicts, proposals, invalid/cyclic links and classification coverage | Labelled controls, no false flags for complete active facts or scheduled/expired records, exact scope, stable pagination, no writes/body reads/remote inference; installed API check |
+| 2 — follow-on | Host-assisted extraction of independent facts from mixed notes, with exact source passages and explicit uncertainty | Original notes retained; no partial correction retires an entire mixed record; reviewed proposed facts trace back to evidence |
+| 3 — follow-on | Reviewed identity reuse across languages and explicit disambiguation of similar subjects | Multilingual same-fact and different-fact controls; no semantic or spelling-based automatic merge; correction history retained |
+| 4 — follow-on | Paired native-host outcome study and targeted retrieval improvement | Same model, permissions, normal native memory and input material within each host; report losses and gains, current/history accuracy, time, usage and failures |
+
+Phases 2–4 are not delivered by the phase 1 inventory. Stage their implementation using what the
+inventory and paired studies actually reveal. A diagnostic feature is not evidence of better answers.
+
+## Phase 1 API contract
+
+`memory_review` reads the current SQLite index without refreshing source files, contacting serving
+databases, reading full bodies, invoking embeddings, or saving memories. It reports the indexed state,
+not a guarantee that source files have not changed since indexing.
+
+- Omitted scope includes all indexed scopes. An explicit scope matches exactly; empty means unscoped
+  only. Counts and returned names must not reveal excluded scopes.
+- The first request freezes `as_of`. Subsequent pages require that value and `expected_snapshot` from
+  the first response. Changed indexed metadata returns `snapshot_changed`; the caller restarts.
+- `only_attention=true` is the default. `false` includes healthy metadata too. Counts always describe
+  the selected scope, independently of the current page. `limit` is 1–100.
+- Reasons distinguish untracked validity, pending confirmation, conflicting claims, invalid links,
+  cycles, missing recorded evidence, missing effective start and missing kind. Missing metadata means
+  review may be useful, not that the fact is false. Evidence presence is not source credibility.
+- Exact recorded kinds and sources are counted, not translated, case-folded or silently merged.
+- Items carry source paths and hashes, stable identity fields and bounded current/conflict references.
+  Read the source or `memory_history` before making a judgement. Continue with existing
+  `prepare_revision` / guarded `remember` only after confirming the change and its effective date.
+
+## Measurement and acceptance
+
+Use fixed-time, isolated labelled fixtures spanning current, future, expired, proposed, conflicting,
+untracked, broken and cyclic records; include several scripts and exact scope controls. Check issue
+recall and false flags separately. Verify page union equals an unpaged response; metadata changes must
+invalidate the token. An SQL authorizer rejects writes and traced SQL must contain no body reads.
+Check existing revision/save and capability contracts in the clean room on supported platforms.
+
+Measure metadata inventory latency and output size separately from retrieval or model quality. Record
+corpus size, code revision, repetitions and limits. A private read-only snapshot can describe existing
+coverage, but must not publish memory names, bodies or paths. No new work enters the automatic recall
+hot path; no timers or background model calls are added.
+
+For user-level claims use `tests/audit/measure_hosts.py` with native Codex and native Claude baselines,
+normal memory preserved, frozen inputs and independently checked traces. Until that study runs,
+answer-quality and work-efficiency benefit remain unmeasured. Synthetic controls validate the tool,
+not general multilingual comprehension or native-host superiority.
+
+## Implementation checks (2026-11-17)
+
+The labelled fixture covers 17 records in one scope: all 9 review candidates are returned, with no
+false flags on the 8 complete active, scheduled or expired records. Separate unscoped/other-scope
+controls stay excluded. Five scripts remain current without language-specific parsing. SQL write
+authorisation is denied during the request; traced queries read no bodies. Targeted clean-room
+revision, capability, English-only and code-generation checks pass. This is deterministic fixture
+coverage, not a real-host answer-quality result.
+
+## Rollback and limitations
+
+Remove the additive tool declaration/module and capability flag, or revert this change. No data
+migration is needed. Metadata scans and explicit chain resolution still cost work as an index grows;
+this is an on-demand review, not a per-prompt operation. Legacy topic mixtures and semantic
+contradictions require host review. Unobserved conversations cannot be reconstructed.
+
+## Related
+
+- [Current facts and history](../../README.md#current-facts-and-change-history)
+- [Standing native-host comparison criterion](../../CONTRIBUTING.md#native-host-comparison-is-a-standing-release-criterion)
+- [Roadmap](../ROADMAP.md)
+- Personal wiki companion (vault-relative): `01 Projects/local-brain/Memory validity optimisation.md`

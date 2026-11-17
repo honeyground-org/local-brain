@@ -28,7 +28,13 @@ the flat memory index plus `grep`, and improve on each person's own notes.
 | Silence is not success | A layer that stops working must say so in `brain status`, not fall quiet. |
 | CI costs nothing | Every check runs on free runners and no step calls a paid service; `verify_pr_report` enforces it. |
 
-## Where it stands (2026-10-12)
+## Current optimisation work (2026-11-17)
+
+[Memory validity and classification plan](plans/memory-validity-optimisation.md): phase 1 adds a
+read-only review inventory. Later phases cover evidence-led fact extraction, reviewed multilingual
+identity reuse and paired native-host outcome measurements. Those later phases are not complete.
+
+## Earlier baseline (2026-10-12)
 
 **Retrieval**
 - Recall attaches memories as you type, above a threshold measured on your own corpus.

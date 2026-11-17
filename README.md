@@ -121,7 +121,7 @@ flowchart LR
   learned from your own tool history (`brain rules --discover`).
 - **When the agent asks.** Twelve MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
   `brain_suggest` · `brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view` ·
-  `memory_history` · `brain_capabilities` (what this brain supports, read live — a client checks it once after connecting).
+  `memory_history` · `memory_review` · `brain_capabilities` (what this brain supports, read live — a client checks it once after connecting).
 
 ## Personal memory and performance
 
@@ -1070,6 +1070,27 @@ proposal issue ──► pull request ──► automatic checks ──► PR re
 
 Apache License 2.0 — the full text is in [LICENSE](LICENSE). Use it, change it, ship it
 inside something commercial; keep the notice and say where it came from.
+
+### Review long-term memory validity
+
+Server 2.3 adds `memory_review`, a read-only inventory before making corrections:
+
+```json
+{"name":"memory_review","arguments":{"scope":"household","limit":25}}
+```
+
+It reports indexed untracked records, proposals, conflicts, broken/cyclic revision links and missing
+kind/evidence/effective-date metadata. Counts show exact memory kinds, sources and computed states;
+missing metadata is not a verdict that a fact is false. No memory is rewritten or certified, no
+source/index refresh or embedding call is made, and bodies are not returned. Read sources and
+`memory_history` before using `prepare_revision` and guarded `remember`.
+
+Omit `scope` for all scopes; an empty string selects only unscoped records. Set `only_attention=false`
+for healthy metadata too. Continue pages using the first response's `as_of` and `snapshot` as
+`expected_snapshot`; changed indexed metadata returns `snapshot_changed`, requiring a restart.
+The capability is `tools.memory_review.available`. Reconnect a host that caches the tool list.
+See the [phased optimisation plan](docs/plans/memory-validity-optimisation.md). This diagnostic does
+not yet establish improved answer quality against native Codex or Claude.
 
 ### Current facts and change history
 

@@ -49,7 +49,9 @@ def tool_flags(tools: List[dict]) -> Dict[str, Any]:
     rc, rm, fb, an = _props(tools, "recall"), _props(tools, "remember"), _props(tools, "brain_feedback"), \
         _props(tools, "brain_analyse")
     signals = ((fb.get("signal") or {}).get("enum") if isinstance(fb.get("signal"), dict) else None) or []
+    review = _props(tools, "memory_review")
     return {
+        "memory_review": {"available": bool(review), "paginated": {"offset", "limit", "expected_snapshot", "as_of"} <= set(review), "scope": "scope" in review},
         "recall": {
             "formats": _formats(rc),
             "default_format": (rc.get("format") or {}).get("default", "text"),
@@ -97,6 +99,8 @@ def unsupported(flags: Dict[str, Any]) -> List[str]:
     """The explicit list a client reads first — every entry is a flag that is false, nothing else."""
     out: List[str] = []
     rc, rm = flags["recall"], flags["remember"]
+    if not flags.get("memory_review", {}).get("available"):
+        out.append("memory_review")
     if "json" not in rc["formats"]:
         out.append("recall.format=json")
     for k in ("scope", "request_id", "budget_ms"):
