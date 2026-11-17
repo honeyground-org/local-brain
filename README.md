@@ -121,7 +121,7 @@ flowchart LR
   learned from your own tool history (`brain rules --discover`).
 - **When the agent asks.** Twelve MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
   `brain_suggest` · `brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view` ·
-  `memory_history` · `memory_review` · `brain_capabilities` (what this brain supports, read live — a client checks it once after connecting).
+  `memory_history` · `memory_review` · `prepare_fact` · `brain_capabilities` (what this brain supports, read live — a client checks it once after connecting).
 
 ## Personal memory and performance
 
@@ -1091,6 +1091,47 @@ for healthy metadata too. Continue pages using the first response's `as_of` and 
 The capability is `tools.memory_review.available`. Reconnect a host that caches the tool list.
 See the [phased optimisation plan](docs/plans/memory-validity-optimisation.md). This diagnostic does
 not yet establish improved answer quality against native Codex or Claude.
+
+### Extract proposed facts from mixed notes
+
+Server 2.4 adds `prepare_fact`. The calling host reads a mixed source, identifies **one independent
+claim**, and supplies its exact source SHA and unique verbatim body passages. Brain checks provenance;
+it does not extract claims with a model or decide whether the passages logically support them.
+
+```json
+{"name":"prepare_fact","arguments":{
+  "source_name":"household_notes","source_sha":"SHA_FROM_RECALL",
+  "name":"orchid_watering_proposal","description":"Proposed orchid watering schedule",
+  "type":"user","body":"The orchid is watered on Fridays.",
+  "project_id":"household","topic":"orchid","facet":"watering_schedule",
+  "quotes":["The orchid is watered on Fridays."]
+}}
+```
+
+Replace the SHA placeholder with the actual 40-character source version. Omitted `project_id` means
+unscoped only. Quotes must occur uniquely in the parsed, outer-whitespace-trimmed Markdown body;
+include context when a passage repeats. Matching is exact Unicode text, without translation or
+normalisation. At most ten quotes of 1,000 characters each are accepted.
+
+Preparation writes nothing, performs no indexing or model calls, and returns `save_arguments` for
+`remember`. Review the claim and quotations before saving. The request records a `proposed` lifecycle,
+links the source without superseding it, and includes `extracted_from: {name,sha,spans}`; span offsets
+count Unicode code points in that trimmed body. Provenance is retained in frontmatter and quoted
+lifecycle evidence. Source scope, SHA and quote spans are checked again before a new save. A changed
+source returns `source_changed`; a changed related fact snapshot returns `fact_changed`. Reread and
+prepare again. An identical already successful save remains a noop even if its source later changes.
+
+A proposed extraction is excluded from current recall. Confirm it with `prepare_revision` using the
+**proposal** as predecessor, a new name, explicit effective date, reason and confirmation evidence.
+Do not carry `extracted_from` into an active save: that field is only for non-replacing proposals.
+The mixed original stays intact and searchable; this does not automatically suppress its extracted
+passage or classify all its other facts. Save multiple proposals separately, retaining each successful
+request for retries; there is no batch transaction. Direct filesystem editors do not share the writer
+lock, so a final source check is not an atomic transaction across arbitrary external file edits.
+
+Capability flags: `tools.remember.prepare_fact` and `tools.remember.extracted_from`. This feature
+checks source attribution, not factual truth, semantic atomicity, completeness or source credibility.
+Existing protected writes and retry hashes remain compatible. Native-host answer benefit is unmeasured.
 
 ### Current facts and change history
 

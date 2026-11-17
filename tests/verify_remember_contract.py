@@ -333,6 +333,54 @@ def review_checks():
     db.close()
 
 
+def extraction_checks(db):
+    import copy
+    from brain import lifecycle, capabilities
+    quotes=["The orchid needs water on Friday.","\uae08\uc694\uc77c\uc5d0 \ubb3c\uc744 \uc90d\ub2c8\ub2e4.","\u91d1\u66dc\u65e5\u306b\u6c34\u3092\u3084\u308b\u3002","\u0627\u0644\u0633\u0642\u064a \u064a\u0648\u0645 \u0627\u0644\u062c\u0645\u0639\u0629.","Le caf\u00e9 ouvre vendredi."]
+    def prepare(args):
+        return json.loads(server.call_tool(db,"prepare_fact",args,_measure=True))
+    for i,quote in enumerate(quotes):
+        source="mixed_source_"+str(i);target="extracted_fact_"+str(i)
+        scope="extraction_"+str(i)
+        saved=_j(db,name=source,description="Mixed source",type="reference",body=quote+"\nThe address remains unchanged.",project_id=scope)
+        original=_read(source)
+        args=dict(source_name=source,source_sha=saved['sha'],quotes=[quote],name=target,description="One proposed schedule",type="user",body=quote,project_id=scope,topic="orchid",facet="watering")
+        before=db.total_changes
+        result=prepare(args)
+        check("extraction preparation is read-only "+str(i),result.get('ok') and db.total_changes==before and not os.path.exists(os.path.join(_MEM,target+'.md')))
+        payload=result['save_arguments'];span=payload['extracted_from']['spans'][0]
+        check("exact Unicode source span "+str(i),span==dict(start=0,end=len(quote),text=quote))
+        check("extraction is proposed and never supersedes its mixed source "+str(i),payload['lifecycle']['status']=='proposed' and not payload['lifecycle'].get('supersedes'))
+        first=_j(db,**payload);retry=_j(db,**payload)
+        check("save and retry retain provenance "+str(i),first.get('result')=='new' and retry.get('result')=='noop' and first.get('extracted_from')==payload['extracted_from'])
+        meta,_=store.parse_frontmatter(_read(target))
+        check("provenance survives in the file "+str(i),json.loads(meta['extracted_from'])==payload['extracted_from'])
+        snap=lifecycle.snapshot(db);did=snap.by_name[(scope,target)][0]
+        check("proposal excluded from current resolution "+str(i),snap.resolve(did)==[] and snap.info(did)['status']=='proposed')
+        check("mixed original remains byte-identical "+str(i),_read(source)==original)
+        check("wrong quotes are refused "+str(i),prepare(dict(args,name=target+'_bad',quotes=['invented quote']))['error']['code']=='quote_mismatch')
+        check("scope cannot be borrowed "+str(i),prepare(dict(args,name=target+'_other',project_id='unrelated'))['error']['code']=='source_unavailable')
+        direct=copy.deepcopy(payload);direct['name']=target+'_active';direct['lifecycle']['status']='active'
+        check("direct extraction cannot bypass proposal status "+str(i),_j(db,**direct)['error']['code']=='invalid_argument')
+        direct=prepare(dict(args,name=target+'_tampered'))['save_arguments'];direct['extracted_from']['spans'][0]['start']+=1;direct['extracted_from']['spans'][0]['end']+=1
+        check("save validates the span again "+str(i),_j(db,**direct)['error']['code']=='quote_mismatch')
+        waiting=prepare(dict(args,name=target+'_waiting'))['save_arguments']
+        with open(os.path.join(_MEM,source+'.md'),'a',encoding='utf-8') as f:f.write('\nNew source information.\n')
+        check("stale source rejected on preparation "+str(i),prepare(dict(args,name=target+'_stale'))['error']['code']=='source_changed')
+        check("stale source rejected on save "+str(i),_j(db,**waiting)['error']['code']=='source_changed' and not os.path.exists(os.path.join(_MEM,target+'_waiting.md')))
+        check("successful old request remains a noop after source edit "+str(i),_j(db,**payload).get('result')=='noop')
+        # Confirm only the extracted proposal, never the mixed original.
+        confirmation=json.loads(server.call_tool(db,'prepare_revision',dict(predecessor=target,name=target+'_confirmed',description='Confirmed schedule',type='user',body=quote,project_id=scope,status='active',valid_from='2026-11-17',change_reason='Explicit confirmation',evidence=['The source owner confirmed this fact']),_measure=True))
+        final=_j(db,**confirmation['save_arguments'])
+        check("confirmation revises only the proposal "+str(i),final.get('result')=='new' and final['lifecycle']['supersedes']==[target] and source not in final['lifecycle']['supersedes'])
+    saved=_j(db,name='repeated_quote_source',description='Repeated passage',type='reference',body='same quote; same quote')
+    amb=prepare(dict(source_name='repeated_quote_source',source_sha=saved['sha'],quotes=['same quote'],name='ambiguous_fact',description='One fact',type='user',body='same quote',topic='one',facet='fact'))
+    check("ambiguous repeated quotation requires more context",amb['error']['code']=='ambiguous_quote')
+    before=capabilities.tool_flags(server.TOOLS)
+    without=capabilities.tool_flags([t for t in server.TOOLS if t['name']!='prepare_fact'])
+    check("extraction capability follows its declaration",before['remember']['prepare_fact'] and not without['remember']['prepare_fact'])
+
+
 def main() -> int:
     db = _build()
     base = dict(description="harbour ledger rule", type="lesson", body="The ledger closes on friday.")
@@ -440,6 +488,7 @@ def main() -> int:
 
     revision_checks(db)
     review_checks()
+    extraction_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
         print("❌ failed: %d — %s" % (len(FAILS), " · ".join(FAILS)))
