@@ -312,6 +312,14 @@ def decide(cur: Dict[str, Any], args: dict) -> Tuple[str, Optional[Dict[str, Any
     return "conflict", dict(detail, reason="name_taken")
 
 
+def frontmatter_json(value, **kwargs) -> str:
+    """Keep JSON on one physical line for the frontmatter splitlines reader."""
+    text = json.dumps(value, ensure_ascii=False, **kwargs)
+    for char in ("\u0085", "\u2028", "\u2029"):
+        text = text.replace(char, "\\u%04x" % ord(char))
+    return text
+
+
 def render(name: str, args: dict, verified_at: str) -> str:
     """The file — the legacy shape with the contract's fields added in the frontmatter."""
     lines = ["---", "name: %s" % name, "description: %s" % args["description"].replace("\n", " "),
@@ -319,9 +327,9 @@ def render(name: str, args: dict, verified_at: str) -> str:
     if args.get("extracted_from") or "embed" in args:
         lines.insert(1, "embed: " + ("false" if args.get("extracted_from") or args["embed"] is False else "true"))
     if args.get("extracted_from"):
-        lines.append("extracted_from: " + json.dumps(args["extracted_from"], ensure_ascii=False, sort_keys=True))
+        lines.append("extracted_from: " + frontmatter_json(args["extracted_from"], sort_keys=True))
     if args.get("lifecycle"):
-        lines.append("lifecycle: " + json.dumps(args["lifecycle"], ensure_ascii=False, sort_keys=True))
+        lines.append("lifecycle: " + frontmatter_json(args["lifecycle"], sort_keys=True))
     if args.get("idempotency_key"):
         lines.append("idempotency_key: %s" % args["idempotency_key"])
         lines.append("payload_sha: %s" % payload_sha(args))
@@ -331,7 +339,7 @@ def render(name: str, args: dict, verified_at: str) -> str:
         lines.append("source: %s" % args["source"].replace("\n", " "))
     al = aliases(args)
     if al:
-        lines.append("search_aliases: " + json.dumps(al, ensure_ascii=False))
+        lines.append("search_aliases: " + frontmatter_json(al))
     lines += ["metadata:", "  node_type: memory", "  type: %s" % args["type"], "---", ""]
     links = [l for l in (args.get("links") or []) if isinstance(l, str)]
     link_line = ("\n\nrelated: " + " · ".join("[[%s]]" % l for l in links)) if links else ""
