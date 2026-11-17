@@ -83,7 +83,7 @@ def validate(args: dict) -> Optional[Dict[str, Any]]:
     for f in ("description", "type", "body"):
         if not isinstance(args.get(f), str) or not args.get(f, "").strip():
             return error("invalid_argument", "%s is required" % f, {"field": f})
-    if any(ord(c) < 32 for c in args["type"]):
+    if any(ord(c) < 32 or c in "\u0085\u2028\u2029" for c in args["type"]):
         return error("invalid_argument", "type must be a single-line value")
     for field in ("links", "search_aliases"):
         values = args.get(field, [])
@@ -320,9 +320,14 @@ def frontmatter_json(value, **kwargs) -> str:
     return text
 
 
+def frontmatter_scalar(value: str) -> str:
+    """Flatten every splitlines separator without changing other scalar bytes."""
+    return value.translate({ord(c): " " for c in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"})
+
+
 def render(name: str, args: dict, verified_at: str) -> str:
     """The file — the legacy shape with the contract's fields added in the frontmatter."""
-    lines = ["---", "name: %s" % name, "description: %s" % args["description"].replace("\n", " "),
+    lines = ["---", "name: %s" % name, "description: %s" % frontmatter_scalar(args["description"]),
              "verified_at: %s" % verified_at]
     if args.get("extracted_from") or "embed" in args:
         lines.insert(1, "embed: " + ("false" if args.get("extracted_from") or args["embed"] is False else "true"))
@@ -336,7 +341,7 @@ def render(name: str, args: dict, verified_at: str) -> str:
     if args.get("project_id"):
         lines.append("project_id: %s" % args["project_id"].strip())
     if args.get("source"):
-        lines.append("source: %s" % args["source"].replace("\n", " "))
+        lines.append("source: %s" % frontmatter_scalar(args["source"]))
     al = aliases(args)
     if al:
         lines.append("search_aliases: " + frontmatter_json(al))
