@@ -1,6 +1,6 @@
 # Memory validity and classification optimisation
 
-> Status: Phase 1 implemented; release verification in progress — 2026-11-17
+> Status: Phase 1 implemented — 2026-11-17
 > Owner: Maintainers
 
 ## Goal
@@ -84,6 +84,8 @@ this is an on-demand review, not a per-prompt operation. Legacy topic mixtures a
 contradictions require host review. Unobserved conversations cannot be reconstructed.
 
 ## Related
+
+- [Implementation and release checks: PR #90](https://github.com/honeyground-org/local-brain/pull/90)
 
 - [Current facts and history](../../README.md#current-facts-and-change-history)
 - [Standing native-host comparison criterion](../../CONTRIBUTING.md#native-host-comparison-is-a-standing-release-criterion)
