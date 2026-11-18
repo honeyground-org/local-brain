@@ -79,6 +79,78 @@ def verify_semantic_route():
     print('PASS: cold evidence stays pending; warm evidence uses the actual automatic semantic route')
 
 
+def verify_rejected_observations(check_collection=True, modes=('query','terms')):
+    import array, sqlite3
+    from brain import hosts, observe, recalljson, search, server, tail
+    hosts.pin('claude-code')
+    def user(text):return dict(type='user',message=dict(role='user',content=text))
+    def tool(tid,name,args):return dict(type='assistant',message=dict(content=[dict(type='tool_use',id=tid,name=name,input=args)]))
+    def result(tid,text):return dict(type='user',message=dict(content=[dict(type='tool_result',tool_use_id=tid,content=text)]))
+    bad_requests = [dict(query='cached query',terms=['term'+str(i) for i in range(101)]),
+                    dict(query='cached query',terms='words'), dict(query='cached query',terms={'x':1}),
+                    dict(query='x'*24001), dict(query=' '), {}, dict(query='cached query',k=False),
+                    dict(query='cached query',format='invalid'), dict(query='cached query',scope='')]
+    if check_collection:
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db);personal.ensure(db)
+        db.execute("INSERT INTO docs(path,name,source,sha,body) VALUES('/valid','valid','memory','sha','orchid')");db.commit()
+        with patch.object(tail,'_db',return_value=db),patch.object(tail,'_close_db'),patch.object(observe,'write'):
+            for i,args in enumerate(bad_requests):
+                answer=server.call_tool(db,'recall',args)
+                assert json.loads(answer)['error']['code']=='invalid_argument'
+                rec={'session_id':'rejected'+str(i)};trace=tail._blank_tail()
+                for event in (user('request'),tool('bad','mcp__brain__recall',args),result('bad',answer),
+                              tool('read','Read',{'file_path':'/valid'}),result('read','orchid'),user('next real turn')):
+                    tail._apply(json.dumps(event),trace,rec)
+                assert db.execute('SELECT COUNT(*) FROM personal_events').fetchone()[0]==0, 'rejected recall entered observations'
+                if 'terms' in args or not args.get('query','').strip() or len(args.get('query',''))>24000:
+                    personal.record(db,args.get('query'),'/valid','direct'+str(i),1,terms=args.get('terms',[]))
+                assert db.execute('SELECT COUNT(*) FROM personal_events').fetchone()[0]==0, 'rejected recall entered observations'
+                for event in (tool('good-read','Read',{'file_path':'/valid'}),result('good-read','orchid'),user('confirmed')):
+                    tail._apply(json.dumps(event),trace,rec)
+                assert db.execute('SELECT query,settled FROM personal_events').fetchone()[:] == ('next real turn',1)
+                db.execute('DELETE FROM personal_events');db.commit()
+        db.close()
+    original_call=server.call_tool
+    for mode in modes:
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db);personal.ensure(db)
+        db.execute("INSERT INTO docs(path,name,source,sha,body) VALUES('/valid','valid','memory','sha','orchid')");db.commit()
+        oversized=json.dumps(['term'+str(i) for i in range(101)])
+        malformed=[('cached query',oversized),('cached query','{'),('cached query','"words"'),(' ','[]'),('cached query',None),('cached query','')]
+        for i,(query,terms) in enumerate(malformed):
+            db.execute('INSERT INTO personal_events(identity,session,turn,query,path,sha,exposed,terms,settled) VALUES(?,?,?,?,?,?,0,?,1)',
+                       (personal.evidence_prefix()+'bad'+str(i),'bad'+str(i),1,query,'/valid','sha',terms))
+        db.commit()
+        def replay(db,name,args,**kw):
+            if args['query'].startswith('degraded'):
+                values={'degraded missing':None,'degraded nan':float('nan'),'degraded negative':-1,'degraded text':'fast'}
+                value=values[args['query']]
+                if value is not None:kw['_retrieval']['baseline_seconds']=value
+                return '{}'
+            return original_call(db,name,args,**kw)
+        with patch.object(vectors,'query_tag',return_value='fixture-cache'),patch.object(observe,'write'), \
+             patch.object(search,'recall',return_value=[]),patch.object(search,'meaning',return_value=([],'')), \
+             patch.object(server,'_words_unsure',return_value=True),patch.object(server,'call_tool',side_effect=replay), \
+             patch.object(personal,'candidates',side_effect=lambda db,q,base,arm,*a,**k:base if arm=='baseline' else [dict(path='/valid')]), \
+             patch.object(vectors,'embed',side_effect=AssertionError('measurement requested an embedding')):
+            vectors._qcache_get(db,'cached query')
+            vectors._qcache_put(db,'cached query',array.array('f',[1.0]*vectors.DIM))
+            for query in ('degraded missing','degraded nan','degraded negative','degraded text'):
+                personal.record(db,query,'/valid',query,1,terms=['term'] if mode=='terms' else [])
+                personal.settle(db,query,1)
+                vectors._qcache_put(db,query,array.array('f',[1.0]*vectors.DIM))
+            for i in range(12):
+                query='valid query '+str(i);sid='valid'+str(i)
+                personal.record(db,query,'/valid',sid,1,terms=['term'] if mode=='terms' else [])
+                personal.settle(db,sid,1)
+                vectors._qcache_put(db,query,array.array('f',[1.0]*vectors.DIM))
+            assert personal.update(db,mode)['observations']==12
+            assert db.execute("SELECT COUNT(*) FROM personal_events WHERE session LIKE 'bad%' AND measured=-1").fetchone()[0]==6
+            assert db.execute("SELECT COUNT(*) FROM personal_events WHERE session LIKE 'valid%' AND measured=1").fetchone()[0]==12
+            assert db.execute("SELECT COUNT(*) FROM personal_events WHERE session LIKE 'degraded%' AND measured=0").fetchone()[0]==4
+        db.close()
+    print('PASS: rejected requests never enter learning; malformed persisted rows are excluded and degraded replays cannot block valid observations in either mode')
+
+
 def verify_turn_edit_order():
     import sqlite3
     from brain import hosts, observe, server, tail
@@ -130,7 +202,7 @@ def verify_turn_edit_order():
                 assert all(r[0] for r in db.execute('SELECT exposed FROM personal_events'))
             if order=='read_only':
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v11:' || substr(identity,5)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v12:' || substr(identity,5)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -138,7 +210,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v11 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v12 support rejected')
 
 
 def verify_scoped_meaning():
@@ -584,6 +656,7 @@ def main():
     verify_support_and_cost()
     verify_retired_budget()
     verify_semantic_route()
+    verify_rejected_observations()
     verify_turn_edit_order()
     verify_scoped_meaning()
     verify_resolved_vector()

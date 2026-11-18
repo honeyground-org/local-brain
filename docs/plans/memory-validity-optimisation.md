@@ -477,3 +477,20 @@ timeline, brain_analyse, brain_status and brain_suggest pass twelve-session poli
 checks, immediately and after ten turns. An unseen independent session remains a
 positive control. The prior collector falsely certifies the history response.
 These are eligibility checks with synthetic ranking costs, not measured user uplift.
+
+
+### Rejected observations and queue isolation (2.7.26)
+
+Recall requests rejected by the public API must not become ranking observations.
+The collector validates the exact request and remembers rejection until a new request
+or real user turn. Record insertion validates query and raw terms before normalising
+them. Replay validates persisted rows with the same contract, excludes malformed rows
+and continues to later evidence; certificates also reject malformed support. Missing,
+non-finite, negative or nonnumeric replay timings stay pending without blocking the
+queue or certifying a policy. Collector 13 retires affected older observations.
+
+Actual API validation and host events cover nine invalid requests, followed by a clean
+turn that still records evidence. Both query and terms mode process twelve valid cached
+observations behind six malformed stored records and four degraded timing replays.
+The test uses the actual query cache and forbids new embeddings. Prior modules admit
+rejected requests and fail queue replay at baseline_seconds in both modes.

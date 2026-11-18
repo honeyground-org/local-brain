@@ -17,7 +17,7 @@ import time
 
 ARMS = ("baseline", "fusion", "linked")
 KEY = "personal_policy_v2"
-OBSERVATION_VERSION = 12
+OBSERVATION_VERSION = 13
 ALPHA = 0.05
 
 
@@ -43,9 +43,22 @@ def ensure(db):
 
 def eligible(args):
     """The measured context: current, unfiltered, default-width retrieval only."""
+    from brain import recalljson
+    if not isinstance(args, dict) or (args and recalljson.validate(args)):
+        return False
     return (not any(args.get(k) for k in ("scope", "sources", "kinds", "as_of"))
             and args.get("view", "current") == "current"
             and args.get("k", 8) == 8 and args.get("semantic_k") is None)
+
+
+def _event_request(event):
+    """Validate persisted inputs before replay, including older malformed rows."""
+    from brain import recalljson
+    try:
+        args = {"query": event["query"], "terms": json.loads(event["terms"]), "k": 8}
+    except (ValueError, TypeError):
+        return None
+    return None if recalljson.validate(args) else args
 
 
 def signature():
@@ -79,12 +92,12 @@ def certified(db, s):
     # Chunk for SQLite's portable bind limit; one query per batch, not one per observation.
     for start in range(0, len(support), 500):
         ids = support[start:start + 500]
-        found = db.execute("SELECT d.id FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
+        found = db.execute("SELECT d.id,e.query,e.terms FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
                            "WHERE e.id IN (" + ",".join("?" for _ in ids) + ") "
                            "AND e.measured=1 AND e.settled=1 AND e.edited=0 AND e.exposed=0 AND e.identity LIKE ?",
                            list(ids) + [evidence_prefix() + "%"]).fetchall()
         current = _current_ids(db, {r[0] for r in found})
-        if len(found) != len(ids) or any(r[0] not in current for r in found):
+        if len(found) != len(ids) or any(r[0] not in current or _event_request({"query": r[1], "terms": r[2]}) is None for r in found):
             return False
     return True
 
@@ -129,7 +142,9 @@ def state(db, mode="query"):
 
 def record(db, query, path, session, turn, exposed=False, terms=()):
     """An observation, not a label. Repeated query/document pairs add no confidence."""
-    if not query or not session:
+    from brain import recalljson
+    terms = list(terms) if isinstance(terms, tuple) else terms
+    if not session or recalljson.validate({"query": query, "terms": terms}):
         return
     ensure(db)
     doc = db.execute("SELECT sha FROM docs WHERE path=?", (path,)).fetchone()
@@ -319,6 +334,11 @@ def update(db, mode="query"):
         s = _save(db, s, "baseline", "support_invalidated", _latest(db))
     events = db.execute("SELECT * FROM personal_events WHERE measured=0 ORDER BY id").fetchall()
     for ev in events:
+        args = _event_request(ev)
+        if args is None:
+            with db:
+                db.execute("UPDATE personal_events SET measured=-1 WHERE id=?", (ev["id"],))
+            continue
         doc = db.execute("SELECT sha,id FROM docs WHERE path=?", (ev["path"],)).fetchone()
         if not ev["identity"].startswith(evidence_prefix()) or ev["edited"] or ev["exposed"] or doc is None or doc[0] != ev["sha"] or doc[1] not in _current_ids(db, [doc[1]]):
             with db:
@@ -327,9 +347,8 @@ def update(db, mode="query"):
         if not ev["settled"]:
             continue  # the host may still write later in this user turn
         t = time.monotonic()
-        terms = json.loads(ev["terms"] or "[]")
+        terms = args["terms"]
         base = []
-        args = {"query": ev["query"], "terms": terms, "k": 8}
         # Never certify the automatic semantic route using a lexical-only substitute.
         # Leave cold observations pending; ordinary recall may populate the cache later.
         # Measurement itself must not request a new embedding.
@@ -339,7 +358,9 @@ def update(db, mode="query"):
         server.call_tool(db, "recall", args, _measure=True, _capture=base, _retrieval=retrieval)
         if retrieval.get("semantic_errors"):
             continue
-        baseline_cost = retrieval["baseline_seconds"]
+        baseline_cost = retrieval.get("baseline_seconds")
+        if type(baseline_cost) not in (int, float) or not math.isfinite(baseline_cost) or baseline_cost < 0:
+            continue  # a degraded replay cannot block later observations or certify itself
         scores, costs = {}, {}
         try:
             for arm in ARMS:
@@ -359,7 +380,15 @@ def update(db, mode="query"):
                       "AND NOT EXISTS(SELECT 1 FROM personal_events old WHERE old.session=e.session AND old.id<=?) "
                       "ORDER BY e.id", (evidence_prefix() + "%", s.get("after", 0), s.get("after", 0))).fetchall()
     current = _current_ids(db, {r["current_doc_id"] for r in rows})
-    rows = [r for r in rows if r["current_doc_id"] in current and r["identity"].startswith(evidence_prefix()) and bool(json.loads(r["terms"] or "[]")) == (mode == "terms")]
+    usable = []
+    for row in rows:
+        args = _event_request(row)
+        if args is None:
+            with db:
+                db.execute("UPDATE personal_events SET measured=-1 WHERE id=?", (row["id"],))
+        elif row["current_doc_id"] in current and row["identity"].startswith(evidence_prefix()) and bool(args["terms"]) == (mode == "terms"):
+            usable.append(row)
+    rows = usable
     through = max((r["id"] for r in rows), default=s.get("after", 0))
     unique = {}
     for r in rows:
