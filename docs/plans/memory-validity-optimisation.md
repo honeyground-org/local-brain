@@ -148,3 +148,4 @@ Entry-point follow-up (2.5.3): read-only MCP identity review and discovery never
 Target-name follow-up (2.5.4): source-bound fact writes recheck the target name in the refreshed exact scope, preventing a competing source from making history ambiguous after preparation. Other scopes and successful retries remain compatible.
 
 Identity-edge follow-up (2.5.5): exact-scope SHA-pinned identity provenance no longer becomes an unqualified graph name link. Cross-project homonyms cannot acquire a new automatic identity edge. Existing saved content is preserved; typed identity-edge traversal is not implemented.
+New writes also reject old prepared identity requests containing automatic bare-name provenance links; successful prior retries bypass new-write guards and remain compatible.

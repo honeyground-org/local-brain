@@ -510,6 +510,9 @@ def identity_checks(db):
         store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
         scoped=prep(name='identity_scoped_reference')['save_arguments']
         check('identity provenance is not an ambiguous graph name',scoped['identity_reference']==ref and scoped['links']==[])
+        old_request=dict(scoped,links=[scoped['extracted_from']['name'],ref['name']])
+        rejected=_j(db,**old_request)
+        check('old unsaved generated links require preparation again',(rejected.get('error') or {}).get('code')=='identity_reprepare_required')
         check('scoped reference saves with foreign homonym',_j(db,**scoped).get('result')=='new')
         from brain import graphstore
         proposal_id=db.execute('SELECT id FROM docs WHERE name=?',(scoped['name'],)).fetchone()[0]

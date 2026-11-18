@@ -533,6 +533,9 @@ def check_identity(db, args):
         return None
     if not args.get("expected_fact_sha"):
         return error("invalid_argument", "Keep expected_fact_sha from the prepared identity request")
+    generated_names = {value["name"], (args.get("extracted_from") or {}).get("name")}
+    if generated_names.intersection(args.get("links") or []):
+        return error("identity_reprepare_required", "Prepare this identity request again without unqualified provenance links")
     record, bad = identity_record(db, value["name"], value["sha"], args.get("project_id") or "")
     if bad:
         return bad
