@@ -79,6 +79,51 @@ def verify_semantic_route():
     print('PASS: cold evidence stays pending; warm evidence uses the actual automatic semantic route')
 
 
+def verify_request_replay_order():
+    import sqlite3
+    from brain import observe, server
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    terms=['zebra','amber','cedar','ivory']
+    for i,word in enumerate(terms):
+        store._index_one(db,dict(name='fixture'+str(i+1),path='/fixture'+str(i+1),source='memory',kind='reference',title='',description='',body=word,mtime=1,size=len(word),sha='sha'+str(i),links=[]))
+    store._rebuild_terms(db);db.commit()
+    def recall(args):
+        return [r['name'] for r in json.loads(server.call_tool(db,'recall',args,_measure=True))['results'] if not r.get('related')][:3]
+    with patch.object(observe,'write'),patch.object(server,'_words_unsure',return_value=False):
+        for words in (terms,terms+[terms[0]],list(reversed(terms))):
+            args=dict(query='unmatchedquery',terms=words,k=8)
+            original=recall(args)
+            personal.record(db,args['query'],'/fixture1','ordered-session',1,terms=words)
+            row=dict(db.execute('SELECT * FROM personal_events ORDER BY id DESC LIMIT 1').fetchone())
+            assert json.loads(row['terms'])==words,'stored terms lost order or multiplicity'
+            assert recall(personal._event_request(row))==original,'replay changed top-three boundary'
+        assert recall(dict(query='unmatchedquery',terms=terms)) != recall(dict(query='unmatchedquery',terms=sorted(terms))), 'fixture did not exercise a meaningful tie boundary'
+    db.close()
+    print('PASS: actual lexical recall and stored-request replay preserve top-three ties, term order and multiplicity')
+
+
+def verify_malformed_policy_view():
+    import sqlite3
+    from brain import dashboard, dashview, scorecard
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    db.execute("INSERT INTO docs(path,name,source,body) VALUES('/kept','kept_memory','memory','Preserved body')");db.commit()
+    broken=[[],None,'text',1,True,{'arm':'fusion','support':None}, {'arm':'baseline','history':{}}, {'arm':'baseline','history':[1]}, {'arm':'baseline','after':'bad'}]
+    valid=dict(arm='fusion',after=0,history=[],support=[1],signature=personal.signature(),cost_limit=.1)
+    broken += [dict(valid,cost_limit=c) for c in (float('nan'),float('inf'),-1,True,'fast')]
+    broken += [dict(valid,support=v) for v in ('ids',{},[True],[1,1],[0])]
+    with patch.object(scorecard,'history',return_value=[]):
+        for value in broken:
+            for key in (personal.KEY,personal.KEY+'_terms'):store.set_meta(db,key,json.dumps(value))
+            db.commit();before='\n'.join(db.iterdump())
+            data=dashboard.payload(db);html=dashview.render(data)
+            assert len(data['memories'])==1 and 'kept_memory' in html
+            assert data['performance'] is None
+            assert all(s['effective']=='baseline' for s in data['policy']['contexts'].values())
+            assert before=='\n'.join(db.iterdump()),'policy fallback rewrote the index'
+    db.close()
+    print('PASS: malformed scalar/object policy states retain readonly memory/performance views and baseline')
+
+
 def verify_serving_cache_fallback():
     import array, hashlib, sqlite3
     from brain import observe, search, server
@@ -247,7 +292,7 @@ def verify_turn_edit_order():
                 assert all(r[0] for r in db.execute('SELECT exposed FROM personal_events'))
             if order=='read_only':
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v13:' || substr(identity,5)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v14:' || substr(identity,5)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -255,7 +300,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v13 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v14 support rejected')
 
 
 def verify_scoped_meaning():
@@ -718,6 +763,8 @@ def main():
     verify_semantic_route()
     verify_rejected_observations()
     verify_serving_cache_fallback()
+    verify_request_replay_order()
+    verify_malformed_policy_view()
     verify_turn_edit_order()
     verify_scoped_meaning()
     verify_resolved_vector()

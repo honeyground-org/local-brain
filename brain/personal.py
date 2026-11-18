@@ -17,7 +17,7 @@ import time
 
 ARMS = ("baseline", "fusion", "linked")
 KEY = "personal_policy_v2"
-OBSERVATION_VERSION = 14
+OBSERVATION_VERSION = 15
 ALPHA = 0.05
 
 
@@ -133,11 +133,27 @@ def describe(db):
 
 def state(db, mode="query"):
     from brain import store
+    baseline = {"arm": "baseline", "after": 0, "history": [], "mode": mode}
     try:
         s = json.loads(store.get_meta(db, KEY if mode == "query" else KEY + "_terms", "") or "{}")
-        return s if s.get("arm") in ARMS else {"arm": "baseline", "after": 0, "history": [], "mode": mode}
-    except (ValueError, TypeError):
-        return {"arm": "baseline", "after": 0, "history": [], "mode": mode}
+        if not isinstance(s, dict) or s.get("arm") not in ARMS:
+            return baseline
+        if (type(s.get("after", 0)) is not int or s.get("after", 0) < 0
+                or not isinstance(s.get("history", []), list)
+                or any(not isinstance(event, dict) for event in s.get("history", []))
+                or s.get("mode", mode) != mode):
+            return baseline
+        if s["arm"] != "baseline":
+            support, cost = s.get("support"), s.get("cost_limit")
+            if (not isinstance(support, list) or not support
+                    or any(type(i) is not int or i <= 0 for i in support)
+                    or len(set(support)) != len(support)
+                    or not isinstance(s.get("signature"), list)
+                    or type(cost) not in (int, float) or not math.isfinite(cost) or cost <= 0):
+                return baseline
+        return dict(s, mode=mode, after=s.get("after", 0), history=s.get("history", []))
+    except (ValueError, TypeError, sqlite3.Error):
+        return baseline
 
 
 def record(db, query, path, session, turn, exposed=False, terms=()):
@@ -150,7 +166,7 @@ def record(db, query, path, session, turn, exposed=False, terms=()):
     doc = db.execute("SELECT sha FROM docs WHERE path=?", (path,)).fetchone()
     if doc is None:
         return
-    terms = sorted(set(t for t in terms if isinstance(t, str)))
+    terms = list(terms)  # Order (and multiplicity) can affect tie-breaking during replay.
     identity = evidence_prefix() + hashlib.sha256((query.strip() + json.dumps(terms) + "\0" + path + "\0" + doc[0]).encode()).hexdigest()
     with db:
         # The lookup is part of the insert, so a concurrent edit either precedes
