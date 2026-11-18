@@ -212,7 +212,7 @@ def verify_turn_edit_order():
                 assert all(r[0] for r in db.execute('SELECT exposed FROM personal_events'))
             if order=='read_only':
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v12:' || substr(identity,5)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v13:' || substr(identity,5)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -220,7 +220,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v12 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v13 support rejected')
 
 
 def verify_scoped_meaning():
@@ -347,9 +347,9 @@ def verify_retired_budget():
     print('PASS: 41 SHA-pinned legacy predecessors cannot exhaust k=8; absent current vector stays empty')
 
 
-def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','meaning','hook_direct','hook_related','hook_meaning'), delays=(0,10), name='known note', context_tool=None, expected_exposed=True):
+def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','meaning','hook_direct','hook_related','hook_meaning'), delays=(0,10), name='known note', context_tool=None, expected_exposed=True, history_language=None):
     import sqlite3
-    from brain import hosts, observe, server, tail, recalljson, hook, i18n
+    from brain import hosts, observe, server, tail, recalljson, hook, i18n, lifecycle
     hosts.pin('claude-code')
     for fmt in formats:
       for lane in lanes:
@@ -358,10 +358,19 @@ def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','m
         db.execute("INSERT INTO docs(path,name,source,sha,body) VALUES('/shown-note',?,'memory','sha','orchid')",(name,));db.commit()
         row=dict(name=name,path='/shown-note',source='memory',kind='reference',description='fixture',title='fixture',
                  age_days=0,stale=False,why='fixture',excerpt='orchid',related=lane in ('related','hook_related'),via_vector=lane=='hook_meaning',cosine=.8,via_graph='seed',score=1)
+        if lane=='history':
+            current=dict(topic='history-fixture',facet='value',status='active',supersedes=['past_note'])
+            old=dict(topic='history-fixture',facet='value',status='superseded',superseded_by=name)
+            db.execute('UPDATE docs SET lifecycle=? WHERE path=?',(json.dumps(current),'/shown-note'))
+            db.execute("INSERT INTO docs(path,name,source,sha,body,lifecycle) VALUES('/past-note','past_note','memory','old-sha','previous value',?)",(json.dumps(old),));db.commit()
+            old_id=db.execute("SELECT id FROM docs WHERE path='/past-note'").fetchone()[0]
+            row.update(name='past_note',path='/past-note',lifecycle=lifecycle.snapshot(db).info(old_id))
+            assert row['lifecycle']['current_names']==[name]
         rows=[] if lane=='meaning' else [row];meaning=[row] if lane=='meaning' else []
         if fmt=='text':
-            answer=server._fmt_recall(rows)
-            if meaning:answer+='\n'+server._fmt_meaning(meaning,'','cached',1)
+            with patch.object(i18n,'_lang',history_language or 'en'):
+                answer=server._fmt_recall(rows)
+                if meaning:answer+='\n'+server._fmt_meaning(meaning,'','cached',1)
         else:
             answer=json.dumps(recalljson.response(db,query='orchid',terms=[],k=8,rows=rows,mrows=meaning,why_none='',
                  asked_meaning=8 if meaning else 0,auto_meaning=True,request_id=None,unsure=False,bridged=[],
@@ -393,7 +402,11 @@ def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','m
                             with patch.object(i18n,'_lang',language):rendered=hook._format([row])
                             assert tail._names(db,rendered,tail._HOOK_LINE)==[name],(lane,language)
                         events.append(dict(type='attachment',attachment=dict(type='hook_additional_context',content=[rendered])))
-                    else:events.extend([tool('recall','mcp__brain__'+(context_tool or 'recall'),context_args if context_tool else dict(query='orchid '+sid,format=fmt)),result('recall',answer)])
+                    else:
+                        request=context_args if context_tool else dict(query='orchid '+sid,format=fmt)
+                        if lane=='history':request['view']='history'
+                        events.extend([tool('recall','mcp__brain__'+(context_tool or 'recall'),request),result('recall',answer)])
+                        if lane=='history':events.append(user('after history'))
                     for j in range(delay):
                         events.extend([user('later '+str(j)),tool('empty'+str(j),'mcp__brain__recall',dict(query='empty'+str(j))),result('empty'+str(j),'{}')])
                 events.extend([tool('read','Read',dict(file_path='/shown-note')),result('read','orchid'),user('next actual turn')])
@@ -655,7 +668,9 @@ def main():
                  '\u3000orchid', 'orchid\u3000', 'orchid\nrelease', '\norchid', 'orchid\n',
                  '  orchid ←\n[release]  '):
         verify_exposure_parity(name=name)
-    from brain import hosts, server
+    from brain import hosts, server, i18n
+    for language in i18n.LANGS:
+        verify_exposure_parity(lanes=('history',),name='current_note',history_language=language)
     assert {tool['name'] for tool in server.TOOLS} <= hosts.BRAIN_TOOLS
     for tool in ('memory_history', 'review_identity', 'memory_review', 'neighbors',
                  'timeline', 'brain_analyse', 'brain_status', 'brain_suggest', 'future_context'):

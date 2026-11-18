@@ -306,6 +306,23 @@ def _doc_of(db, path: str):
     return None
 
 
+def _validity_names(db, text):
+    """Literal mentions in rendered lifecycle metadata, in every UI language.
+
+    Do not split comma-separated names: commas and newlines can belong to a name.
+    Ambiguous substring mentions conservatively exclude all matches. Only the short
+    lifecycle suffix is scanned; ordinary result bodies do not trigger this lookup.
+    """
+    from brain import i18n
+    prefixes = {i18n.catalog(lang)["memory.validity"].split("{", 1)[0] for lang in i18n.LANGS}
+    starts = [match.start() for prefix in prefixes if prefix
+              for match in re.finditer(r"^" + re.escape(prefix), text or "", re.MULTILINE)]
+    if not starts:
+        return []
+    suffix = text[min(starts):]
+    return [row[0] for row in db.execute("SELECT DISTINCT name FROM docs WHERE name<>'' AND instr(?,name)>0", (suffix,))]
+
+
 def _context_names(db, value):
     """Literal references anywhere in a structured Brain response or its arguments.
 
@@ -373,6 +390,7 @@ def _use(ev: tuple, rec: dict) -> None:
     db = _db()
     if kind == "hook":
         names = _names(db, ev[1], _HOOK_LINE)
+        names += [name for name in _validity_names(db, ev[1]) if name not in names]
         if names:
             _expose(rec, names)
             u["shown"] = (u["shown"] + [{"via": "hook", "names": names, "turn": u["turn"]}])[-SHOWN_KEEP:]
@@ -391,6 +409,7 @@ def _use(ev: tuple, rec: dict) -> None:
             u["recall_rejected"] = True
         names = _names(db, ev[2], _RECALL_LINE)
         names += _names(db, ev[2], _RELATED_LINE)
+        names += _validity_names(db, ev[2])
         try:
             structured = json.loads(ev[2])
             if isinstance(structured, dict):
@@ -399,6 +418,7 @@ def _use(ev: tuple, rec: dict) -> None:
                 all_rows = list(structured.get("results") or []) + list(structured.get("related") or [])
                 all_rows += (structured.get("meaning") or {}).get("rows") or []
                 names += [r["name"] for r in all_rows if isinstance(r, dict) and r.get("name")]
+                names += _context_names(db, structured)
         except (ValueError, TypeError, AttributeError):
             pass
         names = [n for i, n in enumerate(names) if n not in names[:i]
