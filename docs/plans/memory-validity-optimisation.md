@@ -290,3 +290,8 @@ The semantic candidate budget now counts every document excluded by current vali
 ### Scoped connections and current policy support
 
 Connection nodes and edges retain document IDs; labels disambiguate same-name memories with their scope or path. An isolated homonym remains separate from connected homonyms. Current-only policy certification and training reject superseded support even when the original source bytes and SHA remain unchanged; historical retrieval still preserves that source. Measurement and serving compare the same baseline-retrieval plus reranking interval, excluding final response serialization in both. Synthetic 10ms baseline + 5ms reranking exceeds an 11ms certificate and returns baseline, whereas 10ms + 0.5ms remains eligible. These controls are not evidence of user-level quality improvement.
+
+
+### Exact path edges and complete policy overhead
+
+Path links now join directly to indexed document IDs instead of becoming ambiguous name links. Graph provenance generation 6 rebuilds old derived links at a full index; original files and history are untouched, and the dedicated graph receives the corrected edge difference. SQLite and remote graph sources share the same canonical edges. Policy application starts timing before state, certificate and query-cache checks. Prospective certification adds those same checks to held-out costs before promotion; excessive validation cost can reject a candidate as well as roll back serving.

@@ -111,6 +111,25 @@ def verify_graph_scopes():
     db.close()
 
 
+def verify_path_scope():
+    import sqlite3
+    from brain import graphstore,graphview
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    for did,name,path,scope in ((1,'source','/a/source.md','a'),(2,'same','/a/same.md','a'),(3,'same','/b/same.md','b')):
+        db.execute('INSERT INTO docs(id,name,path,project_id,source) VALUES(?,?,?,?,?)',(did,name,path,scope,'memory'))
+    db.execute("INSERT INTO path_links(src_id,dst_path) VALUES(1,'/a/same.md')");db.commit()
+    store._resolve_path_links(db)
+    backend=graphstore.SqliteGraph()
+    check('path link preserves the exact target',backend.edges(db)==[(1,2)]
+          and backend.neighbors(db,[1])=={1:{2}} and backend.incoming(db,2)=={1}
+          and backend.incoming(db,3)==set() and not backend.linked(db,1,3) and backend.targets(db)=={2})
+    check('remote graph source retains exact path edge',graphstore.NotesGraphSource(db).edges()==[(1,2)])
+    nodes,edges,isolates=graphview.fetch(db)
+    check('path homonym remains isolated in graph view',{r['id'] for r in nodes}=={1,2}
+          and {r['id'] for r in isolates}=={3})
+    db.close()
+
+
 def verify_observatory():
     import datetime
     import json
@@ -418,6 +437,7 @@ def main():
 
     verify_cli_readonly()
     verify_graph_scopes()
+    verify_path_scope()
     verify_workspace_controls()
     verify_workspace()
     verify_observatory()
