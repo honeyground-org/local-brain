@@ -471,6 +471,26 @@ def identity_checks(db):
     args['name']='identity_pending'
     ref=dict(name='identity_anchor',sha=anchor['sha'],reason='Same independently changing fact')
     def prep(**extra): return call('prepare_fact',**dict(args,identity_reference=ref,**extra))
+    for label, br in (('lf', '\n'), ('crlf', '\r\n'), ('cr', '\r')):
+        body = 'First line.'+br+'Second line with Unicode \uac31\uc2e0.'+br+'Last line.'
+        prepared_lines = prep(name='identity_lines_'+label, body=body)['save_arguments']
+        check('preparation preserves original line endings '+label, prepared_lines['body'] == body)
+        created = _j(db, **prepared_lines)
+        path = os.path.join(_MEM, prepared_lines['name']+'.md')
+        with open(path, 'rb') as f: saved_bytes = f.read()
+        receipt = rc.current(path)['payload_sha']
+        retried = _j(db, **prepared_lines)
+        with open(path, 'rb') as f: after_retry = f.read()
+        check('reviewed multiline exact retry is noop '+label, created.get('result') == 'new' and retried.get('result') == 'noop')
+        check('multiline retry preserves bytes and receipt '+label, after_retry == saved_bytes and
+              rc.current(path)['payload_sha'] == receipt == rc.payload_sha(prepared_lines))
+        changed = _j(db, **dict(prepared_lines, body=body+' changed', expected_sha=created['sha']))
+        with open(path, 'rb') as f: after_change = f.read()
+        check('real multiline revision is still refused '+label,
+              (changed.get('error') or {}).get('code') == 'revision_required' and after_change == saved_bytes)
+        ordinary = dict(name='plain_lines_'+label, description='Line endings', type='user', body=body)
+        check('ordinary multiline exact retry is noop '+label,
+              _j(db, **ordinary).get('result') == 'new' and _j(db, **ordinary).get('result') == 'noop')
     check('translated identity cannot override reviewed identifiers',prep(topic='translated')['error']['code']=='identity_mismatch')
     for replacement,code in [(dict(ref,sha='0'*40),'identity_changed'),(dict(ref,name='identity_foreign'),'identity_unavailable'),(dict(ref,name='identity_untracked'),'invalid_identity'),(dict(ref,reason=''),'invalid_argument')]:
         result=call('prepare_fact',**dict(args,identity_reference=replacement))

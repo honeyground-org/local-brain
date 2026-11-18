@@ -265,6 +265,11 @@ def payload_sha(args: dict) -> str:
     return hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()
 
 
+def read_form(text: str) -> str:
+    """Match Python's universal-newline file reads, without altering receipts or writes."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def file_sha(path: str) -> Optional[str]:
     """The index's own document hash — sha1 of the file text (§store) — so `sha` means one thing everywhere."""
     try:
@@ -318,7 +323,7 @@ def decide(cur: Dict[str, Any], args: dict) -> Tuple[str, Optional[Dict[str, Any
     if key and cur.get("idempotency_key") == key:
         if cur.get("payload_sha") == payload_sha(args):
             intended = render(cur["name"], args, cur.get("verified_at") or "")
-            if hashlib.sha1(intended.encode("utf-8", "replace")).hexdigest() == cur.get("sha"):
+            if hashlib.sha1(read_form(intended).encode("utf-8", "replace")).hexdigest() == cur.get("sha"):
                 return "noop", None
             if expected != cur.get("sha"):
                 return "conflict", dict(detail, reason="sha_mismatch")

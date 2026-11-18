@@ -240,3 +240,9 @@ a second starter could interpret the empty newly created file as a dead owner an
 The checker now uses a nonblocking OS lock on a persistent inode, with automatic crash release.
 An existing session-events check reproduces the empty-PID interleaving and confirms exclusion
 and subsequent reuse; the worker lease and its retry budget are unchanged.
+
+2.7.5 aligns rendered-file retry hashes and lifecycle body comparisons with universal-newline
+file reads. It preserves the original request payload hash, key and stored bytes, including
+previously saved CRLF records. Existing tests cover LF/CRLF/CR reviewed preparation, unchanged
+new/noop retries, byte/receipt preservation, real-edit refusal and ordinary saves. Generation 57
+tracks the receipt-module repair; graph provenance remains version 5.
