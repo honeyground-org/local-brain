@@ -256,7 +256,7 @@ CI; synthetic subprocess controls test this measurement tool without proving Bra
 
 Automatic personalisation is implemented: corpus calibration, learned vocabulary, feedback-based
 ranking and the background policy-selection loop are part of Brain. The advanced candidate policy
-serving described below remains opt-in; that is an activation and evidence boundary, not an absent feature.
+serving described below is automatic only after independent held-out evidence validates a winner.
 
 The background policy loop records independent document reads, separates reads following a brain
 exposure, and excludes turns that edit documents. It compares the existing ranking with reciprocal-rank
@@ -266,15 +266,24 @@ candidates; their own text and vector evidence determine ranking. Link counts ar
 Policies are evaluated on successive time partitions with an exact sign-test guard, independent session
 units, a serving-cost budget and rollback to the baseline when new evidence or serving failures justify
 it. Repeated query/document pairs do not add confidence. Evidence for changed/deleted documents is not
-reused. The state and history live in the local index under `personal_policy_v1` and its `_terms` variant; per-request diagnostics
-contain no query text. The existing Claude Code read-event adapter supplies this experiment's signals;
-hosts without equivalent read events retain the baseline.
+reused. The state and history live in the local index under `personal_policy_v2` and its `_terms` variant; per-request diagnostics
+contain no query text. The Claude Code adapter supplies confirmed successful read events; JSON results in every recall lane
+count as prior exposure. Other hosts do not yet contribute read observations. A validated policy is
+local to this Brain and can serve eligible MCP requests from any host.
 
-**Serving remains off by default.** The loop and rollback mechanics have isolated checks, but synthetic
-checks do not establish retrieval quality. `BRAIN_PERSONAL_EXPERIMENT=1` enables the measured policy for
-unfiltered MCP recall at its evaluated width (8), with separate policies for queries with and without
-caller-supplied expansion terms. Calls with filters, another width, or `semantic_k: 0` retain the established path. `BRAIN_PERSONAL_DISABLED=1` always
-forces the baseline. Neither switch installs models or authorises additional remote embedding calls.
+**Validated serving is automatic by default.** No winner means the baseline stays active. The policy
+requires fresh independent training and holdout sessions, zero observed losses in either partition,
+and holdout p95 cost within 10% of the incumbent. Synthetic checks establish these guards, not search
+quality. Only current, unfiltered MCP recall at width 8 with automatic semantic width is eligible;
+history/as-of queries, explicit semantic widths and filtered queries retain the established path.
+Query-only and expansion-term policies stay separate. A certificate binds the measurement generation,
+tokenizer, embedding space and supporting document versions; invalidated evidence resets the policy.
+Old collector records are retained but cannot promote the new policy.
+
+`BRAIN_PERSONAL_MODE=observe` collects and evaluates without serving a candidate; `off` also serves the
+baseline. `BRAIN_PERSONAL_DISABLED=1` takes precedence. Neither installs models or adds embedding calls.
+The old experiment switch is no longer required. `brain_capabilities.personalisation` reports selected
+and effective policy, certification, mode and decision history without query or document content.
 
 Release requires both labelled evaluation and chronological real-use replay, including losses, noise,
 latency and resource costs. Vector/graph synergy and automatic embedding-model selection are **not yet

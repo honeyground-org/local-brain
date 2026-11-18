@@ -16,7 +16,8 @@ import sqlite3
 import time
 
 ARMS = ("baseline", "fusion", "linked")
-KEY = "personal_policy_v1"
+KEY = "personal_policy_v2"
+OBSERVATION_VERSION = 2
 ALPHA = 0.05
 
 
@@ -27,6 +28,55 @@ def ensure(db):
                "scores TEXT, costs TEXT, terms TEXT DEFAULT '[]')")
     if "terms" not in {r[1] for r in db.execute("PRAGMA table_info(personal_events)")}:
         db.execute("ALTER TABLE personal_events ADD COLUMN terms TEXT DEFAULT '[]'")
+
+
+def eligible(args):
+    """The measured context: current, unfiltered, default-width retrieval only."""
+    return (not any(args.get(k) for k in ("scope", "sources", "kinds", "as_of"))
+            and args.get("view", "current") == "current"
+            and args.get("k", 8) == 8 and args.get("semantic_k") is None)
+
+
+def signature():
+    from brain import calibrate, textindex, vectors
+    return [calibrate.CODE_GENERATION, textindex.TOKENIZER_VERSION, vectors.model_tag()]
+
+
+def evidence_prefix():
+    return "v2:" + hashlib.sha256(json.dumps(signature()).encode()).hexdigest() + ":"
+
+
+def serving_mode():
+    if os.environ.get("BRAIN_PERSONAL_DISABLED"):
+        return "off"
+    mode = os.environ.get("BRAIN_PERSONAL_MODE", "auto")
+    return mode if mode in ("auto", "observe", "off") else "off"
+
+
+def certified(db, s):
+    if s.get("signature") != signature() or not s.get("support") or not s.get("cost_limit"):
+        return False
+    for eid in s["support"]:
+        row = db.execute("SELECT 1 FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
+                         "WHERE e.id=? AND e.measured=1 AND e.edited=0 AND e.exposed=0 "
+                         "AND e.identity LIKE 'v2:%'", (eid,)).fetchone()
+        if row is None:
+            return False
+    return True
+
+
+def describe(db):
+    """Read-only diagnostics; never expose queries or document paths."""
+    modes = {}
+    for mode in ("query", "terms"):
+        s = state(db, mode)
+        valid = s["arm"] != "baseline" and certified(db, s)
+        effective = s["arm"] if valid and serving_mode() == "auto" else "baseline"
+        modes[mode] = {"selected": s["arm"], "effective": effective,
+                       "certified": bool(valid), "history": s.get("history", [])}
+    return {"mode": serving_mode(), "observation_version": OBSERVATION_VERSION,
+            "contexts": modes, "eligibility": "current, unfiltered, k=8, automatic semantic width",
+            "observation_hosts": ["claude-code"], "native_host_outcome_benefit": "unmeasured"}
 
 
 def state(db, mode="query"):
@@ -47,7 +97,7 @@ def record(db, query, path, session, turn, exposed=False, terms=()):
     if doc is None:
         return
     terms = sorted(set(t for t in terms if isinstance(t, str)))
-    identity = hashlib.sha256((query.strip() + json.dumps(terms) + "\0" + path + "\0" + doc[0]).encode()).hexdigest()
+    identity = evidence_prefix() + hashlib.sha256((query.strip() + json.dumps(terms) + "\0" + path + "\0" + doc[0]).encode()).hexdigest()
     with db:
         db.execute("INSERT OR IGNORE INTO personal_events(identity,session,turn,query,path,sha,exposed,terms) "
                    "VALUES(?,?,?,?,?,?,?,?)", (identity, session, turn, query, path, doc[0], int(exposed), json.dumps(terms)))
@@ -142,8 +192,10 @@ def apply(db, query, rows, k, terms=()):
     """Read the last measured policy; never train in the request."""
     s = state(db, "terms" if terms else "query")
     arm = s["arm"]
-    if (os.environ.get("BRAIN_PERSONAL_EXPERIMENT") != "1"
-            or os.environ.get("BRAIN_PERSONAL_DISABLED") or arm == "baseline"):
+    if serving_mode() != "auto" or arm == "baseline":
+        return rows
+    if not certified(db, s):
+        _save(db, s, "baseline", "support_invalidated", _latest(db))
         return rows
     t = time.monotonic()
     try:
@@ -166,10 +218,13 @@ def _latest(db):
         return 0
 
 
-def _save(db, s, arm, reason, after, cost_limit=None):
+def _save(db, s, arm, reason, after, cost_limit=None, support=None):
     from brain import store, observe
     event = {"from": s["arm"], "to": arm, "reason": reason, "at": time.time(), "after": after}
     updated = dict(s, arm=arm, after=after, history=(s.get("history", []) + [event])[-30:])
+    if support is not None:
+        updated["support"] = list(support)
+        updated["signature"] = signature()
     if cost_limit is not None:
         updated["cost_limit"] = cost_limit
     store.set_meta(db, KEY if s.get("mode", "query") == "query" else KEY + "_terms", json.dumps(updated))
@@ -189,10 +244,12 @@ def update(db, mode="query"):
     from brain import search, server, vectors
     ensure(db)
     s = state(db, mode)
+    if s["arm"] != "baseline" and not certified(db, s):
+        s = _save(db, s, "baseline", "support_invalidated", _latest(db))
     events = db.execute("SELECT * FROM personal_events WHERE measured=0 ORDER BY id").fetchall()
     for ev in events:
         doc = db.execute("SELECT sha FROM docs WHERE path=?", (ev["path"],)).fetchone()
-        if ev["edited"] or ev["exposed"] or doc is None or doc[0] != ev["sha"]:
+        if not ev["identity"].startswith(evidence_prefix()) or ev["edited"] or ev["exposed"] or doc is None or doc[0] != ev["sha"]:
             with db:
                 db.execute("UPDATE personal_events SET measured=-1 WHERE id=?", (ev["id"],))
             continue
@@ -217,10 +274,10 @@ def update(db, mode="query"):
     # Evidence for a removed/edited document cannot promote a policy for its replacement.
     # Independent sessions, not many reads in one conversation, are the sampling units.
     rows = db.execute("SELECT e.* FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
-                      "WHERE measured=1 AND edited=0 AND exposed=0 AND e.id>? "
+                      "WHERE measured=1 AND edited=0 AND exposed=0 AND e.identity LIKE 'v2:%' AND e.id>? "
                       "AND NOT EXISTS(SELECT 1 FROM personal_events old WHERE old.session=e.session AND old.id<=?) "
                       "ORDER BY e.id", (s.get("after", 0), s.get("after", 0))).fetchall()
-    rows = [r for r in rows if bool(json.loads(r["terms"] or "[]")) == (mode == "terms")]
+    rows = [r for r in rows if r["identity"].startswith(evidence_prefix()) and bool(json.loads(r["terms"] or "[]")) == (mode == "terms")]
     through = max((r["id"] for r in rows), default=s.get("after", 0))
     unique = {}
     for r in rows:
@@ -242,7 +299,7 @@ def update(db, mode="query"):
             # Relative serving-cost guard is a product budget, never a learned relevance weight.
             at = min(len(old) - 1, math.ceil(0.95 * len(old)) - 1)
             if new[at] <= old[at] * 1.1:
-                s = _save(db, s, candidate, "independent_read_holdout", through, new[at] * 1.1)
+                s = _save(db, s, candidate, "independent_read_holdout", through, new[at] * 1.1, support=[r["id"] for r in rows])
                 return {"arm": s["arm"], "observations": len(rows), "decision": "changed"}
         # Confirmation has now been inspected: consume it, even when it rejected the candidate.
         s = _save(db, s, incumbent, "holdout_rejected", through)

@@ -72,6 +72,9 @@ def transcript(path, lines):
     with open(path, "w", encoding="utf-8") as fh:
         for x in lines:
             fh.write(json.dumps(x, ensure_ascii=False) + "\n")
+            for item in (x.get("message") or {}).get("content", []):
+                if isinstance(item, dict) and item.get("type") == "tool_use" and item.get("name") == "Read":
+                    fh.write(json.dumps(tool_result(item["id"], "fixture contents")) + "\n")
 
 
 def main() -> int:
@@ -161,6 +164,27 @@ def main() -> int:
     rows3, _ = observe.read("use", [observe.day()])
     check("★control★: without the hook's attachment the same open is recorded as not shown",
           [(r["via"], r["rank"]) for r in rows3] == [(None, None)], "%s" % rows3)
+    # Requests alone and failed results must not become positive learning evidence.
+    from brain import personal
+    rec4 = {"session_id": "confirmed-read"}
+    def feed(value):
+        for event in hosts.active().brain_events(json.dumps(value)):
+            tail._use(event, rec4)
+    feed(tool_use("pending", "Read", {"file_path": p("ledger_rule")}))
+    check("pending read is not a positive signal", not rec4["use"]["opened"])
+    failed = tool_result("pending", "permission denied")
+    failed["message"]["content"][0]["is_error"] = True
+    feed(failed)
+    check("failed read is not a positive signal", not rec4["use"]["opened"])
+    feed(tool_use("json", "recall", {"query": "current rules"}))
+    feed(tool_result("json", json.dumps({"results": [{"name": "ledger_rule"}],
+          "related": [{"name": "deploy_window"}], "meaning": {"rows": [{"name": "harbour_note"}]}})))
+    for number, name in enumerate(("ledger_rule", "deploy_window", "harbour_note")):
+        tid = "ok-" + str(number)
+        feed(tool_use(tid, "Read", {"file_path": p(name)}))
+        feed(tool_result(tid, "fixture contents"))
+    learned = db.execute("SELECT exposed FROM personal_events WHERE session='confirmed-read'").fetchall()
+    check("all JSON result lanes are exposure, not independent labels", len(learned) == 3 and all(r[0] for r in learned))
     db.close()
 
     print("=" * 78)
