@@ -511,9 +511,12 @@ def check_identity(db, args):
     if value is None and args.get("extracted_from"):
         # 2.5.0 stored references in evidence. Preserve payload bytes while
         # enforcing the same guard for new writes of those prepared requests.
+        source = args["extracted_from"]
+        quoted = {"%s@%s [%s:%s]: %s" % (source["name"], source["sha"],
+                  span["start"], span["end"], span["text"]) for span in source["spans"]}
         legacy = [e[len("Identity selected: "):] for e in
                   (args.get("lifecycle") or {}).get("evidence", [])
-                  if e.startswith("Identity selected: ")]
+                  if e.startswith("Identity selected: ") and e not in quoted]
         if legacy:
             try:
                 value = json.loads(legacy[0]) if len(legacy) == 1 else None
@@ -523,6 +526,8 @@ def check_identity(db, args):
                 return error("identity_reprepare_required", "Prepare this legacy identity request again")
     if value is None:
         return None
+    if not args.get("expected_fact_sha"):
+        return error("invalid_argument", "Keep expected_fact_sha from the prepared identity request")
     record, bad = identity_record(db, value["name"], value["sha"], args.get("project_id") or "")
     if bad:
         return bad

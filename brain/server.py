@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 import time
 import traceback
@@ -20,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.5.2"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.5.3"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -840,20 +841,39 @@ def serve() -> int:
             elif method == "ping":
                 _result(mid, {})
             elif method == "tools/list":
-                if db is None:
-                    db = store.connect()
-                _result(mid, {"tools": tools_for(db)})
+                listing = None
+                try:
+                    listing = store.connect(readonly=True)
+                    listed = tools_for(listing)
+                except (OSError, sqlite3.Error):
+                    listed = tools_for(None)
+                finally:
+                    if listing is not None:
+                        listing.close()
+                _result(mid, {"tools": listed})
             elif method == "tools/call":
                 params = req.get("params") or {}
-                if db is None:
-                    db = store.connect()
                 tool_name, arguments = params.get("name"), params.get("arguments", {})
+                if tool_name != "review_identity" and db is None:
+                    db = store.connect()
                 if tool_name in ("recall", "memory_history") and isinstance(arguments, dict):
                     from brain import recalljson
                     valid = tool_name != "recall" or recalljson.validate(arguments) is None
                     if valid and store.needs_reindex(db):
                         store.reindex(db, recalibrate=False)
-                text = call_tool(db, tool_name, arguments)
+                if tool_name == "review_identity":
+                    from brain import remembercontract as rc
+                    reader = None
+                    try:
+                        reader = store.connect(readonly=True)
+                        text = call_tool(reader, tool_name, arguments)
+                    except (OSError, sqlite3.Error):
+                        text = json.dumps(rc.error("index_pending", "Index memories explicitly before reviewing identities"))
+                    finally:
+                        if reader is not None:
+                            reader.close()
+                else:
+                    text = call_tool(db, tool_name, arguments)
                 result = {"content": [{"type": "text", "text": text}]}
                 try:
                     structured = json.loads(text)

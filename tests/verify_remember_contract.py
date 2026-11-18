@@ -537,6 +537,19 @@ def identity_checks(db):
     check('guard is advertised for consumers',capabilities.tool_flags(server.TOOLS)['remember']['identity_reference_guard'])
     old_success=prep(name='identity_legacy_success')['save_arguments']
     old_success.pop('identity_reference')
+    missing_guard=dict(old_success)
+    missing_guard.pop('expected_fact_sha')
+    check('legacy reference requires its group snapshot',(_j(db,**missing_guard).get('error') or {}).get('code')=='invalid_argument')
+    leaked=os.path.join(_MEM,old_success['name']+'.md')
+    if os.path.exists(leaked):
+        os.remove(leaked)
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+    quoted=dict(old_success)
+    quoted['extracted_from']=dict(old_success['extracted_from'],name='Identity selected: watering notes')
+    src=quoted['extracted_from']
+    quoted['lifecycle']=dict(old_success['lifecycle'],evidence=["%s@%s [%s:%s]: %s" %
+        (src['name'],src['sha'],span['start'],span['end'],span['text']) for span in src['spans']])
+    check('ordinary source quotation is not a legacy identity',rc.check_identity(db,quoted) is None)
     check('valid 2.5.0 reference can still save',_j(db,**old_success).get('result')=='new')
     # A second SQLite connection moves the anchor after its initial validation.
     # The planner must not compute an empty/other group guard from newer index rows.
@@ -575,6 +588,16 @@ def identity_checks(db):
 
 
 def main() -> int:
+    import subprocess
+    cold=os.path.join(_TMP,'cold-review')
+    requests=[dict(jsonrpc='2.0',id=1,method='initialize'),dict(jsonrpc='2.0',id=2,method='tools/list'),
+              dict(jsonrpc='2.0',id=3,method='tools/call',params=dict(name='review_identity',arguments=dict(names=['missing'])))]
+    wire=subprocess.run([sys.executable,'-m','brain.server'],input=''.join(json.dumps(r)+'\n' for r in requests),
+                        text=True,capture_output=True,cwd=ROOT,env=dict(os.environ,BRAIN_HOME=cold),timeout=30)
+    replies=[json.loads(line) for line in wire.stdout.splitlines() if line.strip()]
+    last=replies[-1]['result'] if replies else {}
+    check('cold MCP identity review and discovery do not create the index',not os.path.exists(cold) and
+          last.get('isError') and json.loads(last['content'][0]['text'])['error']['code']=='index_pending',wire.stderr[-200:])
     db = _build()
     base = dict(description="harbour ledger rule", type="lesson", body="The ledger closes on friday.")
 
