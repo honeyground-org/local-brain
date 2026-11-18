@@ -22,7 +22,7 @@ def evidence(db, n, winner, start=0):
         db.execute("INSERT OR IGNORE INTO docs(path,name,source,sha) VALUES('fixture','fixture','memory','sha')")
         for i in range(start, start+n):
             scores = {a: int(a == winner) for a in personal.ARMS}
-            db.execute('INSERT INTO personal_events(identity,session,turn,query,path,sha,exposed,measured,scores,costs) VALUES(?,?,?,?,?,?,?,?,?,?)',
+            db.execute('INSERT INTO personal_events(identity,session,turn,query,path,sha,exposed,measured,scores,costs,settled) VALUES(?,?,?,?,?,?,?,?,?,?,1)',
                        (personal.evidence_prefix()+str(i), 'session-'+str(i), 1, 'fixture', 'fixture', 'sha', 0, 1, json.dumps(scores),
                         json.dumps({a: .01 for a in personal.ARMS})))
 
@@ -48,6 +48,7 @@ def verify_semantic_route():
          patch.object(personal.time, 'monotonic', return_value=1):
         for i in range(12):
             personal.record(db,'orchid '+str(i),hit['path'],'route-session-'+str(i),1)
+            personal.settle(db,'route-session-'+str(i),1)
         result = personal.update(db)
         assert result['arm']=='baseline', 'cold observations certified a semantic policy'
         assert db.execute('SELECT COUNT(*) FROM personal_events WHERE measured=0').fetchone()[0]==12
@@ -120,13 +121,14 @@ def verify_turn_edit_order():
                 feed(tool('read','Read',{'file_path':'/note'}))
                 feed({'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'read','content':'orchid'}]}})
                 if order in ('read_edit','read_remember','read_shell'):edited_event()
+                feed({'type':'user','message':{'role':'user','content':'next independent turn'}})
             rows=db.execute('SELECT edited FROM personal_events').fetchall()
             assert len(rows)==12 and all(bool(r[0])==is_edited for r in rows), (order,[tuple(r) for r in rows])
             result=personal.update(db)
             assert result['arm']==('baseline' if is_edited else 'fusion'), (order,result)
             if not is_edited:
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v4:' || substr(identity,4)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v5:' || substr(identity,4)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -134,7 +136,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v4 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v5 support rejected')
 
 
 def verify_scoped_meaning():
@@ -214,6 +216,7 @@ def verify_resolved_vector(real_semantic=False):
                 assert current[0]['cosine']==-1.0, 'old cosine attached to current body '+case
             for i in range(12):
                 personal.record(db,'water '+str(i),'/current','revision-'+str(i),1)
+                personal.settle(db,'revision-'+str(i),1)
             result=personal.update(db)
             assert result['arm'] in (('fusion','linked') if 3 in ids else ('baseline',)), ('measurement version mismatch',case,result,[dict(r) for r in db.execute('SELECT scores,costs FROM personal_events LIMIT 2')])
             served=json.loads(server.call_tool(db,'recall',{'query':'water live'}))['rows']
@@ -258,6 +261,56 @@ def verify_retired_budget():
         assert not why and len(rows)==1 and rows[0]['name']=='current' and rows[0]['cosine']==0.6
     db.close()
     print('PASS: 41 SHA-pinned legacy predecessors cannot exhaust k=8; absent current vector stays empty')
+
+
+def verify_unsettled_evidence(cases=('unfinished','failed_veto')):
+    import sqlite3
+    from brain import hosts, observe, server, tail
+    hosts.pin('claude-code')
+    for case in cases:
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+        db.execute("INSERT INTO docs(path,name,source,sha,body) VALUES('/note','note','memory','sha','orchid')");db.commit()
+        def user(text):return dict(type='user',message=dict(role='user',content=text))
+        def tool(tid,name,args):return dict(type='assistant',message=dict(content=[dict(type='tool_use',id=tid,name=name,input=args)]))
+        def baseline(db,name,args,**kw):kw['_retrieval']['baseline_seconds']=0.01;return '{}'
+        with patch.object(tail,'_db',return_value=db), patch.object(tail,'_close_db'), patch.object(observe,'write'), \
+             patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(server,'call_tool',side_effect=baseline), \
+             patch.object(personal,'candidates',side_effect=lambda db,q,base,arm,*a,**k:base if arm=='baseline' else [dict(path='/note')]), \
+             patch.object(personal.time,'monotonic',return_value=0):
+            records=[]
+            for i in range(12):
+                sid=case+str(i);path=Path(tmp.name)/(sid+'.jsonl')
+                events=[user('orchid '+sid),tool('read','Read',{'file_path':'/note'}),
+                        dict(type='user',message=dict(content=[dict(type='tool_result',tool_use_id='read',content='orchid')]))]
+                if case=='failed_veto':
+                    if i==11:events.append(tool('shell','Bash',{'command':'python3 change.py'}))
+                    events.append(user('next turn'))
+                path.write_bytes(('\r\n'.join(json.dumps(e) for e in events)+'\r\n').encode())
+                rec=dict(session_id=sid,offset=0,tail=tail._blank_tail(),saves=0)
+                if case=='failed_veto' and i==11:
+                    with patch.object(personal,'edited',side_effect=sqlite3.OperationalError('locked')):tail.scan(str(path),rec)
+                    assert rec['offset']<path.stat().st_size
+                else:tail.scan(str(path),rec)
+                records.append((path,rec))
+            assert personal.update(db)['arm']=='baseline',case+' certified an unfinished turn'
+            assert personal.apply(db,'orchid',['baseline'],8)==['baseline']
+            assert not personal.certified(db,personal.state(db))
+            # Even premeasured rows must pass the settled-turn gate during serving.
+            with db:
+                db.execute("UPDATE personal_events SET measured=1,scores=?,costs=?",(json.dumps(dict(baseline=0,fusion=1,linked=1)),json.dumps(dict(baseline=.01,fusion=.01,linked=.01))))
+            prospective=dict(signature=personal.signature(),support=[r[0] for r in db.execute('SELECT id FROM personal_events')],cost_limit=.02)
+            assert not personal.certified(db,prospective),case+' certified premeasured pending evidence'
+            for path,rec in records:
+                if case=='unfinished':
+                    with path.open('ab') as f:f.write((json.dumps(user('next turn'))+'\r\n').encode())
+                tail.scan(str(path),json.loads(json.dumps(rec)))
+            result=personal.update(db)
+            assert result['arm']==('fusion' if case=='unfinished' else 'baseline'),(case,result)
+            if case=='failed_veto':
+                assert db.execute('SELECT edited,settled FROM personal_events WHERE session=?',(case+'11',)).fetchone()[:]==(1,1)
+            else:assert personal.certified(db,personal.state(db))
+        db.close()
+    print('PASS: EOF is not turn completion; failed-veto retry cannot train or certify; next user confirms clean turns')
 
 
 def verify_disputed_support():
@@ -441,6 +494,7 @@ def main():
     other.close(); db.close()
     clock.stop()
     cache.stop()
+    verify_unsettled_evidence()
     verify_disputed_support()
     verify_support_and_cost()
     verify_retired_budget()

@@ -356,7 +356,7 @@ def _use(ev: tuple, rec: dict) -> None:
 
 
 class EvidenceVetoUnavailable(RuntimeError):
-    """An edit exclusion must be durable before scanning can pass its line."""
+    """Evidence state must be durable before scanning can pass its line."""
 
 
 def _exclude_turn(rec):
@@ -375,6 +375,12 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
     host = hosts.active()
     text = host.user_text(line)
     if text:
+        previous = rec.get("use") or {}
+        if previous.get("collector_version") == personal.OBSERVATION_VERSION:
+            try:
+                personal.settle(_db(), rec.get("session_id", ""), previous.get("turn", 0))
+            except Exception as exc:
+                raise EvidenceVetoUnavailable() from exc
         tail["user_says"] = (tail["user_says"] + [text[:USER_SAY_CHARS]])[-LIST_CAP:]
         u = rec.setdefault("use", {"turn": 0, "shown": [], "calls": [], "opened": []})
         u["turn"] += 1

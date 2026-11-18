@@ -346,3 +346,21 @@ checks control covers this gap; the existing ten-process check remains unchanged
 
 Transcript cursors count original bytes, including CRLF, rather than re-encoding universally
 translated text lines. Recovery fixtures cover both LF and CRLF with multibyte UTF-8 input.
+
+
+### Confirmed turn boundaries (2.7.19)
+
+A scan reaching EOF is not proof that a user turn is finished: the agent can still run a
+shell command later, and an exclusion write can be waiting for retry. New observations
+therefore start unsettled. Only a subsequently scanned user message settles the preceding
+turn; its exclusion records must have been processed before that cursor can advance.
+Training and certification both require settled evidence, including already measured rows.
+A final turn with no subsequent user message stays diagnostic/pending. This intentionally
+reduces the available sample rather than treating a Stop hook or EOF as proof of completion.
+Collector 6 invalidates prior collector certificates without deleting their history.
+
+The regression uses twelve actual CRLF host transcripts, injects one SQLite failure after
+a read and before a shell exclusion, and invokes training and serving before retry. Both
+retain the baseline; recovery marks the edited turn excluded. A separate clean-turn control
+stays pending at EOF and becomes eligible only after a subsequent user message. Explicit
+premeasured support cannot bypass the settled flag. Native-host outcome benefit is unmeasured.

@@ -17,7 +17,7 @@ import time
 
 ARMS = ("baseline", "fusion", "linked")
 KEY = "personal_policy_v2"
-OBSERVATION_VERSION = 5
+OBSERVATION_VERSION = 6
 ALPHA = 0.05
 
 
@@ -29,9 +29,12 @@ def ensure(db):
     db.execute("CREATE TABLE IF NOT EXISTS personal_events("
                "id INTEGER PRIMARY KEY, identity TEXT UNIQUE, session TEXT, turn INTEGER, query TEXT, "
                "path TEXT, sha TEXT, exposed INTEGER, edited INTEGER DEFAULT 0, measured INTEGER DEFAULT 0, "
-               "scores TEXT, costs TEXT, terms TEXT DEFAULT '[]')")
+               "scores TEXT, costs TEXT, terms TEXT DEFAULT '[]', settled INTEGER DEFAULT 0)")
     if "terms" not in {r[1] for r in db.execute("PRAGMA table_info(personal_events)")}:
         db.execute("ALTER TABLE personal_events ADD COLUMN terms TEXT DEFAULT '[]'")
+    if "settled" not in {r[1] for r in db.execute("PRAGMA table_info(personal_events)")}:
+        db.execute("ALTER TABLE personal_events ADD COLUMN settled INTEGER DEFAULT 0")
+    db.execute("CREATE INDEX IF NOT EXISTS personal_events_turn ON personal_events(session,turn)")
     db.execute("CREATE TABLE IF NOT EXISTS personal_edited_turns("
                "session TEXT NOT NULL, turn INTEGER NOT NULL, PRIMARY KEY(session,turn))")
 
@@ -76,7 +79,7 @@ def certified(db, s):
         ids = support[start:start + 500]
         found = db.execute("SELECT d.id FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
                            "WHERE e.id IN (" + ",".join("?" for _ in ids) + ") "
-                           "AND e.measured=1 AND e.edited=0 AND e.exposed=0 AND e.identity LIKE ?",
+                           "AND e.measured=1 AND e.settled=1 AND e.edited=0 AND e.exposed=0 AND e.identity LIKE ?",
                            list(ids) + [evidence_prefix() + "%"]).fetchall()
         current = _current_ids(db, {r[0] for r in found})
         if len(found) != len(ids) or any(r[0] not in current for r in found):
@@ -138,6 +141,13 @@ def record(db, query, path, session, turn, exposed=False, terms=()):
         db.execute("INSERT OR IGNORE INTO personal_events(identity,session,turn,query,path,sha,exposed,terms,edited) "
                    "VALUES(?,?,?,?,?,?,?,?,EXISTS(SELECT 1 FROM personal_edited_turns WHERE session=? AND turn=?))",
                    (identity, session, turn, query, path, doc[0], int(exposed), json.dumps(terms), session, turn))
+
+
+def settle(db, session, turn):
+    """A subsequent user message confirms the prior turn has been fully scanned."""
+    ensure(db)
+    with db:
+        db.execute("UPDATE personal_events SET settled=1 WHERE session=? AND turn=?", (session, turn))
 
 
 def edited(db, session, turn):
@@ -300,6 +310,8 @@ def update(db, mode="query"):
             with db:
                 db.execute("UPDATE personal_events SET measured=-1 WHERE id=?", (ev["id"],))
             continue
+        if not ev["settled"]:
+            continue  # the host may still write later in this user turn
         t = time.monotonic()
         terms = json.loads(ev["terms"] or "[]")
         base = []
@@ -329,7 +341,7 @@ def update(db, mode="query"):
     # Evidence for a removed/edited document cannot promote a policy for its replacement.
     # Independent sessions, not many reads in one conversation, are the sampling units.
     rows = db.execute("SELECT e.*,d.id AS current_doc_id FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
-                      "WHERE measured=1 AND edited=0 AND exposed=0 AND e.identity LIKE ? AND e.id>? "
+                      "WHERE measured=1 AND settled=1 AND edited=0 AND exposed=0 AND e.identity LIKE ? AND e.id>? "
                       "AND NOT EXISTS(SELECT 1 FROM personal_events old WHERE old.session=e.session AND old.id<=?) "
                       "ORDER BY e.id", (evidence_prefix() + "%", s.get("after", 0), s.get("after", 0))).fetchall()
     current = _current_ids(db, {r["current_doc_id"] for r in rows})
