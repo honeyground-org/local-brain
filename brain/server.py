@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.2"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.3"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -854,21 +854,22 @@ def serve() -> int:
             elif method == "tools/call":
                 params = req.get("params") or {}
                 tool_name, arguments = params.get("name"), params.get("arguments", {})
-                if tool_name != "review_identity" and db is None:
+                readonly_tool = tool_name in ("review_identity", "prepare_fact", "prepare_revision", "memory_review")
+                if not readonly_tool and db is None:
                     db = store.connect()
                 if tool_name in ("recall", "memory_history") and isinstance(arguments, dict):
                     from brain import recalljson
                     valid = tool_name != "recall" or recalljson.validate(arguments) is None
                     if valid and store.needs_reindex(db):
                         store.reindex(db, recalibrate=False)
-                if tool_name == "review_identity":
+                if readonly_tool:
                     from brain import remembercontract as rc
                     reader = None
                     try:
                         reader = store.connect(readonly=True)
                         text = call_tool(reader, tool_name, arguments)
                     except (OSError, sqlite3.Error):
-                        text = json.dumps(rc.error("index_pending", "Index memories explicitly before reviewing identities"))
+                        text = json.dumps(rc.error("index_pending", "Index memories explicitly before read-only review or preparation"))
                     finally:
                         if reader is not None:
                             reader.close()

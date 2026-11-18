@@ -1406,3 +1406,9 @@ from the flushed temporary file. If another writer creates the destination after
 SHA check, saving returns a conflict without changing that file. Filesystems that cannot make
 hard links fail safely; there is no overwrite fallback. Existing-version updates retain their
 optimistic SHA checks, and successful identical retries remain noops.
+
+`prepare_fact`, `prepare_revision`, `review_identity` and `memory_review` open an existing
+index read-only, including the first call in a fresh MCP session. If no readable index exists,
+they return `index_pending` without creating a home or initialising schema. Run indexing
+explicitly. Malformed optional historical evidence or unrelated metadata does not disable
+filtering of a valid recorded automatic source footer; authored body links remain available.

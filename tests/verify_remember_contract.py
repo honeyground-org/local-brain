@@ -566,13 +566,28 @@ def identity_checks(db):
         bid=db.execute('SELECT id FROM docs WHERE path=?',(legacy_bracket_path,)).fetchone()[0]
         fid=db.execute('SELECT id FROM docs WHERE path=?',(bracket_foreign,)).fetchone()[0]
         check('legacy bracket provenance creates no foreign graph edge',not graphstore.LOCAL.linked(db,bid,fid))
+        for evidence in (None, 7, 'invalid', {}, []):
+            malformed = dict(bracket, lifecycle=dict(bracket['lifecycle'], evidence=evidence), body='Keep [[authored]] explicit.')
+            text = rc.render('malformed_footer', malformed, '')
+            path = os.path.join(_MEM, 'malformed_footer.md')
+            with open(path, 'w', encoding='utf-8') as f: f.write(text)
+            check('malformed evidence keeps authored links but excludes provenance '+repr(evidence),
+                  set(store.read_doc(path, 'memory')['links']) == {'authored'})
+        for field in ('lifecycle', 'identity_reference', 'search_aliases'):
+            text = rc.render('malformed_footer', dict(bracket, body='Keep [[authored]] explicit.'), '')
+            import re
+            text = re.sub(r'(?m)^'+field+r':[^\n]*', field+': {invalid', text) if field+':' in text else text.replace('---\n', '---\n'+field+': {invalid\n', 1)
+            with open(path, 'w', encoding='utf-8') as f: f.write(text)
+            check('unrelated malformed metadata cannot disable source filtering '+field,
+                  set(store.read_doc(path, 'memory')['links']) == {'authored'})
+        os.remove(path)
         check('successful legacy extraction retry remains noop',_j(db,**bracket).get('result')=='noop' and _read(bracket['name'])==legacy_bracket_text)
         db.execute('INSERT OR IGNORE INTO links(src_id,dst_name) VALUES(?,?)',(quoted_id,ref['name']))
         store.set_meta(db,'graph_provenance_version','0')
         db.commit()
         check('legacy graph fixture starts with contaminated edge',graphstore.LOCAL.linked(db,quoted_id,foreign_id))
         store.reindex(db,recalibrate=True,sync=False,heal=False,queue_embedding=False,refresh_history=False)
-        check('normal indexing repairs legacy provenance edges without file edits',store.get_meta(db,'graph_provenance_version')=='3' and not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
+        check('normal indexing repairs legacy provenance edges without file edits',store.get_meta(db,'graph_provenance_version')=='4' and not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
 
 
     finally:
@@ -757,6 +772,35 @@ def main() -> int:
     check('cold MCP identity review and discovery do not create the index',not os.path.exists(cold) and
           last.get('isError') and json.loads(last['content'][0]['text'])['error']['code']=='index_pending',wire.stderr[-200:])
     db = _build()
+    for tool in ('prepare_fact', 'prepare_revision', 'memory_review'):
+        for existing in (False, True):
+            home = os.environ['BRAIN_HOME'] if existing else os.path.join(_TMP, 'cold-' + tool)
+            requests = [dict(jsonrpc='2.0', id=1, method='initialize'),
+                        dict(jsonrpc='2.0', id=2, method='tools/list'),
+                        dict(jsonrpc='2.0', id=3, method='tools/call', params=dict(name=tool, arguments={}))]
+            before = db.total_changes
+            wire = subprocess.run([sys.executable, '-m', 'brain.server'],
+                input=''.join(json.dumps(r)+'\n' for r in requests), text=True, encoding='utf-8',
+                capture_output=True, cwd=ROOT, env=dict(os.environ, BRAIN_HOME=home), timeout=30)
+            replies = [json.loads(line) for line in wire.stdout.splitlines() if line.strip()]
+            result = json.loads(replies[-1]['result']['content'][0]['text'])
+            check('cold read-only '+tool+' existing='+str(existing),
+                  (result.get('ok') is True or (result.get('error') or {}).get('code') == 'invalid_argument') if existing else
+                  not os.path.exists(home) and (result.get('error') or {}).get('code') == 'index_pending', result)
+            check('cold read-only call leaves open index unchanged '+tool, db.total_changes == before)
+    from unittest.mock import patch
+    original_connect = store.connect
+    opened = []
+    def read_connection(*args, **kwargs):
+        opened.append(kwargs.get('readonly', False))
+        return original_connect(*args, **kwargs)
+    for tool in ('review_identity', 'prepare_fact', 'prepare_revision', 'memory_review'):
+        opened.clear()
+        request = json.dumps(dict(jsonrpc='2.0', id=1, method='tools/call', params=dict(name=tool, arguments={})))
+        with patch.object(server, '_requests', return_value=iter([request])), patch.object(server, '_result'), \
+                patch.object(store, 'connect', side_effect=read_connection), patch('brain.hosts.utf8_stdio'):
+            server.serve()
+        check('first dispatcher call opens only a read-only connection '+tool, opened == [True], opened)
     base = dict(description="harbour ledger rule", type="lesson", body="The ledger closes on friday.")
 
     print("=" * 72 + "\n① protected defaults\n" + "=" * 72)
