@@ -210,8 +210,17 @@ def save(sc: dict, note: str = "", path: str = "") -> str:
            "total": sc["total"],
            "axes": {r["key"]: r["score"] for r in sc["axes"]},
            "raw": {r["key"]: r["raw"] for r in sc["axes"]}}
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    if not valid_history_record(rec):
+        raise ValueError("Cannot save an inconsistent performance measurement")
+    payload = json.dumps(rec, ensure_ascii=False).encode("utf-8") + b"\n"
+    with open(path, "a+b") as fh:
+        fh.seek(0, os.SEEK_END)
+        if fh.tell():
+            fh.seek(-1, os.SEEK_END)
+            if fh.read(1) != b"\n":
+                payload = b"\n" + payload
+        # A single append preserves every old byte, including a truncated UTF-8 tail.
+        fh.write(payload)
     return path
 
 
