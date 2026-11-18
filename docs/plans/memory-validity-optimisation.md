@@ -343,3 +343,6 @@ The concurrent-session check also exposed a stale-observation race: a worker can
 between a session detecting work and acquiring the worker lease. Session starts now recheck
 the reasons under their acquired lease before spawning. A deterministic completion-between-
 checks control covers this gap; the existing ten-process check remains unchanged.
+
+Transcript cursors count original bytes, including CRLF, rather than re-encoding universally
+translated text lines. Recovery fixtures cover both LF and CRLF with multibyte UTF-8 input.

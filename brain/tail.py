@@ -200,11 +200,12 @@ def scan(transcript: str, rec: dict) -> dict:
         offset, tail, saves = 0, _blank_tail(), 0
 
     try:
-        with open(transcript, encoding="utf-8", errors="replace") as f:
+        with open(transcript, "rb") as f:
             f.seek(offset)
-            for line in f:
-                if not line.endswith("\n"):     # the last line has not finished being written yet
+            for raw in f:
+                if not raw.endswith(b"\n"):     # the last line has not finished being written yet
                     break
+                line = raw.decode("utf-8", "replace")
                 before_rec, before_tail = copy.deepcopy(rec), copy.deepcopy(tail)
                 try:
                     _apply(line, tail, rec)
@@ -215,7 +216,7 @@ def scan(transcript: str, rec: dict) -> dict:
                     rec.update(before_rec)
                     tail = before_tail
                     break
-                offset += len(line.encode("utf-8", "replace"))
+                offset += len(raw)
                 if tail.get("_saved"):
                     tail.pop("_saved")
                     saves += 1
