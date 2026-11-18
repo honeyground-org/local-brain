@@ -420,3 +420,15 @@ and mixed repeated delimiters, in both formats and all lanes, immediately and af
 ten turns. Every exposed case retains baseline; a clean independent control promotes.
 The previous collector falsely promotes bracketed direct and arrow-containing related
 results. These checks establish evidence eligibility, not native-host quality uplift.
+
+
+### Overlapping exposure boundaries (2.7.23)
+
+A name ending in a left arrow shares separator whitespace with the rendered link
+origin. Non-overlapping matching skipped that second boundary. A zero-width lookahead
+now visits every boundary, including shared whitespace and repeated trailing arrows.
+Collector 10 excludes potentially affected collector 9 observations from certification.
+Existing fixtures add trailing arrows, repeated arrows and a trailing bracket, for
+168 name/format/lane/delay combinations. The previous collector falsely promotes a
+trailing-arrow related result; the corrected collector preserves baseline while the
+genuinely independent-session control still promotes.
