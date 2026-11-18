@@ -750,7 +750,7 @@ def semantic(db: sqlite3.Connection, query: str, k: int = 3,
 def meaning(db: sqlite3.Connection, query: str, k: int, exclude: Sequence[str] = (),
             kinds: Optional[Sequence[str]] = None, sources: Optional[Sequence[str]] = None,
             width: int = 0,
-            scope: Optional[str] = None) -> Tuple[List[dict], str]:
+            scope: Optional[str] = None, exclude_paths: Sequence[str] = ()) -> Tuple[List[dict], str]:
     """★The k memories closest in meaning that the caller does not already have★ — for a caller that
     asked for them by number (MCP `recall`'s `semantic_k`). Returns (rows, why-none).
 
@@ -759,7 +759,8 @@ def meaning(db: sqlite3.Connection, query: str, k: int, exclude: Sequence[str] =
     question alone: meaning's top 3 held the answer for 24 (words' for 22), and words and meaning found
     different answers (13 only by words, 15 only by meaning). Each row reads the passage of the chunk that
     matched (§evidence), not the head — cut to `width`, the length the caller shows, so the words that
-    matched are inside what is shown. `exclude` (names already shown), `kinds` and `sources` apply as in
+    matched are inside what is shown. `exclude` retains the legacy name filter; `exclude_paths`
+    excludes exact documents without hiding homonyms in other scopes. `kinds` and `sources` apply as in
     `recall`; memories always in context are left out. ⛔ A failure is said, not swallowed — why-none
     carries the reason (no embedding engine chosen, a quota, the network) when rows is empty for that reason.
     """
@@ -767,8 +768,9 @@ def meaning(db: sqlite3.Connection, query: str, k: int, exclude: Sequence[str] =
     if k <= 0:
         return [], ""
     skip = set(exclude) | set(_always_in_context())
+    skip_paths = set(exclude_paths)
     out: List[dict] = []
-    want = k + len(skip)
+    want = k + len(skip) + len(skip_paths)
     n_docs = max(1, store.corpus_stats(db)["docs"])
     while True:
         try:
@@ -779,7 +781,7 @@ def meaning(db: sqlite3.Connection, query: str, k: int, exclude: Sequence[str] =
         rows = []
         for doc_id, cos, ratio in hits:
             row = _hydrate(db, doc_id)
-            if row is None or row["name"] in skip:
+            if row is None or row["name"] in skip or row["path"] in skip_paths:
                 continue
             if kinds and row["kind"] not in kinds:
                 continue

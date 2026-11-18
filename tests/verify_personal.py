@@ -78,6 +78,38 @@ def verify_semantic_route():
     print('PASS: cold evidence stays pending; warm evidence uses the actual automatic semantic route')
 
 
+def verify_scoped_meaning():
+    import sqlite3
+    from brain import search, server
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    for did,path in ((1,'/seed'),(2,'/a/route'),(3,'/b/route')):
+        db.execute('INSERT INTO docs(id,path,name,project_id,source,body) VALUES(?,?,?,?,?,?)',
+                   (did,path,'seed' if did==1 else 'route',path.split('/')[1],'memory','orchid'))
+    db.commit()
+    rows=[search._present(search._hydrate(db,did),1,[],None,[],db) for did in (1,2,3)]
+    with patch.object(search,'recall',return_value=[rows[0]]) as recall, \
+         patch.object(search,'query_weights',return_value=[('orchid',1,['orchid'])]), \
+         patch.object(search,'union',return_value=([rows[0]],'')), \
+         patch.object(vectors,'search',return_value=[(2,0.9,1.2),(3,0.8,1.1)]), \
+         patch.object(vectors,'best_chunks',return_value={}), \
+         patch.object(vectors,'_qcache_get',return_value=[1.0]), \
+         patch.object(server,'_words_unsure',return_value=True), patch.object(server,'_note_recall'), \
+         patch.object(personal,'apply',side_effect=lambda db,q,base,*a,**k:base) as apply:
+        baseline=json.loads(server.call_tool(db,'recall',{'query':'orchid'}))
+        assert {r['path'] for r in baseline['meaning']['rows']}=={'/a/route','/b/route'}
+        apply.side_effect=None;apply.return_value=[rows[1]]
+        ranked=json.loads(server.call_tool(db,'recall',{'query':'orchid'}))
+        assert [r['path'] for r in ranked['results']]==['/a/route']
+        assert [r['path'] for r in ranked['meaning']['rows']]==['/b/route'], 'same-name scope lost after reranking'
+        # The initial meaning query must also exclude only the exact lexical path.
+        recall.return_value=[rows[1]]
+        with patch.object(server,'_words_unsure',return_value=False):
+            initial=json.loads(server.call_tool(db,'recall',{'query':'orchid','semantic_k':3}))
+        assert [r['path'] for r in initial['meaning']['rows']]==['/b/route'], 'same-name scope lost before reranking'
+    db.close()
+    print('PASS: actual MCP meaning preserves scoped homonyms and removes exact duplicates')
+
+
 def verify_resolved_vector(real_semantic=False):
     from contextlib import nullcontext
     import array
@@ -239,6 +271,12 @@ def verify_support_and_cost():
 
 
 def main():
+    # These policy/support fixtures supply synthetic 10ms scores, so validation
+    # time must also be synthetic. Wall-clock cost boundaries are checked below.
+    import itertools
+    ticks = itertools.count(0, 0.000001)
+    clock = patch.object(personal.time, 'monotonic', side_effect=lambda:next(ticks))
+    clock.start()
     cache = patch.object(vectors, "_qcache_get", return_value=[1.0])
     cache.start()
     db = store.connect()
@@ -311,10 +349,12 @@ def main():
                     {'k':4}, {'semantic_k':0}, {'semantic_k':20}, {'sources':['x']}):
         assert not personal.eligible(request), request
     other.close(); db.close()
+    clock.stop()
     cache.stop()
     verify_support_and_cost()
     verify_retired_budget()
     verify_semantic_route()
+    verify_scoped_meaning()
     verify_resolved_vector()
     verify_resolved_vector(real_semantic=True)
     print('PASS: weak evidence retained, independent holdout promoted, drift rolled back, users isolated')

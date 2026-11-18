@@ -236,17 +236,15 @@ def _spawn() -> None:
     else:
         kw["start_new_session"] = True
     from brain import launch                             # the installed brain, never a `brain/` in some folder
-    proc = subprocess.Popen(launch.argv("brain.deferred"), **kw)
-    # ★Hand the lease to the worker at once★ — the lease named the short-lived process that started it, and when
-    # that process exited before the worker took over, the next caller saw a dead owner and started a second
-    # worker (ten session starts at once produced two). Same token, the worker's PID.
-    try:
-        with _lease_guard() as held:
-            if held and _TOKEN and _owner().get("token") == _TOKEN:
-                with open(_lock_path(), "w", encoding="utf-8") as fh:
-                    json.dump({"pid": proc.pid, "at": time.time(), "token": _TOKEN}, fh)
-    except OSError:
-        pass
+    # Keep spawn and PID publication in one lease transaction. Taking the guard
+    # only after Popen could fail under contention, leaving a short-lived parent
+    # as owner until it exited and another session started a duplicate worker.
+    with _lease_guard() as held:
+        if not held or not _TOKEN or _owner().get("token") != _TOKEN:
+            raise RuntimeError("worker lease unavailable before spawn")
+        proc = subprocess.Popen(launch.argv("brain.deferred"), **kw)
+        with open(_lock_path(), "w", encoding="utf-8") as fh:
+            json.dump({"pid": proc.pid, "at": time.time(), "token": _TOKEN}, fh)
 
 
 EMBED_SPACE_KEY = "deferred_embed_space"

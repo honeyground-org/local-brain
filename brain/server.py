@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.14"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.15"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -623,7 +623,7 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             if cached is None:
                 cached = vectors._qcache_get(db, q) is not None
             cost = "query embedding cached" if cached else "one embedding call"
-            mrows, why = search.meaning(db, q, sk, exclude=[r["name"] for r in rows],
+            mrows, why = search.meaning(db, q, sk, exclude_paths=[r["path"] for r in rows],
                                         kinds=args.get("kinds"), sources=args.get("sources"),
                                         width=SHOWN, scope=args.get("scope") or None)
             if why:
@@ -641,8 +641,8 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             if personal.eligible(args) and not semantic_errors:
                 rows = personal.apply(db, q, rows, k, terms=terms, baseline_cost=baseline_seconds)
                 if mrows is not None:
-                    shown = {r["name"] for r in rows}
-                    mrows = [r for r in mrows if r["name"] not in shown]
+                    shown = {r["path"] for r in rows}
+                    mrows = [r for r in mrows if r["path"] not in shown]
                     start = len([r for r in rows if not r.get("related")]) + 1
                     more = ("\n\n" + _fmt_meaning(mrows, why, cost, start, auto=auto)
                             if mrows or not auto else "")

@@ -132,6 +132,26 @@ def main() -> int:
             fh.write('')
         check('empty legacy PID file cannot bypass a live check guard', held and probe_guard() is False)
     check('released check guard is immediately reusable', probe_guard() is True)
+    # A contender cannot enter between process creation and PID publication.
+    from unittest.mock import patch
+    from types import SimpleNamespace
+    real_popen = subprocess.Popen
+    contested = []
+    def spawn_probe(*args, **kwargs):
+        code = ("import json; from brain import deferred;\n"
+                "with deferred._lease_guard() as held: print(json.dumps(held))")
+        p = real_popen([sys.executable,'-c',code], env=dict(os.environ,PYTHONPATH=ROOT),
+                       stdout=subprocess.PIPE, text=True, encoding='utf-8')
+        contested.append(json.loads(p.communicate()[0]))
+        return SimpleNamespace(pid=os.getpid())
+    check('fixture owns the startup lease', deferred._take_lock())
+    try:
+        with patch.object(subprocess,'Popen',side_effect=spawn_probe):
+            deferred._spawn()
+        check('spawn and child PID publication share one guard', contested == [False]
+              and deferred._owner().get('pid') == os.getpid())
+    finally:
+        deferred._release()
     store.reindex(db, full=True)                          # a human-run index: calibrated, pointers built
     first = deferred.on_session_start(db)                 # records the repositories and their fingerprint
     wait_idle()
