@@ -258,3 +258,7 @@ Dashboard and memory_history now share the same scoped history-members helper. A
 ### Certification route and transitive history closure
 
 Automatic-policy measurement now leaves observations without cached query vectors pending instead of substituting semantic_k=0. Serving also retains baseline when the query vector is absent. Warm measurements use the same automatic semantic route as eligible serving, without measurement-triggered embedding calls. Generation changes invalidate prior certificates. History traversal expands the scoped identity group at every reached revision, so a SHA-pinned legacy record and a translated proposal reach the same closure while other scopes and facts stay separate.
+
+### Distinct legacy-source branches and degraded semantic retrieval
+
+A shared SHA-pinned legacy source does not make different topic/facet identities one history. Each fact retains its own revisions plus the source; a source with multiple identities offers separate branches. Dashboard and memory_history expose those branches without editing originals. Cache presence alone is not semantic availability: baseline and candidate retrieval failures leave observations pending, and a degraded live baseline is not reranked by a semantic certificate. A generation bump invalidates earlier certificates. These are correctness guards, not evidence of user-level quality superiority.

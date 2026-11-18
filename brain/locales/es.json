@@ -864,5 +864,7 @@
  "dash.inspect.facet": "Faceta",
  "dash.inspect.no_history": "No hay versiones vinculadas registradas.",
  "dash.inspect.unscoped": "Sin ámbito",
- "cli.dashboard.index_unavailable": "El índice falta, no está disponible o es incompatible. No se ha creado ni migrado. Ejecute brain index explícitamente y vuelva a intentarlo."
+ "cli.dashboard.index_unavailable": "El índice falta, no está disponible o es incompatible. No se ha creado ni migrado. Ejecute brain index explícitamente y vuelva a intentarlo.",
+ "dash.inspect.branches": "Ramas de hechos distintos",
+ "dash.inspect.branches_note": "Comparten una fuente, pero describen hechos distintos. Seleccione una rama para ver su historial."
 }

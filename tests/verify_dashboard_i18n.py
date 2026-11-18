@@ -177,6 +177,7 @@ class Element {
 const elements={};['workspace-data','workspace-i18n','source','scope','validity','search','detail','memory-list','count','prev','next','mtoggle'].forEach(id=>elements[id]=new Element(id));
 function memory(id,name,scope,status,history){return {id,name,project_id:scope,source:'memory',kind:'user',preview:'text',body_chars:4,path:'/private/'+name,validity:{status},history};}
 const records=[memory(1,'old','','superseded',[1,2]),memory(2,'new','','active',[1,2]),memory(3,'foreign','garden','active',[3])];
+records[1].history_branches=[{topic:'separate-fact',facet:'state',members:[3]}];
 elements['workspace-data'].textContent=JSON.stringify({memories:records,states:{superseded:1,active:2}});
 elements['workspace-i18n'].textContent=JSON.stringify({en:{'dash.inspect.all':'All','dash.inspect.unscoped':'Unscoped','dash.inspect.select':'Select a memory'}});
 const langs=[new Element('button')];langs[0].dataset.lang='en';
@@ -189,6 +190,7 @@ const unscoped=elements.scope.options.find(o=>o.text==='Unscoped');assert(unscop
 elements.scope.value=unscoped.value;elements.scope.events.change();assert.equal(elements.count.textContent,'1–2 / 2');
 elements['memory-list'].children[0].events.click();assert.equal(elements.detail.children[0].textContent,'old');
 const history=elements.detail.children.find(n=>n.className==='history-list');history.children[1].events.click();assert.equal(elements.detail.children[0].textContent,'new');
+const branch=elements.detail.children.filter(n=>n.className==='history-list')[1];branch.children[1].events.click();assert.equal(elements.detail.children[0].textContent,'foreign');elements['memory-list'].children[0].events.click();
 elements.scope.value=elements.scope.options.find(o=>o.text==='garden').value;elements.scope.events.change();assert.equal(elements.count.textContent,'1–1 / 1');assert.equal(elements.detail.children[0].textContent,'Select a memory');
 elements.search.value='absent';elements.search.events.input();assert.equal(elements.count.textContent,'0–0 / 0');assert(elements.next.disabled&&elements.prev.disabled);
 console.log('PASS actual handlers: all/unscoped separation, version navigation, excluded detail clearing and empty results');
@@ -271,6 +273,25 @@ def verify_workspace():
               records[7]['history']==[7] and records[8]['history']==[8]
               and records[4]['history']==[4] and records[10]['history']==[10])
         check('linked history inspection does not change the index', before==list(db.iterdump()))
+        branch = dict(topic='subscription-cost', facet='state', status='proposed',
+                      supersedes=['legacy'], legacy_whole_record_sha={'legacy':'5'*40},
+                      valid_from='2026-01-01', change_reason='A distinct fact', evidence=['source'])
+        db.execute("INSERT INTO docs(id,name,path,source,sha,project_id,lifecycle,body) VALUES(?,?,?,?,?,?,?,?)",
+                   (11,'cost-proposal',str(Path(temp)/'11.md'),'memory','b'*40,'garden',json.dumps(branch),'Cost'))
+        db.commit()
+        before = list(db.iterdump())
+        with patch.object(scorecard, 'history', return_value=[]):
+            partitioned = dashboard.payload(db)
+        records = {r['id']:r for r in partitioned['memories']}
+        for did, expected in ((5,[5]),(6,[5,6,9]),(9,[5,6,9]),(11,[5,11])):
+            canonical = lifecycle.history(db, records[did]['name'], scope='garden')
+            check('shared legacy source does not merge distinct fact histories '+str(did),
+                  records[did]['history']==expected and
+                  {r['name'] for r in canonical['revisions']} == {records[i]['name'] for i in expected})
+        check('ambiguous legacy source presents separate inspectable branches',
+              {tuple(b['members']) for b in records[5]['history_branches']}=={(6,9),(11,)}
+              and len(lifecycle.history(db,'legacy',scope='garden')['branches'])==2)
+        check('partitioned history retains all source records without writes', before==list(db.iterdump()))
         empty=sqlite3.connect(':memory:');empty.row_factory=sqlite3.Row;store._init(empty)
         with patch.object(scorecard,'history',return_value=[]):
             data=dashboard.payload(empty)

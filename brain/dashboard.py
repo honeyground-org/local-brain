@@ -655,6 +655,7 @@ def payload(db: sqlite3.Connection) -> dict:
                 item['file_url'] = Path(item['path']).absolute().as_uri()
                 item['validity'] = info
                 item['history'] = sorted(snap.history_members(item['id']))
+                item['history_branches'] = snap.history_branches(item['id'])
                 states[info['status']] += 1
                 rows.append(item)
         history = scorecard.history(limit=30)

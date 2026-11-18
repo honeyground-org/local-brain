@@ -866,5 +866,7 @@
  "dash.inspect.facet": "Facet",
  "dash.inspect.no_history": "No linked versions recorded.",
  "dash.inspect.unscoped": "Unscoped",
- "cli.dashboard.index_unavailable": "The index is missing, unavailable or incompatible. No index was created or migrated. Run brain index explicitly, then retry."
+ "cli.dashboard.index_unavailable": "The index is missing, unavailable or incompatible. No index was created or migrated. Run brain index explicitly, then retry.",
+ "dash.inspect.branches": "Separate fact branches",
+ "dash.inspect.branches_note": "These records share a source, but describe different facts. Choose a branch to inspect its own history."
 }

@@ -864,5 +864,7 @@
  "dash.inspect.facet": "Facette",
  "dash.inspect.no_history": "Aucune version liée enregistrée.",
  "dash.inspect.unscoped": "Sans périmètre",
- "cli.dashboard.index_unavailable": "Index absent, indisponible ou incompatible. Aucun index créé ni migré. Exécutez explicitement brain index, puis réessayez."
+ "cli.dashboard.index_unavailable": "Index absent, indisponible ou incompatible. Aucun index créé ni migré. Exécutez explicitement brain index, puis réessayez.",
+ "dash.inspect.branches": "Branches de faits distincts",
+ "dash.inspect.branches_note": "Ces éléments partagent une source, mais décrivent des faits différents. Choisissez une branche pour consulter son historique."
 }

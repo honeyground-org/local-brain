@@ -21,6 +21,10 @@ OBSERVATION_VERSION = 2
 ALPHA = 0.05
 
 
+class RetrievalUnavailable(RuntimeError):
+    """A candidate cannot be certified from a degraded semantic route."""
+
+
 def ensure(db):
     db.execute("CREATE TABLE IF NOT EXISTS personal_events("
                "id INTEGER PRIMARY KEY, identity TEXT UNIQUE, session TEXT, turn INTEGER, query TEXT, "
@@ -145,10 +149,13 @@ def candidates(db, query, base, arm, k, terms=()):
     qvec = None
     try:
         qvec = vectors._qcache_get(db, query)
-        if qvec is not None:
-            semantic, _ = search.meaning(db, query, width)
-    except sqlite3.Error:
-        pass
+        if qvec is None:
+            raise RetrievalUnavailable("query vector unavailable")
+        semantic, why = search.meaning(db, query, width)
+        if why:
+            raise RetrievalUnavailable(why)
+    except sqlite3.Error as exc:
+        raise RetrievalUnavailable(str(exc)) from exc
     for row in semantic:
         pool.setdefault(row["path"], row)
     weights = search.query_weights(db, " ".join([query] + list(terms)))
@@ -286,14 +293,20 @@ def update(db, mode="query"):
         # Measurement itself must not request a new embedding.
         if vectors._qcache_get(db, ev["query"]) is None:
             continue
-        server.call_tool(db, "recall", args, _measure=True, _capture=base)
+        retrieval = {}
+        server.call_tool(db, "recall", args, _measure=True, _capture=base, _retrieval=retrieval)
+        if retrieval.get("semantic_errors"):
+            continue
         baseline_cost = time.monotonic() - t
         scores, costs = {}, {}
-        for arm in ARMS:
-            t = time.monotonic()
-            rows = candidates(db, ev["query"], base, arm, 8, terms=terms)
-            scores[arm] = int(ev["path"] in [r["path"] for r in rows if not r.get("related")][:3])
-            costs[arm] = baseline_cost + (time.monotonic() - t)
+        try:
+            for arm in ARMS:
+                t = time.monotonic()
+                rows = candidates(db, ev["query"], base, arm, 8, terms=terms)
+                scores[arm] = int(ev["path"] in [r["path"] for r in rows if not r.get("related")][:3])
+                costs[arm] = baseline_cost + (time.monotonic() - t)
+        except RetrievalUnavailable:
+            continue
         with db:
             db.execute("UPDATE personal_events SET measured=1,scores=?,costs=? WHERE id=?",
                        (json.dumps(scores), json.dumps(costs), ev["id"]))

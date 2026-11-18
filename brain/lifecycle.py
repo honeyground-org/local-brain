@@ -225,18 +225,49 @@ class Snapshot:
         d = self.docs[did]
         return self.by_fact.get((d['project_id'], identity(d['meta'])), ())
 
-    def history_members(self, seed):
-        """Same scoped identity and validated predecessor/successor links for every view."""
-        members = {seed} | set(self.fact_members(seed))
-        pending = list(members)
+    def history_partition(self, seed):
+        """Keep fact branches separate even when they share an untracked source."""
+        cache = getattr(self, '_history_cache', None)
+        if cache is None:
+            cache = self._history_cache = {}
+        if seed in cache:
+            return cache[seed]
+        def neighbors(did):
+            return (self.prev.get(did, set()) | self.next.get(did, set())
+                    | set(self.fact_members(did)))
+        component, pending = {seed}, [seed]
         while pending:
-            did = pending.pop()
-            for linked in (self.prev.get(did, set()) | self.next.get(did, set())
-                           | set(self.fact_members(did))):
+            for linked in neighbors(pending.pop()):
+                if linked not in component:
+                    component.add(linked)
+                    pending.append(linked)
+        groups = {}
+        for did in component:
+            meta = self.docs[did]['meta']
+            if meta.get('topic'):
+                groups.setdefault(identity(meta), set()).add(did)
+        anchor = identity(self.docs[seed]['meta']) if self.docs[seed]['meta'].get('topic') else None
+        if anchor is None and len(groups) == 1:
+            anchor = next(iter(groups))
+        members, pending = {seed}, [seed]
+        while pending:
+            for linked in neighbors(pending.pop()):
+                meta = self.docs[linked]['meta']
+                if meta.get('topic') and identity(meta) != anchor:
+                    continue
                 if linked not in members:
                     members.add(linked)
                     pending.append(linked)
-        return members
+        branches = [dict(topic=key[0], facet=key[1], members=sorted(ids))
+                    for key, ids in sorted(groups.items()) if key != anchor] if len(groups) > 1 else []
+        cache[seed] = members, branches
+        return cache[seed]
+
+    def history_members(self, seed):
+        return self.history_partition(seed)[0]
+
+    def history_branches(self, seed):
+        return self.history_partition(seed)[1]
 
     def edge(self, old, new):
         self.next.setdefault(old, set()).add(new)
@@ -447,7 +478,10 @@ def history(db, name, scope=None, offset=0, limit=25):
             'revisions': rows, 'document_history': observed, 'total': len(ordered), 'offset': offset,
             'has_more': offset + limit < len(ordered) or observed.get('has_more', False),
             'revision_has_more': offset + limit < len(ordered), 'history_complete': False,
-            'coverage': 'explicitly linked or same-topic/facet indexed records; unrecorded conversations are unknown'}
+            'branches': [dict(topic=b['topic'], facet=b['facet'],
+                              names=[snap.docs[d]['name'] for d in b['members']])
+                         for b in snap.history_branches(seed)],
+            'coverage': 'same scoped fact with explicit predecessors; different facts sharing a legacy source are separate branches; unrecorded conversations are unknown'}
 
 
 def format_line(row):
