@@ -352,10 +352,13 @@ def update(db, mode="query"):
         # Never certify the automatic semantic route using a lexical-only substitute.
         # Leave cold observations pending; ordinary recall may populate the cache later.
         # Measurement itself must not request a new embedding.
-        if vectors._qcache_get(db, ev["query"]) is None:
-            continue
         retrieval = {}
-        server.call_tool(db, "recall", args, _measure=True, _capture=base, _retrieval=retrieval)
+        try:
+            if vectors._qcache_get(db, ev["query"]) is None:
+                continue
+            server.call_tool(db, "recall", args, _measure=True, _capture=base, _retrieval=retrieval)
+        except (sqlite3.Error, ValueError, TypeError, KeyError, RuntimeError):
+            continue  # isolate an unavailable observation; retry it after later evidence
         if retrieval.get("semantic_errors"):
             continue
         baseline_cost = retrieval.get("baseline_seconds")
@@ -368,7 +371,7 @@ def update(db, mode="query"):
                 rows = candidates(db, ev["query"], base, arm, 8, terms=terms)
                 scores[arm] = int(ev["path"] in [r["path"] for r in rows if not r.get("related")][:3])
                 costs[arm] = baseline_cost + (time.monotonic() - t)
-        except RetrievalUnavailable:
+        except (sqlite3.Error, ValueError, TypeError, KeyError, RuntimeError):
             continue
         with db:
             db.execute("UPDATE personal_events SET measured=1,scores=?,costs=? WHERE id=?",

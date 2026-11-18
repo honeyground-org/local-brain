@@ -80,7 +80,7 @@ def verify_semantic_route():
 
 
 def verify_rejected_observations(check_collection=True, modes=('query','terms')):
-    import array, sqlite3
+    import array, hashlib, sqlite3
     from brain import hosts, observe, recalljson, search, server, tail
     hosts.pin('claude-code')
     def user(text):return dict(type='user',message=dict(role='user',content=text))
@@ -121,23 +121,33 @@ def verify_rejected_observations(check_collection=True, modes=('query','terms'))
                        (personal.evidence_prefix()+'bad'+str(i),'bad'+str(i),1,query,'/valid','sha',terms))
         db.commit()
         def replay(db,name,args,**kw):
-            if args['query'].startswith('degraded'):
-                values={'degraded missing':None,'degraded nan':float('nan'),'degraded negative':-1,'degraded text':'fast'}
+            if args['query']=='degraded exception':
+                raise ValueError('one replay failed')
+            values={'degraded missing':None,'degraded nan':float('nan'),'degraded negative':-1,'degraded text':'fast'}
+            if args['query'] in values:
                 value=values[args['query']]
                 if value is not None:kw['_retrieval']['baseline_seconds']=value
                 return '{}'
             return original_call(db,name,args,**kw)
+        def candidate(db,q,base,arm,*a,**kw):
+            if q=='degraded candidate':raise ValueError('one candidate failed')
+            return base if arm=='baseline' else [dict(path='/valid')]
         with patch.object(vectors,'query_tag',return_value='fixture-cache'),patch.object(observe,'write'), \
              patch.object(search,'recall',return_value=[]),patch.object(search,'meaning',return_value=([],'')), \
              patch.object(server,'_words_unsure',return_value=True),patch.object(server,'call_tool',side_effect=replay), \
-             patch.object(personal,'candidates',side_effect=lambda db,q,base,arm,*a,**k:base if arm=='baseline' else [dict(path='/valid')]), \
+             patch.object(personal,'candidates',side_effect=candidate), \
              patch.object(vectors,'embed',side_effect=AssertionError('measurement requested an embedding')):
             vectors._qcache_get(db,'cached query')
             vectors._qcache_put(db,'cached query',array.array('f',[1.0]*vectors.DIM))
-            for query in ('degraded missing','degraded nan','degraded negative','degraded text'):
+            for query in ('degraded missing','degraded nan','degraded negative','degraded text','degraded exception','degraded cache','degraded candidate'):
                 personal.record(db,query,'/valid',query,1,terms=['term'] if mode=='terms' else [])
                 personal.settle(db,query,1)
                 vectors._qcache_put(db,query,array.array('f',[1.0]*vectors.DIM))
+                if query=='degraded cache':
+                    db.execute('UPDATE vec_qcache SET vec=? WHERE qsha=?',(b'x',hashlib.sha1(query.encode()).hexdigest()));db.commit()
+                    try:vectors._qcache_get(db,query)
+                    except ValueError:pass
+                    else:raise AssertionError('corrupt-cache control did not fail')
             for i in range(12):
                 query='valid query '+str(i);sid='valid'+str(i)
                 personal.record(db,query,'/valid',sid,1,terms=['term'] if mode=='terms' else [])
@@ -146,7 +156,7 @@ def verify_rejected_observations(check_collection=True, modes=('query','terms'))
             assert personal.update(db,mode)['observations']==12
             assert db.execute("SELECT COUNT(*) FROM personal_events WHERE session LIKE 'bad%' AND measured=-1").fetchone()[0]==6
             assert db.execute("SELECT COUNT(*) FROM personal_events WHERE session LIKE 'valid%' AND measured=1").fetchone()[0]==12
-            assert db.execute("SELECT COUNT(*) FROM personal_events WHERE session LIKE 'degraded%' AND measured=0").fetchone()[0]==4
+            assert db.execute("SELECT COUNT(*) FROM personal_events WHERE session LIKE 'degraded%' AND measured=0").fetchone()[0]==7
         db.close()
     print('PASS: rejected requests never enter learning; malformed persisted rows are excluded and degraded replays cannot block valid observations in either mode')
 

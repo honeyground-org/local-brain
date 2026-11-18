@@ -491,6 +491,10 @@ queue or certifying a policy. Collector 13 retires affected older observations.
 
 Actual API validation and host events cover nine invalid requests, followed by a clean
 turn that still records evidence. Both query and terms mode process twelve valid cached
-observations behind six malformed stored records and four degraded timing replays.
+observations behind six malformed stored records and seven degraded timing/cache/replay/candidate cases.
 The test uses the actual query cache and forbids new embeddings. Prior modules admit
 rejected requests and fail queue replay at baseline_seconds in both modes.
+
+Per-observation cache, replay or candidate errors remain pending and cannot abort
+later measurements. A corrupted cache blob and explicit replay/candidate failures
+are covered, alongside missing or invalid timing.
