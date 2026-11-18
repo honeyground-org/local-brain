@@ -726,17 +726,23 @@ def _qcache_get(db: sqlite3.Connection, query: str) -> Optional[array.array]:
         # An absent/invalid local manifest disables this cache, not lexical recall.
         # The semantic path reports the actual engine failure separately.
         return None
-    db.execute("CREATE TABLE IF NOT EXISTS vec_qcache("
-               " qsha TEXT NOT NULL, model TEXT NOT NULL, dim INTEGER NOT NULL,"
-               " vec BLOB NOT NULL, PRIMARY KEY(qsha, model, dim))")
-    qsha = hashlib.sha1(query.encode("utf-8")).hexdigest()
-    row = db.execute("SELECT vec FROM vec_qcache WHERE qsha=? AND model=? AND dim=?",
-                     (qsha, tag, DIM)).fetchone()
-    if row is None:
+    try:
+        db.execute("CREATE TABLE IF NOT EXISTS vec_qcache("
+                   " qsha TEXT NOT NULL, model TEXT NOT NULL, dim INTEGER NOT NULL,"
+                   " vec BLOB NOT NULL, PRIMARY KEY(qsha, model, dim))")
+        qsha = hashlib.sha1(query.encode("utf-8")).hexdigest()
+        row = db.execute("SELECT vec FROM vec_qcache WHERE qsha=? AND model=? AND dim=?",
+                         (qsha, tag, DIM)).fetchone()
+        if row is None:
+            return None
+        v = array.array("f")
+        v.frombytes(row[0] if not hasattr(row, "keys") else row["vec"])
+        import math
+        return v if len(v) == DIM and all(math.isfinite(x) for x in v) else None
+    except (sqlite3.Error, ValueError, TypeError):
+        # Optional cache corruption/unavailability is a miss, not a recall failure.
+        # Do not delete data here; a successful later embedding can replace it.
         return None
-    v = array.array("f")
-    v.frombytes(row[0] if not hasattr(row, "keys") else row["vec"])
-    return v
 
 
 def _qcache_put(db: sqlite3.Connection, query: str, vec: array.array) -> None:
