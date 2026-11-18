@@ -81,7 +81,11 @@ The host discovers candidates with existing recall and reads full sources/histor
 `prepare_fact.identity_reference` requires a name, source SHA and explicit reason. A unique, fresh,
 tracked identity with valid metadata/links supplies topic/facet verbatim; contradictory identifiers
 are refused. The selection is recorded in existing lifecycle evidence, with a link to the anchor.
-No new storage fields, schema or retry-hash inputs are added. The existing fact snapshot guards the
+Server 2.5.1 also stores structured `identity_reference` frontmatter and revalidates its unique name,
+scope, source SHA, exact identifiers and revision links immediately before new writes. Absent-reference
+payloads retain their original retry hashes; identical successful retries skip the new-write guard.
+No database migration is needed. Re-prepare unsaved 2.5.0 requests to obtain the structured guard.
+The existing fact snapshot additionally guards the
 prepared save against changes to the selected group, including changed source files. Preserve the
 returned arguments; the host remains responsible for semantic identity, not just matching strings.
 

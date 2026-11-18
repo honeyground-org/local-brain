@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.5.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.5.1"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -310,6 +310,8 @@ next(t for t in TOOLS if t["name"] == "prepare_fact")["inputSchema"]["properties
     "description": "Reviewed tracked identity to reuse: exact name, source sha, and explicit reason. Omit topic/facet to inherit them; supplied values must match verbatim. Never merges or replaces existing memories.",
     "properties": {"name": {"type": "string"}, "sha": {"type": "string"}, "reason": {"type": "string", "minLength": 1, "maxLength": 500}},
     "required": ["name", "sha", "reason"]}
+next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"]["identity_reference"] = dict(
+    next(t for t in TOOLS if t["name"] == "prepare_fact")["inputSchema"]["properties"]["identity_reference"])
 TOOLS.append({"name": "review_identity",
     "description": "Read-only comparison of 1..10 explicitly supplied memory names in one exact scope. Returns bounded body previews, tracked identities, current/history references and source freshness issues. Groups only recorded NFC identifiers, never translations or semantic similarity. Discover candidates using recall first, then read sources before selecting identity_reference in prepare_fact.",
     "annotations": {"readOnlyHint": True},
@@ -458,7 +460,7 @@ def _do_remember(db, args: dict) -> str:
                     return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
                 if rc.requires_local_only(db, args) and args.get("embed") is not False:
                     return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
-                bad = rc.check_extraction(db, args)
+                bad = rc.check_extraction(db, args) or rc.check_identity(db, args)
                 if bad:
                     return json.dumps(bad, ensure_ascii=False)
                 preview = lifecycle.prepare(db, name, args)
@@ -498,7 +500,7 @@ def _do_remember(db, args: dict) -> str:
             if result in ("new", "updated"):
                 if rc.requires_local_only(db, args) and args.get("embed") is not False:
                     return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
-                bad = rc.check_extraction(db, args)
+                bad = rc.check_extraction(db, args) or rc.check_identity(db, args)
                 if bad:
                     return json.dumps(bad, ensure_ascii=False)
                 try:

@@ -81,6 +81,7 @@ def tool_flags(tools: List[dict]) -> Dict[str, Any]:
             "prepare_fact": bool(_props(tools, "prepare_fact")),
             "review_identity": bool(_props(tools, "review_identity")),
             "identity_reference": "identity_reference" in _props(tools, "prepare_fact"),
+            "identity_reference_guard": "identity_reference" in rm,
             "extracted_from": "extracted_from" in rm,
             "expected_fact_sha": "expected_fact_sha" in rm,
             "observed_at": "observed_at" in rm,
