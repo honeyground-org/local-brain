@@ -593,7 +593,7 @@ def main() -> int:
     requests=[dict(jsonrpc='2.0',id=1,method='initialize'),dict(jsonrpc='2.0',id=2,method='tools/list'),
               dict(jsonrpc='2.0',id=3,method='tools/call',params=dict(name='review_identity',arguments=dict(names=['missing'])))]
     wire=subprocess.run([sys.executable,'-m','brain.server'],input=''.join(json.dumps(r)+'\n' for r in requests),
-                        text=True,capture_output=True,cwd=ROOT,env=dict(os.environ,BRAIN_HOME=cold),timeout=30)
+                        text=True,encoding='utf-8',errors='replace',capture_output=True,cwd=ROOT,env=dict(os.environ,BRAIN_HOME=cold),timeout=30)
     replies=[json.loads(line) for line in wire.stdout.splitlines() if line.strip()]
     last=replies[-1]['result'] if replies else {}
     check('cold MCP identity review and discovery do not create the index',not os.path.exists(cold) and
