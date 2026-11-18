@@ -79,6 +79,43 @@ def verify_semantic_route():
     print('PASS: cold evidence stays pending; warm evidence uses the actual automatic semantic route')
 
 
+def verify_serving_cache_fallback():
+    import array, hashlib, sqlite3
+    from brain import observe, search, server
+    for mode in ('query','terms'):
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+        with patch.object(observe,'write'),patch.object(vectors,'DIM',2),patch.object(vectors,'query_tag',return_value='fixture-cache'),patch.object(personal.time,'monotonic',return_value=1):
+            vectors._qcache_get(db,'fixture')
+            vectors._qcache_put(db,'fixture',array.array('f',[1,0]))
+            evidence(db,12,'fusion')
+            if mode=='terms':db.execute("UPDATE personal_events SET terms='[\"orchid\"]'");db.commit()
+            assert personal.update(db,mode)['arm']=='fusion'
+            selected=personal.state(db,mode);assert personal.certified(db,selected)
+            key=personal.KEY+('_terms' if mode=='terms' else '')
+            row=dict(name='fixture',path='fixture',source='memory',kind='reference',description='fixture',title='fixture',age_days=0,stale=False,why='fixture',excerpt='orchid',related=False,score=1)
+            args=dict(query='fixture',terms=['orchid'] if mode=='terms' else [],format='json')
+            with patch.object(search,'recall',return_value=[row]),patch.object(server,'_words_unsure',return_value=False),patch.object(server,'_note_recall'),patch.object(vectors,'embed',side_effect=AssertionError('no embedding requested')):
+                for blob in (b'x','not a blob',array.array('f',[1]).tobytes(),array.array('f',[float('nan'),0]).tobytes(),array.array('f',[float('inf'),0]).tobytes()):
+                    db.execute('UPDATE vec_qcache SET vec=?',(blob,));db.commit()
+                    with patch.object(personal,'candidates',side_effect=AssertionError('bad cache reranked')):
+                        answer=json.loads(server.call_tool(db,'recall',args))
+                    assert answer['results'][0]['name']=='fixture','corrupt cache lost baseline'
+                    assert vectors._qcache_get(db,'fixture') is None
+                    with patch.object(server,'_words_unsure',return_value=True),patch.object(search,'union',return_value=([row],'semantic unavailable')),patch.object(search,'meaning',return_value=([],'semantic unavailable')):
+                        assert json.loads(server.call_tool(db,'recall',args))['results'][0]['name']=='fixture','uncertain route lost baseline'
+                vectors._qcache_put(db,'fixture',array.array('f',[1,0]))
+                with patch.object(personal,'candidates',return_value=[row]) as healthy:
+                    assert json.loads(server.call_tool(db,'recall',args))['results'][0]['name']=='fixture'
+                    assert healthy.called,'healthy certified cache never applied'
+                for stage in ('state','certified','candidates','_qcache_get'):
+                    store.set_meta(db,key,json.dumps(selected))
+                    module=vectors if stage=='_qcache_get' else personal
+                    with patch.object(module,stage,side_effect=ValueError('optional stage failed')),patch.object(personal,'_save',side_effect=sqlite3.OperationalError('rollback unavailable')):
+                        assert json.loads(server.call_tool(db,'recall',args))['results'][0]['name']=='fixture',stage
+        db.close()
+    print('PASS: certified public recall retains baseline for malformed caches and optional policy failures, even if rollback cannot persist; healthy cache still applies')
+
+
 def verify_rejected_observations(check_collection=True, modes=('query','terms')):
     import array, hashlib, sqlite3
     from brain import hosts, observe, recalljson, search, server, tail
@@ -145,9 +182,7 @@ def verify_rejected_observations(check_collection=True, modes=('query','terms'))
                 vectors._qcache_put(db,query,array.array('f',[1.0]*vectors.DIM))
                 if query=='degraded cache':
                     db.execute('UPDATE vec_qcache SET vec=? WHERE qsha=?',(b'x',hashlib.sha1(query.encode()).hexdigest()));db.commit()
-                    try:vectors._qcache_get(db,query)
-                    except ValueError:pass
-                    else:raise AssertionError('corrupt-cache control did not fail')
+                    assert vectors._qcache_get(db,query) is None, 'corrupt cache was not a miss'
             for i in range(12):
                 query='valid query '+str(i);sid='valid'+str(i)
                 personal.record(db,query,'/valid',sid,1,terms=['term'] if mode=='terms' else [])
@@ -682,6 +717,7 @@ def main():
     verify_retired_budget()
     verify_semantic_route()
     verify_rejected_observations()
+    verify_serving_cache_fallback()
     verify_turn_edit_order()
     verify_scoped_meaning()
     verify_resolved_vector()

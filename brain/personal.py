@@ -272,28 +272,34 @@ def candidates(db, query, base, arm, k, terms=()):
 def apply(db, query, rows, k, terms=(), baseline_cost=0.0):
     """Read the last measured policy; never train in the request."""
     t = time.monotonic()
-    s = state(db, "terms" if terms else "query")
-    arm = s["arm"]
-    if serving_mode() != "auto" or arm == "baseline":
-        return rows
-    if not certified(db, s):
-        _save(db, s, "baseline", "support_invalidated", _latest(db))
-        return rows
-    from brain import vectors
-    # Certification uses automatic semantic retrieval with a cached query vector.
-    # A cold lexical-only request is a different route; retain its baseline.
-    if vectors._qcache_get(db, query) is None:
-        return rows
+    s = None
     try:
+        if serving_mode() != "auto":
+            return rows
+        s = state(db, "terms" if terms else "query")
+        arm = s["arm"]
+        if arm == "baseline":
+            return rows
+        if not certified(db, s):
+            _save(db, s, "baseline", "support_invalidated", _latest(db))
+            return rows
+        from brain import vectors
+        # Certification uses the automatic route with a valid cached query vector.
+        if vectors._qcache_get(db, query) is None:
+            return rows
         result = candidates(db, query, rows, arm, k, terms=terms)
         elapsed = time.monotonic() - t
-        # A regression in actual serving cost rolls back the next call as well.
         if baseline_cost + elapsed > float(s.get("cost_limit", float("inf"))):
             _save(db, s, "baseline", "serving_cost", _latest(db))
             return rows
         return result
     except Exception as exc:
-        _save(db, s, "baseline", "serving_" + type(exc).__name__, _latest(db))
+        # A diagnostic rollback must not mask the already-computed baseline.
+        if s is not None:
+            try:
+                _save(db, s, "baseline", "serving_" + type(exc).__name__, _latest(db))
+            except Exception:
+                pass
         return rows
 
 
