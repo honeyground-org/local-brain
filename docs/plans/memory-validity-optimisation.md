@@ -175,3 +175,4 @@ synthetic promotion/rollback checks.
 These are assessed directions, not shipped features. Prefer privacy and current-context correctness
 before adding another storage backend or copying language-specific assertion heuristics.
 Identity-edge follow-up (2.5.5): exact-scope SHA-pinned identity provenance no longer becomes an unqualified graph name link. Cross-project homonyms cannot acquire a new automatic identity edge. Existing saved content is preserved; typed identity-edge traversal is not implemented.
+New writes also reject old prepared identity requests containing automatic bare-name provenance links; successful prior retries bypass new-write guards and remain compatible.

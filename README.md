@@ -1362,3 +1362,4 @@ Identity review entry points (2.5.3) open an existing index read-only. Tool disc
 Prepared fact names are checked again against the refreshed index before saving (2.5.4). A same-scope name added by another source returns `name_taken` before writing; another scope does not block the save, and successful identical retries remain `noop`.
 
 Reviewed identity provenance retains its exact scope and SHA. It does not generate a bare-name graph edge, which could resolve to a different project’s homonym. New reviewed proposals retain source provenance in `extracted_from` rather than generating an unqualified source edge. Existing saved memories are preserved.
+Unsaved requests prepared with old automatic provenance links must be prepared again; successful saved retries still return their original acknowledgement.
