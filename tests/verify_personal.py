@@ -142,6 +142,36 @@ def verify_resolved_vector(real_semantic=False):
     print('PASS: old-only/current-only/both vectors bind to the resolved revision in measurement and serving')
 
 
+def verify_retired_budget():
+    import array
+    import sqlite3
+    from brain import search
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db);vectors.ensure_table(db)
+    pinned={}
+    for did in range(1,42):
+        name='legacy_'+str(did);sha=('%040x'%did);pinned[name]=sha
+        db.execute('INSERT INTO docs(id,name,path,source,sha,body) VALUES(?,?,?,?,?,?)',
+                   (did,name,'/'+name,'memory',sha,'old arrangement'))
+        db.execute('INSERT INTO vectors(doc_id,chunk_no,sha,model,dim,vec) VALUES(?,?,?,?,?,?)',
+                   (did,0,sha,'fixture',2,array.array('f',[1.0,0.0]).tobytes()))
+    meta=dict(topic='arrangement',facet='schedule',status='active',supersedes=list(pinned),legacy_whole_record_sha=pinned)
+    db.execute('INSERT INTO docs(id,name,path,source,sha,body,lifecycle) VALUES(42,?,?,?,?,?,?)',
+               ('current','/current','memory','current-sha','new arrangement',json.dumps(meta)))
+    with patch.object(vectors,'_qcache_get',return_value=array.array('f',[1.0,0.0])), \
+         patch.object(vectors,'model_tag',return_value='fixture'), patch.object(vectors,'DIM',2):
+        assert vectors.search(db,'arrangement',k=8)==[], 'no current vector must stay empty'
+        db.execute('INSERT INTO vectors(doc_id,chunk_no,sha,model,dim,vec) VALUES(42,0,?,?,?,?)',
+                   ('current-sha','fixture',2,array.array('f',[0.6,0.8]).tobytes()))
+        db.commit()
+        hits=vectors.search(db,'arrangement',k=8)
+        assert len(hits)==1 and hits[0][0]==42, 'retired legacy vectors exhausted the current candidate pool'
+        assert abs(hits[0][1]-0.6)<0.0001 and abs(hits[0][2]-1.0)<0.0001, 'retired vectors polluted the reference distribution'
+        rows,why=search.meaning(db,'arrangement',8)
+        assert not why and len(rows)==1 and rows[0]['name']=='current' and rows[0]['cosine']==0.6
+    db.close()
+    print('PASS: 41 SHA-pinned legacy predecessors cannot exhaust k=8; absent current vector stays empty')
+
+
 def main():
     cache = patch.object(vectors, "_qcache_get", return_value=[1.0])
     cache.start()
@@ -216,6 +246,7 @@ def main():
         assert not personal.eligible(request), request
     other.close(); db.close()
     cache.stop()
+    verify_retired_budget()
     verify_semantic_route()
     verify_resolved_vector()
     verify_resolved_vector(real_semantic=True)
