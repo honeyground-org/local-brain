@@ -268,7 +268,8 @@ def verify_disputed_support():
         evidence(db,16,'fusion')
         meta=dict(topic='plant',facet='water',status='active')
         db.execute('UPDATE docs SET lifecycle=? WHERE path=?',(json.dumps(meta),'fixture'));db.commit()
-        with patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
+        # Lifecycle eligibility is independent of runner speed; cost gates have their own checks.
+        with patch.object(personal.time,'perf_counter',return_value=0.0), patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
             if preexisting:
                 assert personal.update(db)['arm']=='fusion'
                 assert personal.certified(db,personal.state(db))
