@@ -643,7 +643,8 @@ def review_identity(db, args):
                 for key in ("valid_from", "valid_to"):
                     item[key] = row["meta"].get(key)
                 item["change_reason"] = (row["meta"].get("change_reason") or "")[:500]
-                evidence = row["meta"].get("evidence", [])
+                evidence = row["meta"].get("evidence")
+                evidence = [v for v in evidence if isinstance(v, str)] if isinstance(evidence, list) else []
                 item["evidence"] = [v[:400] for v in evidence[:3]]
                 item["evidence_total"] = len(evidence)
                 item["evidence_truncated"] = len(evidence)>3 or any(len(v)>400 for v in evidence[:3])

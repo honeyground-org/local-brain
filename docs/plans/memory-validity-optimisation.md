@@ -221,3 +221,10 @@ creation causes a conflict; unsupported hard-link filesystems fail without overw
 existing contract fixture creates a foreign-scope record immediately after the final SHA read
 and checks preservation, cleanup and a subsequent successful create/noop pair. Generation 54
 tracks the updated receipt/write module. No new database or runtime service is introduced.
+
+2.7.3 applies the no-write preparation contract at the MCP entry point, including cold sessions
+and revision/inventory planners. Missing indexes return index_pending rather than creating
+state. Historical graph parsing isolates malformed optional JSON and evidence types so that
+known source provenance still gets filtered. Graph provenance version 4 repairs derived links
+without rewriting sources; generation 55 fingerprints the repair. Existing contract checks
+exercise first-call subprocesses and null/scalar/object evidence plus malformed optional JSON.

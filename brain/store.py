@@ -441,9 +441,13 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
         # footer. Exclude only those generated footer entries from the derived
         # graph; keep the source bytes, history, and body-authored links intact.
         try:
-            extracted = json.loads(meta.get("extracted_from") or "null")
-            reference = json.loads(meta.get("identity_reference") or "null")
-            life = json.loads(meta.get("lifecycle") or "null")
+            structured = {}
+            for field in ("extracted_from", "identity_reference", "lifecycle", "search_aliases"):
+                try:
+                    structured[field] = json.loads(meta.get(field) or "null")
+                except (ValueError, TypeError):
+                    structured[field] = None
+            extracted, reference, life = (structured[k] for k in ("extracted_from", "identity_reference", "lifecycle"))
             if isinstance(extracted, dict) and isinstance(extracted.get("name"), str):
                 explicit = extracted.get("graph_policy") == "explicit"
                 # The payload receipt can also prove an older footer was authored
@@ -451,7 +455,7 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
                 if not explicit and meta.get("payload_sha"):
                     from brain import remembercontract
                     candidate = dict(description=meta.get("description"), type=meta.get("type"),
-                                     body=body.strip(), links=[], search_aliases=json.loads(meta.get("search_aliases") or "[]"),
+                                     body=body.strip(), links=[], search_aliases=(structured["search_aliases"] if isinstance(structured["search_aliases"], list) else []),
                                      project_id=meta.get("project_id"), source=meta.get("source"),
                                      lifecycle=life, extracted_from=extracted)
                     if reference is not None:
@@ -469,7 +473,8 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
                     if isinstance(reference, dict) and isinstance(reference.get("name"), str):
                         generated.add(reference["name"])
                     if isinstance(life, dict):
-                        for evidence in life.get("evidence", []):
+                        evidence_values = life.get("evidence")
+                        for evidence in evidence_values if isinstance(evidence_values, list) else []:
                             if isinstance(evidence, str) and evidence.startswith("Identity selected: "):
                                 try:
                                     selected = json.loads(evidence[len("Identity selected: "):])
@@ -1386,7 +1391,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     #    `brain-session` announces it at the next session start. The first human-run index (`brain index`,
     #    the MCP `reindex`, `install`) rebuilds — once.
     tok_stale = tokenizer_stale(db)
-    graph_stale = get_meta(db, "graph_provenance_version", "0") != "3"
+    graph_stale = get_meta(db, "graph_provenance_version", "0") != "4"
     if (tok_stale or graph_stale) and recalibrate:
         full = True
     # ★Sources carry different weights★ — give a memory a human curated by hand (a ⛔ rule) the
@@ -1507,7 +1512,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # so the next human-run index still rebuilds.
     if full or not existing:
         set_meta(db, "tokenizer", str(textindex.TOKENIZER_VERSION))
-        set_meta(db, "graph_provenance_version", "3")
+        set_meta(db, "graph_provenance_version", "4")
     stats = {"added": added, "updated": updated, "skipped": skipped,
              "removed": len(removed), "duplicates": dups,
              "seconds": round(time.time() - t0, 2)}
