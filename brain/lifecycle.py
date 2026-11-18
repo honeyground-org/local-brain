@@ -225,6 +225,18 @@ class Snapshot:
         d = self.docs[did]
         return self.by_fact.get((d['project_id'], identity(d['meta'])), ())
 
+    def history_members(self, seed):
+        """Same scoped identity and validated predecessor/successor links for every view."""
+        members = {seed} | set(self.fact_members(seed))
+        pending = list(members)
+        while pending:
+            did = pending.pop()
+            for linked in self.prev.get(did, set()) | self.next.get(did, set()):
+                if linked not in members:
+                    members.add(linked)
+                    pending.append(linked)
+        return members
+
     def edge(self, old, new):
         self.next.setdefault(old, set()).add(new)
         self.prev.setdefault(new, set()).add(old)
@@ -390,14 +402,7 @@ def history(db, name, scope=None, offset=0, limit=25):
     if len(seeds) != 1:
         return {'ok': False, 'error': {'code': 'ambiguous_or_missing', 'message': 'Specify the exact memory name and scope'}}
     seed = seeds[0]
-    members = {seed} | set(snap.fact_members(seed))
-    pending = list(members)
-    while pending:
-        did = pending.pop()
-        for linked in snap.prev.get(did, set()) | snap.next.get(did, set()):
-            if linked not in members:
-                members.add(linked)
-                pending.append(linked)
+    members = snap.history_members(seed)
     # Order lightweight metadata before fetching bodies or calculating diffs. The
     # full current-name summary still covers every revision, including other pages.
     def history_order(did):

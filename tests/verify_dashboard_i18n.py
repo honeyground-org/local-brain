@@ -243,6 +243,32 @@ def verify_workspace():
                 rejected=True
             check('control: reject source/alias/non-HTML output '+target.name,rejected)
         check('source bytes survive rejected output',source.read_text(encoding='utf-8')=='canonical source')
+        from brain import lifecycle
+        for did, name, scope, meta in (
+                (5, 'legacy', 'garden', {}),
+                (6, 'replacement', 'garden', dict(topic='legacy-topic', facet='state', status='active',
+                    supersedes=['legacy'], legacy_whole_record_sha={'legacy':'5'*40},
+                    valid_from='2026-01-01', change_reason='Explicit correction', evidence=['source'])),
+                (7, 'legacy', 'other', {}),
+                (8, 'replacement', 'other', dict(topic='legacy-topic', facet='state', status='active'))):
+            db.execute("INSERT INTO docs(id,name,path,source,sha,project_id,lifecycle,body) VALUES(?,?,?,?,?,?,?,?)",
+                       (did,name,str(Path(temp)/('%s.md'%did)),'memory',str(did)*40,scope,
+                        json.dumps(meta) if meta else '', 'Original body'))
+        db.commit()
+        before = list(db.iterdump())
+        with patch.object(scorecard, 'history', return_value=[]):
+            linked = dashboard.payload(db)
+        records = {r['id']:r for r in linked['memories']}
+        for did in (5,6):
+            canonical = lifecycle.history(db, records[did]['name'], scope='garden')
+            check('workspace includes pinned legacy history from either version '+str(did),
+                  records[did]['history']==[5,6]
+                  and {r['name'] for r in canonical['revisions']} ==
+                      {records[i]['name'] for i in records[did]['history']})
+        check('legacy history stays scoped and untracked records include themselves',
+              records[7]['history']==[7] and records[8]['history']==[8]
+              and records[4]['history']==[4])
+        check('linked history inspection does not change the index', before==list(db.iterdump()))
         empty=sqlite3.connect(':memory:');empty.row_factory=sqlite3.Row;store._init(empty)
         with patch.object(scorecard,'history',return_value=[]):
             data=dashboard.payload(empty)

@@ -250,3 +250,7 @@ tracks the receipt-module repair; graph provenance remains version 5.
 ### Read-only dashboard entry point
 
 The default dashboard CLI now opens the existing index read-only, before rendering. Missing, unavailable or incompatible schema versions return an actionable message without initialisation or migration. The actual CLI is checked against absent, old-schema and current indexes; this covers the connection boundary that renderer-only tests missed. This does not measure retrieval-quality improvements.
+
+### Linked legacy history in the inspection view
+
+Dashboard and memory_history now share the same scoped history-members helper. A predecessor pinned by legacy_whole_record_sha remains reachable from either revision even without topic/facet metadata. Untracked records include themselves. The existing dashboard verifier compares both directions with standard history and keeps same-name records in other scopes separate; it also checks index immutability.
