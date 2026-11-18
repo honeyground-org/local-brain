@@ -285,3 +285,8 @@ The native vector search now filters superseded revisions rather than assigning 
 ### Retired-candidate budget
 
 The semantic candidate budget now counts every document excluded by current validity, including SHA-pinned legacy predecessors without lifecycle metadata. Forty-one such predecessors cannot hide the one current vector at default k=8 or contaminate its score distribution. With no current vector the result remains empty. Counting uses the same resolver as filtering; the cost grows with the indexed corpus and the retired-candidate allowance rather than an arbitrary larger fixed width.
+
+
+### Scoped connections and current policy support
+
+Connection nodes and edges retain document IDs; labels disambiguate same-name memories with their scope or path. An isolated homonym remains separate from connected homonyms. Current-only policy certification and training reject superseded support even when the original source bytes and SHA remain unchanged; historical retrieval still preserves that source. Measurement and serving compare the same baseline-retrieval plus reranking interval, excluding final response serialization in both. Synthetic 10ms baseline + 5ms reranking exceeds an 11ms certificate and returns baseline, whereas 10ms + 0.5ms remains eligible. These controls are not evidence of user-level quality improvement.

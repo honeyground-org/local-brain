@@ -172,6 +172,52 @@ def verify_retired_budget():
     print('PASS: 41 SHA-pinned legacy predecessors cannot exhaust k=8; absent current vector stays empty')
 
 
+def verify_support_and_cost():
+    import sqlite3
+    from brain import lifecycle, search, server, observe, recalljson
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    evidence(db,16,'fusion')
+    db.execute('UPDATE docs SET lifecycle=? WHERE path=?',
+               (json.dumps(dict(topic='plant',facet='water',status='active')),'fixture'));db.commit()
+    with patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
+        assert personal.update(db)['arm']=='fusion'
+        original=tuple(db.execute("SELECT id,sha,body,lifecycle FROM docs WHERE path='fixture'").fetchone())
+        db.execute('INSERT INTO docs(path,name,source,sha,lifecycle) VALUES(?,?,?,?,?)',
+                   ('successor','successor','memory','new',json.dumps(dict(topic='plant',facet='water',status='active',supersedes=['fixture']))));db.commit()
+        assert not personal.certified(db,personal.state(db)), 'superseded support stayed certified'
+        with patch.object(personal,'candidates',return_value=['reranked']) as candidate:
+            assert personal.apply(db,'plant',['baseline'],8)==['baseline']
+            assert not candidate.called
+        evidence(db,16,'fusion',16)
+        personal.record(db,'fresh old read','fixture','pending-retired',1)
+        assert personal.update(db)['arm']=='baseline', 'superseded support recertified'
+        assert db.execute("SELECT measured FROM personal_events WHERE session='pending-retired'").fetchone()[0]==-1
+        assert tuple(db.execute("SELECT id,sha,body,lifecycle FROM docs WHERE path='fixture'").fetchone())==original
+        with lifecycle.view('history'):
+            assert original[0] in lifecycle.snapshot(db).resolve(original[0])
+    db.close()
+    for extra,expected in ((0.0005,'fusion'),(0.005,'baseline')):
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db);evidence(db,16,'fusion')
+        clock=[0.0];base=[dict(name='baseline',path='/baseline')];ranked=[dict(name='reranked',path='/reranked')]
+        def recall(*args,**kwargs):
+            clock[0]+=0.010
+            return base
+        def candidate(*args,**kwargs):
+            clock[0]+=extra
+            return ranked
+        with patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'), \
+             patch.object(personal.time,'monotonic',side_effect=lambda:clock[0]), \
+             patch.object(search,'recall',side_effect=recall), patch.object(server,'_words_unsure',return_value=False), \
+             patch.object(server,'_note_recall'), patch.object(personal,'candidates',side_effect=candidate), \
+             patch.object(recalljson,'response',side_effect=lambda db,**kw:{'rows':kw['rows']}):
+            assert personal.update(db)['arm']=='fusion'
+            served=json.loads(server.call_tool(db,'recall',{'query':'plant'}))['rows']
+            assert personal.state(db)['arm']==expected, ('total serving cost not enforced',extra)
+            assert served==(ranked if expected=='fusion' else base)
+        db.close()
+    print('PASS: superseded support revokes training and serving; total baseline plus rerank cost matches certification')
+
+
 def main():
     cache = patch.object(vectors, "_qcache_get", return_value=[1.0])
     cache.start()
@@ -246,6 +292,7 @@ def main():
         assert not personal.eligible(request), request
     other.close(); db.close()
     cache.stop()
+    verify_support_and_cost()
     verify_retired_budget()
     verify_semantic_route()
     verify_resolved_vector()
