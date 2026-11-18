@@ -50,8 +50,8 @@ def verify_cli_readonly():
     import subprocess
     import tempfile
     from pathlib import Path
-    from unittest.mock import call, patch
-    from brain import cli
+    from unittest.mock import call, patch, Mock
+    from brain import cli, graphstore, stores
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         home = root / "missing"
@@ -89,6 +89,26 @@ def verify_cli_readonly():
             check("CLI explicitly requests read-only connection",
                   cli.main(["dashboard", "--no-open", "--out", str(root / "page.html")]) == 0
                   and connect.call_args_list == [call(readonly=True)])
+        with patch.dict(os.environ, env):
+            (root/'config.json').write_text('{}', encoding='utf-8')
+            stores.set_choice('graph', 'neo4j', 'http://127.0.0.1:1')
+            remote = Mock()
+            remote.target.return_value = 'offline-fixture'
+            remote.edges.side_effect = stores.StoreError('offline fixture')
+            for synced in ('offline-fixture', ''):
+                db = store.connect()
+                db.execute("INSERT OR IGNORE INTO docs(path,name,source,body) VALUES('/note','offline_note','memory','kept')")
+                stores.record(db, 'graph', synced=synced, ok=bool(synced), error='' if synced else 'offline fixture')
+                db.commit(); db.close()
+                before = hashlib.sha256(path.read_bytes()).hexdigest()
+                with patch.object(graphstore, 'make', return_value=remote), \
+                     patch.object(stores, 'resync', side_effect=AssertionError('view must not heal')) as heal:
+                    result = cli.main(['dashboard','--no-open','--out',str(root/'page.html')])
+                page = (root/'page.html').read_text(encoding='utf-8')
+                check('CLI renders local snapshot with unavailable graph '+repr(synced), result == 0
+                      and 'offline_note' in page and all('data-panel="'+p+'"' in page for p in ('memories','performance','connections'))
+                      and not remote.edges.called and not heal.called
+                      and hashlib.sha256(path.read_bytes()).hexdigest() == before)
 
 
 def verify_graph_scopes():

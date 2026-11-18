@@ -89,7 +89,9 @@ def fetch(db: sqlite3.Connection) -> Tuple[List[dict], List[Tuple[int, int]], Li
     mem = {r["id"]: dict(r) for r in db.execute(
         "SELECT id,name,path,project_id,kind,description,title FROM docs WHERE source='memory'")}
     # Names are labels, not identities: different scopes may use the same name.
-    pairs = sorted({tuple(sorted((a,b))) for a,b in graphstore.ask(db,"edges")
+    # Inspection uses the canonical local snapshot: remote serving may heal or
+    # record failures, neither of which belongs in a read-only dashboard.
+    pairs = sorted({tuple(sorted((a,b))) for a,b in graphstore.LOCAL.edges(db)
                     if a in mem and b in mem and a != b})
     names = Counter(r["name"] for r in mem.values())
     def order(did):

@@ -295,3 +295,8 @@ Connection nodes and edges retain document IDs; labels disambiguate same-name me
 ### Exact path edges and complete policy overhead
 
 Path links now join directly to indexed document IDs instead of becoming ambiguous name links. Graph provenance generation 6 rebuilds old derived links at a full index; original files and history are untouched, and the dedicated graph receives the corrected edge difference. SQLite and remote graph sources share the same canonical edges. Policy application starts timing before state, certificate and query-cache checks. Prospective certification adds those same checks to held-out costs before promotion; excessive validation cost can reject a candidate as well as roll back serving.
+
+
+### Scoped semantic results and offline inspection
+
+MCP recall removes duplicates by exact document path, both before and after automatic reranking. Same-name memories in other scopes remain visible in the meaning lane; legacy direct callers can still explicitly exclude names. The dashboard graph reads the canonical SQLite snapshot rather than the remote serving/healing path. Unavailable or unsynchronised Neo4j does not prevent inspecting memories and recorded performance/connection state, and opening the dashboard never triggers remote graph sync. Existing MCP and CLI verifiers exercise both counterexamples without network calls. Generation 67 invalidates policies measured before this retrieval correction; user-level outcome benefit remains unmeasured.
