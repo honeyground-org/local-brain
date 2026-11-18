@@ -42,7 +42,7 @@ def verify_semantic_route():
          patch.object(search, 'recall', return_value=base), \
          patch.object(search, 'query_weights', return_value=[('orchid',1,['orchid'])]), \
          patch.object(search, 'union', return_value=([hit]+[r for r in base if r!=hit], '')) as union, \
-         patch.object(search, 'meaning', return_value=([],'')), \
+         patch.object(search, 'meaning', return_value=([],'')) as meaning, \
          patch.object(server, '_note_recall'), \
          patch.object(recalljson, 'response', return_value={}), \
          patch.object(personal.time, 'monotonic', return_value=1):
@@ -53,6 +53,21 @@ def verify_semantic_route():
         assert db.execute('SELECT COUNT(*) FROM personal_events WHERE measured=0').fetchone()[0]==12
         assert union.call_count==0, 'cold measurement requested semantic retrieval'
         cache.return_value=[1.0]
+        healthy_union = union.return_value
+        union.return_value = (base, 'semantic backend unavailable')
+        meaning.return_value = ([], 'semantic backend unavailable')
+        result = personal.update(db)
+        assert result['arm']=='baseline', 'failed semantic retrieval certified a policy'
+        assert db.execute('SELECT COUNT(*) FROM personal_events WHERE measured=0').fetchone()[0]==12, 'failed semantic retrieval consumed observations'
+        with patch.object(personal, 'apply') as apply:
+            server.call_tool(db, 'recall', {'query':'orchid live'})
+        assert not apply.called, 'degraded live baseline used a certified reranker'
+        union.return_value = healthy_union
+        with patch.object(server, '_words_unsure', return_value=False):
+            personal.update(db)
+        assert db.execute('SELECT COUNT(*) FROM personal_events WHERE measured=0').fetchone()[0]==12, 'candidate-only semantic failure consumed observations'
+        meaning.return_value = ([], '')
+        union.reset_mock()
         with patch.object(server, 'call_tool', wraps=server.call_tool) as recall:
             personal.update(db)
         assert union.call_count==12, 'warm measurement did not use the automatic semantic route'

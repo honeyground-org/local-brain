@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.8"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.9"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -550,23 +550,24 @@ def _words_unsure(db, rows: List[dict]) -> bool:
         return False
 
 
-def call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=None) -> str:
+def call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=None, _retrieval=None) -> str:
     if name == "recall":
         from brain import vectors
         from brain import lifecycle
         with vectors.search_session(), lifecycle.view(args.get("view", "current") if isinstance(args, dict) else "current",
                                                        args.get("as_of") if isinstance(args, dict) else None):
-            return _call_tool(db, name, args, _measure=_measure, _capture=_capture)
-    return _call_tool(db, name, args, _measure=_measure, _capture=_capture)
+            return _call_tool(db, name, args, _measure=_measure, _capture=_capture, _retrieval=_retrieval)
+    return _call_tool(db, name, args, _measure=_measure, _capture=_capture, _retrieval=_retrieval)
 
 
-def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=None) -> str:
+def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=None, _retrieval=None) -> str:
     if name == "timeline":
         from brain import timeline
         return timeline.render(timeline.recent(
             db, int(args.get("days") or 7), int(args.get("limit") or 25)))
     if name == "recall":
         t0 = time.time()
+        semantic_errors = []
         from brain import recalljson
         bad = recalljson.validate(args)
         if bad:
@@ -601,6 +602,8 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
                 rows, _why = search.union(db, q, wide, k, extra_terms=list(terms) + bridged,
                                           kinds=args.get("kinds"), sources=args.get("sources"), width=SHOWN,
                                           scope=args.get("scope") or None)
+                if _why:
+                    semantic_errors.append(_why)
                 reordered = True
                 if rows:
                     head += ("— the words were unsure: ordered by words and meaning together, "
@@ -622,6 +625,8 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             mrows, why = search.meaning(db, q, sk, exclude=[r["name"] for r in rows],
                                         kinds=args.get("kinds"), sources=args.get("sources"),
                                         width=SHOWN, scope=args.get("scope") or None)
+            if why:
+                semantic_errors.append(why)
             start = len([r for r in rows if not r.get("related")]) + 1
             # ⛔ Added unasked, a failure is recorded (§observe) and not shown — a person with no embedding
             #    engine chosen would read "unavailable" under every unsure answer.
@@ -629,7 +634,7 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
                 more = "\n\n" + _fmt_meaning(mrows, why, cost, start, auto=auto)
         if not _measure:
             from brain import personal
-            if personal.eligible(args):
+            if personal.eligible(args) and not semantic_errors:
                 rows = personal.apply(db, q, rows, k, terms=terms)
                 if mrows is not None:
                     shown = {r["name"] for r in rows}
@@ -639,6 +644,8 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
                             if mrows or not auto else "")
             _note_recall(args, rows, sk, mrows, why, cached, t0, auto=auto,
                          unsure=was_unsure, bridged=len(bridged), reordered=reordered)
+        if _retrieval is not None:
+            _retrieval["semantic_errors"] = semantic_errors
         if _capture is not None:
             _capture.extend(rows)
         if as_json:

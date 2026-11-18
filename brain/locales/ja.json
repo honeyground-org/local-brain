@@ -864,5 +864,7 @@
  "dash.inspect.facet": "観点",
  "dash.inspect.no_history": "関連する版の記録がありません。",
  "dash.inspect.unscoped": "範囲未指定",
- "cli.dashboard.index_unavailable": "インデックスがないか、使用できないか、互換性がありません。作成や移行は行っていません。brain index を明示的に実行してから再試行してください。"
+ "cli.dashboard.index_unavailable": "インデックスがないか、使用できないか、互換性がありません。作成や移行は行っていません。brain index を明示的に実行してから再試行してください。",
+ "dash.inspect.branches": "異なる事実の分岐",
+ "dash.inspect.branches_note": "出典は共通ですが、異なる事実です。分岐を選ぶと、その事実の履歴を確認できます。"
 }

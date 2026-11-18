@@ -864,5 +864,7 @@
  "dash.inspect.facet": "Aspekt",
  "dash.inspect.no_history": "Keine verknüpften Versionen erfasst.",
  "dash.inspect.unscoped": "Ohne Bereich",
- "cli.dashboard.index_unavailable": "Der Index fehlt, ist nicht verfügbar oder inkompatibel. Kein Index wurde erstellt oder migriert. Führen Sie brain index ausdrücklich aus und versuchen Sie es erneut."
+ "cli.dashboard.index_unavailable": "Der Index fehlt, ist nicht verfügbar oder inkompatibel. Kein Index wurde erstellt oder migriert. Führen Sie brain index ausdrücklich aus und versuchen Sie es erneut.",
+ "dash.inspect.branches": "Getrennte Sachverhalte",
+ "dash.inspect.branches_note": "Diese Einträge teilen eine Quelle, beschreiben aber verschiedene Sachverhalte. Wählen Sie einen Zweig für dessen Verlauf."
 }
