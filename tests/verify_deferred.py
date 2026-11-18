@@ -73,7 +73,10 @@ def wait_cleared(db_path_home: str, secs: float = 30.0) -> bool:
     end = time.time() + secs
     while time.time() < end:
         db = store.connect()
-        done = not deferred.pending(db).get("work") and not os.path.exists(deferred._lock_path())
+        # Lease deletion happens while the worker still holds its guard. A clear
+        # marker alone cannot let the next test claim the lease during that cleanup.
+        with deferred._lease_guard() as held:
+            done = held and not deferred.pending(db).get("work") and not os.path.exists(deferred._lock_path())
         db.close()
         if done:
             return True
