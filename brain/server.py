@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.4"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.5"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -473,7 +473,7 @@ def _do_remember(db, args: dict) -> str:
             if args.get('expected_fact_sha') and not args.get('lifecycle'):
                 return json.dumps(rc.error('invalid_argument', 'A fact snapshot requires lifecycle topic/facet'))
             if cur.get("lifecycle") and (
-                    cur.get("body") != store.parse_frontmatter(rc.render(name, args, cur.get("verified_at") or ""))[1].strip()
+                    cur.get("body") != store.parse_frontmatter(rc.read_form(rc.render(name, args, cur.get("verified_at") or "")))[1].strip()
                     or cur.get("lifecycle") != args.get("lifecycle")
                     or (cur.get("payload_sha") and cur["payload_sha"] != rc.payload_sha(args))):
                 return json.dumps(rc.error("revision_required", "Keep the old revision; create a new name with lifecycle.supersedes"))

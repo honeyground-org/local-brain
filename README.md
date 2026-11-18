@@ -1421,3 +1421,8 @@ separately. Normal indexing rebuilds derived graph version 5 to restore any omit
 Concurrent session starts use a nonblocking OS guard on a persistent file. This avoids the
 empty PID-file publication race that could admit two checkers; process exit releases the
 guard without deleting a successor's lock. Worker work queues and retry budgets are unchanged.
+
+Retry comparisons use the same universal-newline form as file reads (CRLF and CR read as LF).
+This applies to the rendered-file hash and the lifecycle body guard. Stored file bytes, payload
+receipts and idempotency keys are not rewritten or redefined: an identical CRLF request retries
+as noop, while a genuinely changed lifecycle body still requires a new revision.
