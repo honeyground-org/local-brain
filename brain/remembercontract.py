@@ -499,6 +499,14 @@ def extraction_source(db, name, sha, scope):
     return actual, None
 
 
+def extraction_evidence(value, reference=None):
+    evidence = ["%s@%s [%s:%s]: %s" % (value["name"], value["sha"], span["start"], span["end"], span["text"])
+                for span in value["spans"]]
+    if reference is not None:
+        evidence.append("Identity selected: " + json.dumps(reference, ensure_ascii=False, sort_keys=True))
+    return evidence
+
+
 def check_extraction(db, args, target_path=None):
     value = args.get("extracted_from")
     if value is None:
@@ -532,6 +540,22 @@ def check_extraction(db, args, target_path=None):
     for span in value["spans"]:
         if source["body"][span["start"]:span["end"]] != span["text"]:
             return error("quote_mismatch", "Every span must exactly match the pinned source body")
+        first = source["body"].find(span["text"])
+        if source["body"].find(span["text"], first + 1) >= 0:
+            return error("ambiguous_quote", "Include enough surrounding source text to identify one passage")
+    evidence = (args.get("lifecycle") or {}).get("evidence", [])
+    reference = args.get("identity_reference")
+    if reference is None and len(evidence) == len(value["spans"]) + 1 and evidence[-1].startswith("Identity selected: "):
+        # Preserve the previously prepared reference format; check_identity still
+        # verifies its pinned source and exact inherited identity before writing.
+        try:
+            reference = json.loads(evidence[-1][len("Identity selected: "):])
+        except (ValueError, TypeError):
+            return error("extraction_evidence_mismatch", "Prepare the extraction again with consistent source evidence")
+        if identity_reference_shape(reference):
+            return error("extraction_evidence_mismatch", "Prepare the extraction again with consistent source evidence")
+    if evidence != extraction_evidence(value, reference):
+        return error("extraction_evidence_mismatch", "Structured source spans and lifecycle evidence must match the prepared extraction")
     return None
 
 
@@ -748,11 +772,9 @@ def _prepare_fact(db, args):
     save["extracted_from"] = dict(name=name, sha=sha, spans=spans, graph_policy="explicit")
     save["links"] = []
     save["embed"] = False
-    save["lifecycle"]["evidence"] = ["%s@%s [%s:%s]: %s" % (name, sha, s["start"], s["end"], s["text"]) for s in spans]
-    if selected:
-        save["lifecycle"]["evidence"].append("Identity selected: " + json.dumps(reference, ensure_ascii=False, sort_keys=True))
-        # Keep the scope/SHA-qualified reference as provenance. A bare name graph
-        # edge can resolve to homonyms in other projects and is not equivalent.
+    save["lifecycle"]["evidence"] = extraction_evidence(save["extracted_from"], reference if selected else None)
+    # Keep the scope/SHA-qualified reference as provenance. A bare name graph
+    # edge can resolve to homonyms in other projects and is not equivalent.
     bad = validate(save)
     if bad:
         return bad

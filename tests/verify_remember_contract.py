@@ -340,6 +340,27 @@ def extraction_checks(db):
     quotes += ["Water" + chr(cp) + "on Friday." for cp in (0x2028, 0x2029, 0x85)]
     def prepare(args):
         return json.loads(server.call_tool(db,"prepare_fact",args,_measure=True))
+    for i, quote in enumerate(quotes):
+        source='repeated_source_'+str(i)
+        text=quote+'\n'+quote+'\nUnique passage.\nOther passage.'
+        saved=_j(db,name=source,description='Repeated source',type='reference',body=text)
+        args=dict(source_name=source,source_sha=saved['sha'],quotes=['Unique passage.'],name='repeated_proposal_'+str(i),description='Proposal',type='reference',body='Unique passage.',topic='repeated-'+str(i),facet='claim')
+        original=_read(source)
+        check('preparation rejects repeated quotes '+str(i),prepare(dict(args,quotes=[quote]))['error']['code']=='ambiguous_quote')
+        payload=prepare(args)['save_arguments']
+        for rewrite_evidence in (False, True):
+            changed=copy.deepcopy(payload)
+            changed['extracted_from']['spans']=[dict(start=0,end=len(quote),text=quote)]
+            if rewrite_evidence:changed['lifecycle']['evidence']=rc.extraction_evidence(changed['extracted_from'])
+            check('save rejects repeated quotes even with rewritten evidence '+str((i,rewrite_evidence)),_j(db,**changed)['error']['code']=='ambiguous_quote' and not os.path.exists(os.path.join(_MEM,args['name']+'.md')))
+        changed=copy.deepcopy(payload);start=text.index('Other passage.')
+        changed['extracted_from']['spans']=[dict(start=start,end=start+len('Other passage.'),text='Other passage.')]
+        check('save rejects changed unique quote with old evidence '+str(i),_j(db,**changed)['error']['code']=='extraction_evidence_mismatch')
+        for evidence in ([], ['invented evidence'], payload['lifecycle']['evidence']+['extra source claim']):
+            changed=copy.deepcopy(payload);changed['lifecycle']['evidence']=evidence
+            check('save requires exact matching evidence '+str(i),_j(db,**changed).get('error',{}).get('code') in ('extraction_evidence_mismatch','invalid_argument'))
+        first=_j(db,**payload);before=_read(args['name'])
+        check('unchanged preparation saves and retries without source mutation '+str(i),first.get('result')=='new' and _j(db,**payload).get('result')=='noop' and _read(args['name'])==before and _read(source)==original)
     for i,quote in enumerate(quotes):
         source="mixed_source_"+str(i);target="extracted_fact_"+str(i)
         scope="extraction_"+str(i)
