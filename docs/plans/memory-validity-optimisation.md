@@ -175,6 +175,15 @@ synthetic promotion/rollback checks.
    event timelines and plan transitions would be an application view, not a mandatory domain ontology.
    Require language-independent structured fields and retain source quotations and uncertainty.
 
+Source audit: Ollo commit `94c33d87` (inspected 2026-11-18), not a claim about enabled production flags.
+
+| Brain candidate | Inspected Ollo source at that commit | Assessment and priority |
+|---|---|---|
+| Explicit forgetting | `services/api/src/memory.ts`, `deleteNote`: recursive predecessor deletion, `memory_forgotten` keys; `forgottenKeys` guards incoming writes | First: archival alone cannot prevent reimport. Adopt an explicit privacy contract and test all derived stores before shipping. |
+| Bounded current context | `services/agent/src/memory/rank.ts`, `pickMemory` and `noteLine`: item/character budgets, core-first selection, archive exclusion, previous-version annotation | Next: a useful projection over Brain validity/history. Measure budget coverage; do not copy Ollo's fixed weights or language-specific rendering. |
+| Typed relationships | `services/api/src/memory-graph/store.ts`, `pgMemoryGraph` and `lockGraph`: PostgreSQL projection from fact/history rows with per-user locking and an optional switch | Later: complement Brain document edges with entity/predicate provenance only if relation accuracy improves. No additional graph database is implied. |
+| Events and plans | `packages/contracts/src/memory.ts`, `MemoryPlanKind`, `MemoryPlanCertainty`, `MemoryPlanStatus`; `docs/LONG-TERM-MEMORY.ko.md` sections 3-4 distinguish event and plan stores | Later optional views: retain source/time/uncertainty and avoid imposing a task-specific ontology on general memories. |
+
 These are assessed directions, not shipped features. Prefer privacy and current-context correctness
 before adding another storage backend or copying language-specific assertion heuristics.
 Identity-edge follow-up (2.5.5): exact-scope SHA-pinned identity provenance no longer becomes an unqualified graph name link. Cross-project homonyms cannot acquire a new automatic identity edge. Existing saved content is preserved; typed identity-edge traversal is not implemented.
@@ -271,3 +280,8 @@ Graph neighbors can name an earlier revision. Linked candidates now use the hydr
 ### Semantic scores and exact graph seeds
 
 The native vector search now filters superseded revisions rather than assigning their cosine to a successor. Current memories need their own current-SHA vector; a predecessor cannot contribute a score or reference-distribution value. Actual SQLite vector search is exercised through policy measurement, certification and MCP serving for old-only, current-only and conflicting vectors. Graph expansion identifies a selected semantic seed by its unique path, not a potentially shared name across scopes. These are correctness checks on synthetic fixtures, not a measured user-quality gain.
+
+
+### Retired-candidate budget
+
+The semantic candidate budget now counts every document excluded by current validity, including SHA-pinned legacy predecessors without lifecycle metadata. Forty-one such predecessors cannot hide the one current vector at default k=8 or contaminate its score distribution. With no current vector the result remains empty. Counting uses the same resolver as filtering; the cost grows with the indexed corpus and the retired-candidate allowance rather than an arbitrary larger fixed width.

@@ -806,10 +806,10 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
     from brain import lifecycle
     temporal = lifecycle.snapshot(db)
     # Retired candidates must not consume the result slots. Fetch enough to refill.
-    tracked = sum(bool(d["meta"]) for d in temporal.docs.values())
+    excluded = sum(did not in temporal.resolve(did) for did in temporal.docs)
     penalties = {r['id']: min(1.0, max(0.0, r['weight']))
                  for r in db.execute('SELECT id,weight FROM docs WHERE weight<1')}
-    n = max(k, TOPN_FOR_MEAN) + tracked + len(penalties)
+    n = max(k, TOPN_FOR_MEAN) + excluded + len(penalties)
     local = vecstore.SqliteVectors()
     c = stores.choice("vector")
     session = _SEARCH_SESSION.get()
