@@ -498,6 +498,11 @@ def identity_checks(db):
         request=call('prepare_fact',**dict(args,identity_reference=ref))
         check('reviewed identity inherited '+str(i),request.get('ok') and request['save_arguments']['lifecycle']['topic']=='caf\u00e9' and request['identity_reference']==ref)
         payload=request['save_arguments'];reused.add(lifecycle.identity(payload['lifecycle']));proposals.append(payload['name'])
+        if i==0:
+            import copy
+            changed=copy.deepcopy(payload)
+            changed['lifecycle']['evidence'][-1]='Identity selected: '+json.dumps(dict(ref,reason='Unreviewed different reason'),ensure_ascii=False,sort_keys=True)
+            check('structured identity reference cannot contradict lifecycle evidence',_j(db,**changed).get('error',{}).get('code')=='extraction_evidence_mismatch' and not os.path.exists(os.path.join(_MEM,payload['name']+'.md')))
         result=_j(db,**payload)
         stored_meta,_=store.parse_frontmatter(_read(payload['name']))
         check('structured identity reference round trips '+str(i),json.loads(stored_meta['identity_reference'])==ref and result['identity_reference']==ref)
