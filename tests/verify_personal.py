@@ -84,7 +84,8 @@ def verify_turn_edit_order():
     hosts.pin('claude-code')
     def tool(tid,name,args):
         return {'type':'assistant','message':{'content':[{'type':'tool_use','id':tid,'name':name,'input':args}]}}
-    for order in ('edit_read','read_edit','read_only'):
+    for order in ('edit_read','read_edit','remember_read','read_remember','preview_read','read_only'):
+        is_edited = order not in ('read_only','preview_read')
         path=Path(tmp.name)/(order+'.db')
         db=sqlite3.connect(str(path));db.row_factory=sqlite3.Row;store._init(db)
         db.execute("INSERT INTO docs(path,name,source,sha,body) VALUES('/note','note','memory','sha','orchid')");db.commit()
@@ -101,19 +102,21 @@ def verify_turn_edit_order():
                 def feed(value):tail._apply(json.dumps(value),trace,rec)
                 feed({'type':'user','message':{'role':'user','content':'orchid '+order+str(i)}})
                 edit=tool('edit','Edit',{'file_path':'/code.py','old_string':'old','new_string':'new'})
-                if order=='edit_read':
+                if 'remember' in order or order=='preview_read':
+                    edit=tool('save','mcp__brain__remember',{'name':'note','body':'new','prepare_only':order=='preview_read'})
+                if order in ('edit_read','remember_read','preview_read'):
                     feed(edit)
                     # Persisted turn state survives a new connection and resumed transcript.
                     db.close();db=sqlite3.connect(str(path));db.row_factory=sqlite3.Row
                     rec=json.loads(json.dumps(rec))
                 feed(tool('read','Read',{'file_path':'/note'}))
                 feed({'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'read','content':'orchid'}]}})
-                if order=='read_edit':feed(edit)
+                if order in ('read_edit','read_remember'):feed(edit)
             rows=db.execute('SELECT edited FROM personal_events').fetchall()
-            assert len(rows)==12 and all(bool(r[0])==(order!='read_only') for r in rows), (order,[tuple(r) for r in rows])
+            assert len(rows)==12 and all(bool(r[0])==is_edited for r in rows), (order,[tuple(r) for r in rows])
             result=personal.update(db)
-            assert result['arm']==('fusion' if order=='read_only' else 'baseline'), (order,result)
-            if order=='read_only':
+            assert result['arm']==('baseline' if is_edited else 'fusion'), (order,result)
+            if not is_edited:
                 assert personal.certified(db,personal.state(db))
                 db.execute("UPDATE personal_events SET identity='v2:' || substr(identity,4)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'

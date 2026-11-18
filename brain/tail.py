@@ -368,6 +368,11 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
         if name.endswith("remember"):
             if kind == 'preview':
                 continue
+            try:
+                from brain import personal
+                personal.edited(_db(), rec.get("session_id", ""), rec.get("use", {}).get("turn", 0))
+            except Exception:
+                pass
             tail.update(_blank_tail())
             tail["_saved"] = True
             continue
