@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.4.2"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.5.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -298,12 +298,25 @@ TOOLS.append({"name": "memory_review",
         "expected_snapshot": {"type": "string", "description": "snapshot from first page; required with as_of for continuation"}}}})
 
 TOOLS.append({"name": "prepare_fact",
-    "description": "Prepare one host-authored proposed fact from a mixed note. Supply the exact source name/version and unique verbatim quotes, plus a stable topic/facet. Checks source passages without inference or writing. Review returned save_arguments then use remember. Never retires the original or certifies the extracted claim; later confirmation requires a separate explicit revision.",
+    "description": "Prepare one host-authored proposed fact from a mixed note. Supply the exact source name/version and unique verbatim quotes, plus a stable topic/facet or reviewed identity_reference. Checks source passages without inference or writing. Review returned save_arguments then use remember. Never retires the original or certifies the extracted claim; later confirmation requires a separate explicit revision.",
     "annotations": {"readOnlyHint": True},
     "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
         **{k: {"type": "string"} for k in ("source_name", "source_sha", "name", "description", "type", "body", "project_id", "topic", "facet")},
         "quotes": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "string", "maxLength": 1000}}},
-        "required": ["source_name", "source_sha", "quotes", "name", "description", "type", "body", "topic", "facet"]}})
+        "required": ["source_name", "source_sha", "quotes", "name", "description", "type", "body"]}})
+next(t for t in TOOLS if t["name"] == "prepare_fact")["inputSchema"]["anyOf"] = [{"required": ["topic", "facet"]}, {"required": ["identity_reference"]}]
+next(t for t in TOOLS if t["name"] == "prepare_fact")["inputSchema"]["properties"]["identity_reference"] = {
+    "type": "object", "additionalProperties": False,
+    "description": "Reviewed tracked identity to reuse: exact name, source sha, and explicit reason. Omit topic/facet to inherit them; supplied values must match verbatim. Never merges or replaces existing memories.",
+    "properties": {"name": {"type": "string"}, "sha": {"type": "string"}, "reason": {"type": "string", "minLength": 1, "maxLength": 500}},
+    "required": ["name", "sha", "reason"]}
+TOOLS.append({"name": "review_identity",
+    "description": "Read-only comparison of 1..10 explicitly supplied memory names in one exact scope. Returns bounded body previews, tracked identities, current/history references and source freshness issues. Groups only recorded NFC identifiers, never translations or semantic similarity. Discover candidates using recall first, then read sources before selecting identity_reference in prepare_fact.",
+    "annotations": {"readOnlyHint": True},
+    "inputSchema": {"type": "object", "additionalProperties": False,
+                    "properties": {"names": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "string"}},
+                                   "project_id": {"type": "string", "description": "Exact scope; omitted or empty means unscoped only"}},
+                    "required": ["names"]}})
 next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"]["extracted_from"] = {
     "type": "object", "description": "Provenance returned by prepare_fact: name, sha and spans with Unicode code-point start/end/text. Source and quotes are checked on new saves. Only proposed, non-replacing facts may use this field."}
 
@@ -636,6 +649,9 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
     if name == "memory_review":
         from brain import memoryreview
         return json.dumps(memoryreview.review(db, args), ensure_ascii=False)
+    if name == "review_identity":
+        from brain import remembercontract
+        return json.dumps(remembercontract.review_identity(db, args), ensure_ascii=False)
     if name == "prepare_fact":
         from brain import remembercontract
         return json.dumps(remembercontract.prepare_fact(db, args), ensure_ascii=False)

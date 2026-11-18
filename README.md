@@ -121,7 +121,7 @@ flowchart LR
   learned from your own tool history (`brain rules --discover`).
 - **When the agent asks.** Twelve MCP tools: `recall` · `remember` · `neighbors` · `brain_status` ·
   `brain_suggest` · `brain_feedback` · `reindex` · `timeline` · `brain_analyse` · `brain_view` ·
-  `memory_history` · `memory_review` · `prepare_fact` · `brain_capabilities` (what this brain supports, read live — a client checks it once after connecting).
+  `memory_history` · `memory_review` · `review_identity` · `prepare_fact` · `brain_capabilities` (what this brain supports, read live — a client checks it once after connecting).
 
 ## Personal memory and performance
 
@@ -1091,6 +1091,48 @@ for healthy metadata too. Continue pages using the first response's `as_of` and 
 The capability is `tools.memory_review.available`. Reconnect a host that caches the tool list.
 See the [phased optimisation plan](docs/plans/memory-validity-optimisation.md). This diagnostic does
 not yet establish improved answer quality against native Codex or Claude.
+
+### Review and reuse identities across languages
+
+Server 2.5 adds `review_identity` before creating a fact in another language. Discover candidate
+names with `recall`, then compare up to ten explicitly selected memories in one exact scope:
+
+```json
+{"name":"review_identity","arguments":{"names":["orchid_schedule","orchid_food"],"project_id":"household"}}
+```
+
+The response shows bounded source previews, recorded topic/facet, validity dates, evidence, current
+fact names and conflicts. Read full sources and `memory_history` before choosing: a reusable identity
+is not proof that its claim is currently true. Groups mean the same recorded NFC identifiers, not
+translated meanings; case, different subjects/facets and scopes stay separate. Omitted scope means
+unscoped only. Missing, ambiguous, untracked, invalid/cyclic or stale candidates cannot supply an identity.
+
+For a source-bound proposal about the **same independently changing fact**, omit topic/facet in
+`prepare_fact` and supply an explicitly reviewed reference:
+
+```json
+"identity_reference": {
+  "name": "orchid_schedule",
+  "sha": "<source SHA from review_identity>",
+  "reason": "I reviewed both sources: this is the same plant and watering schedule."
+}
+```
+
+The planner inherits the chosen identifiers verbatim and records the reference name, version and
+reason in lifecycle evidence. If supplied, topic/facet must match verbatim. The original mixed note,
+chosen identity and existing history remain unchanged. The new memory stays proposed and `embed:false`;
+this does not merge old identity groups, supersede facts, or certify semantic equivalence. Reuse an
+existing identity only after inspecting its meaning. Different facts need distinct identifiers.
+
+Keep the returned `expected_fact_sha` in `save_arguments`: saving refreshes the local index and rejects
+changed fact membership or source versions with `fact_changed`. Re-prepare after changes. As with other
+prepared writes, direct external file editors do not share the lock; no cross-file atomicity is claimed.
+For an actual confirmed correction, use `prepare_revision` on the applicable predecessor and resolve
+competing current claims explicitly; sharing an identifier alone does not establish a revision edge.
+
+Capabilities: `tools.remember.review_identity` and `tools.remember.identity_reference`. The five-language
+fixture reduces caller-created translated identity groups from five to one through explicit reuse;
+that is a controlled identity-management result, not measured native-host answer-quality improvement.
 
 ### Extract proposed facts from mixed notes
 

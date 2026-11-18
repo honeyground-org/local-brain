@@ -1,6 +1,6 @@
 # Memory validity and classification optimisation
 
-> Status: Phases 1 and 2 implemented — 2026-11-17
+> Status: Phases 1–3 implemented — 2026-11-18
 > Owner: Maintainers
 
 ## Goal
@@ -23,11 +23,11 @@ Do not bulk rewrite, split, certify or delete existing private memories.
 |---|---|---|
 | 1 — implemented | Read-only `memory_review` inventory of validity gaps, explicit conflicts, proposals, invalid/cyclic links and classification coverage | Labelled controls, no false flags for complete active facts or scheduled/expired records, exact scope, stable pagination, no writes/body reads/remote inference; installed API check |
 | 2 — implemented | Host-assisted extraction of independent facts from mixed notes, with exact source passages and explicit uncertainty | Original notes retained; no partial correction retires an entire mixed record; reviewed proposed facts trace back to evidence |
-| 3 — follow-on | Reviewed identity reuse across languages and explicit disambiguation of similar subjects | Multilingual same-fact and different-fact controls; no semantic or spelling-based automatic merge; correction history retained |
+| 3 — implemented | Reviewed identity reuse across languages and explicit disambiguation of similar subjects | Multilingual same-fact and different-fact controls; no semantic or spelling-based automatic merge; correction history retained |
 | 4 — follow-on | Paired native-host outcome study and targeted retrieval improvement | Same model, permissions, normal native memory and input material within each host; report losses and gains, current/history accuracy, time, usage and failures |
 
-Phases 3–4 remain follow-on work; phase 2 adds the source-bound proposal workflow below. Stage their implementation using what the
-inventory and paired studies actually reveal. A diagnostic feature is not evidence of better answers.
+Phase 4 remains follow-on work. Stage retrieval changes using the inventory and paired studies.
+Identity controls are not evidence of better answers.
 
 ## Phase 1 API contract
 
@@ -70,6 +70,27 @@ Direct external editors do not participate in the writer lock; no cross-file tra
 Controls cover five languages, exact quotations, stale sources before preparation and saving,
 wrong scope, tampered spans, proposal-only writes, immutable originals, retry compatibility and
 confirmation of the proposal alone. These checks do not establish general answer-quality improvement.
+
+## Phase 3: reviewed identity reuse
+
+`review_identity` compares up to ten explicit candidates in one exact scope (omitted means unscoped).
+It returns bounded source/evidence previews, recorded identifiers, current fact names, conflicts and
+revision references. Grouping is exact after NFC normalisation, never translation or case folding.
+The host discovers candidates with existing recall and reads full sources/history before choosing.
+
+`prepare_fact.identity_reference` requires a name, source SHA and explicit reason. A unique, fresh,
+tracked identity with valid metadata/links supplies topic/facet verbatim; contradictory identifiers
+are refused. The selection is recorded in existing lifecycle evidence, with a link to the anchor.
+No new storage fields, schema or retry-hash inputs are added. The existing fact snapshot guards the
+prepared save against changes to the selected group, including changed source files. Preserve the
+returned arguments; the host remains responsible for semantic identity, not just matching strings.
+
+Identity reuse never merges existing groups, certifies a fact, or creates a revision edge. A new
+proposal remains proposed/local-only. Explicit correction uses existing revision/conflict controls.
+Controls compare five translated caller-created identifiers against one explicitly reused identity;
+include distinct subjects/facets/scopes/case, NFC-equivalent labels, invalid/cyclic/stale references,
+no SQL writes during review, source preservation, history membership, save-time changes and retries.
+Native-host benefit remains unmeasured.
 
 ## Measurement and acceptance
 

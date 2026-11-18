@@ -484,10 +484,88 @@ def check_extraction(db, args):
     return None
 
 
+def identity_record(db, name, sha, scope, snap=None, cyclic=None):
+    """Resolve an explicitly reviewed, version-pinned identity; never infer sameness."""
+    from brain import lifecycle, memoryreview
+    snap = lifecycle.snapshot(db) if snap is None else snap
+    if cyclic is None:
+        cyclic = memoryreview._cycles(snap, {did for did,r in snap.docs.items() if r["project_id"] == scope})
+    ids = snap.by_name.get((scope, name), [])
+    if len(ids) != 1:
+        return None, error("identity_unavailable", "Select one indexed identity in the exact project_id scope")
+    record = snap.docs[ids[0]]
+    if (not record["meta"] or lifecycle.validate(record["meta"]) or ids[0] in snap.issues
+            or ids[0] in cyclic):
+        return None, error("invalid_identity", "Use a tracked identity with valid metadata and revision links")
+    try:
+        actual_sha = file_sha(record["path"])
+    except (OSError, UnicodeError):
+        actual_sha = None
+    if sha != record["sha"] or actual_sha != sha:
+        return None, error("identity_changed", "Read the identity source and refresh its index before choosing again")
+    return record, None
+
+
+def review_identity(db, args):
+    """Compare caller-selected candidates without translation, ranking or merging."""
+    from brain import lifecycle, memoryreview
+    if not isinstance(args, dict) or set(args) - {"names", "project_id"}:
+        return error("invalid_argument", "Use only declared identity review fields")
+    names, scope = args.get("names"), args.get("project_id", "")
+    if (not isinstance(names, list) or not 1 <= len(names) <= 10
+            or any(not isinstance(n, str) or not n.strip() or len(n) > 200 for n in names)
+            or len(set(names)) != len(names) or not isinstance(scope, str) or len(scope) > PROJECT_MAX):
+        return error("invalid_argument", "Provide 1..10 distinct names and one exact project_id scope; omitted means unscoped only")
+    db.execute("SAVEPOINT identity_review")
+    try:
+        snap = lifecycle.snapshot(db)
+        cyclic = memoryreview._cycles(snap, {did for did,r in snap.docs.items() if r["project_id"] == scope})
+        items, groups = [], {}
+        at = lifecycle.now()
+        with lifecycle.view("current", at):
+            for name in names:
+                ids = snap.by_name.get((scope, name), [])
+                if len(ids) != 1:
+                    items.append(dict(name=name, reusable=False, issue="identity_unavailable"))
+                    continue
+                row = snap.docs[ids[0]]
+                record, bad = identity_record(db, name, row["sha"], scope, snap, cyclic)
+                info = snap.info(ids[0])
+                body = db.execute("SELECT body FROM docs WHERE id=?", (ids[0],)).fetchone()[0] or ""
+                item = dict(name=name, sha=row["sha"], reusable=bad is None,
+                            issue=bad["error"]["code"] if bad else None,
+                            topic=row["meta"].get("topic"), facet=row["meta"].get("facet"),
+                            status=info["status"], current=info["current"], body=body[:1000], body_truncated=len(body)>1000)
+                for key in ("valid_from", "valid_to"):
+                    item[key] = row["meta"].get(key)
+                item["change_reason"] = (row["meta"].get("change_reason") or "")[:500]
+                evidence = row["meta"].get("evidence", [])
+                item["evidence"] = [v[:400] for v in evidence[:3]]
+                item["evidence_total"] = len(evidence)
+                item["evidence_truncated"] = len(evidence)>3 or any(len(v)>400 for v in evidence[:3])
+                peers = [(snap.docs[n]["name"], snap.info(n)) for n in snap.fact_members(ids[0])]
+                for key, predicate in (("current_fact_names", lambda v: v["current"] is True),
+                                       ("conflicting_fact_names", lambda v: v["status"] == "disputed")):
+                    values = sorted(n for n, state in peers if predicate(state))
+                    item[key], item[key+"_total"] = values[:10], len(values)
+                for key in ("current_names", "conflicts", "predecessors", "successors"):
+                    item[key] = info[key][:10]
+                    item[key+"_total"] = len(info[key])
+                items.append(item)
+                if record:
+                    groups.setdefault(lifecycle.identity(record["meta"]), []).append(name)
+        return dict(ok=True, stored=False, scope=scope, as_of=at, items=items,
+                    groups=[dict(topic=k[0], facet=k[1], names=v) for k,v in groups.items()],
+                    coverage="Only supplied candidates in one exact scope. Groups reflect recorded NFC identities, not semantic equivalence, truth or current applicability.",
+                    next="Read complete sources and memory_history before choosing. For the same independently changing fact, pass identity_reference with name, sha and your reason to prepare_fact. Different subjects or facets need separate identities. No existing identities or histories are merged.")
+    finally:
+        db.execute("RELEASE identity_review")
+
+
 def prepare_fact(db, args):
     """Prepare one host-authored proposal grounded in unique verbatim source passages."""
     from brain import lifecycle
-    fields = {"source_name", "source_sha", "quotes", "name", "description", "type", "body", "project_id", "topic", "facet"}
+    fields = {"source_name", "source_sha", "quotes", "name", "description", "type", "body", "project_id", "topic", "facet", "identity_reference"}
     if not isinstance(args, dict) or set(args) - fields:
         return error("invalid_argument", "Use only declared fact preparation fields")
     name, sha, quotes = args.get("source_name"), args.get("source_sha"), args.get("quotes")
@@ -497,7 +575,25 @@ def prepare_fact(db, args):
             or any(not isinstance(q, str) or not q.strip() or len(q) > 1000 for q in quotes)):
         return error("invalid_argument", "Provide source_name, source_sha and 1..10 verbatim quotes of at most 1000 characters")
     save = {k: args[k] for k in ("name", "description", "type", "body", "project_id") if k in args}
-    save["lifecycle"] = dict(topic=args.get("topic"), facet=args.get("facet"), status="proposed")
+    selected = None
+    reference = args.get("identity_reference")
+    if "identity_reference" in args:
+        if (not isinstance(reference, dict) or set(reference) != {"name", "sha", "reason"}
+                or not isinstance(reference["name"], str) or not 1 <= len(reference["name"]) <= 200
+                or not isinstance(reference["sha"], str) or not _SHA.fullmatch(reference["sha"])
+                or not isinstance(reference["reason"], str) or not reference["reason"].strip() or len(reference["reason"]) > 500):
+            return error("invalid_argument", "identity_reference requires name, sha and an explicit reason of 1..500 characters")
+        bad = validate(save)
+        if bad:
+            return bad
+        selected, bad = identity_record(db, reference["name"], reference["sha"], save.get("project_id") or "")
+        if bad:
+            return bad
+        for key in ("topic", "facet"):
+            if key in args and args[key] != selected["meta"][key]:
+                return error("identity_mismatch", "Omit topic/facet or reuse the selected identity verbatim; translations cannot redefine it")
+    save["lifecycle"] = dict(topic=selected["meta"]["topic"] if selected else args.get("topic"),
+                             facet=selected["meta"]["facet"] if selected else args.get("facet"), status="proposed")
     bad = validate(save)
     if bad:
         return bad
@@ -522,6 +618,10 @@ def prepare_fact(db, args):
     save["links"] = [name]
     save["embed"] = False
     save["lifecycle"]["evidence"] = ["%s@%s [%s:%s]: %s" % (name, sha, s["start"], s["end"], s["text"]) for s in spans]
+    if selected:
+        save["lifecycle"]["evidence"].append("Identity selected: " + json.dumps(reference, ensure_ascii=False, sort_keys=True))
+        if reference["name"] not in save["links"]:
+            save["links"].append(reference["name"])
     bad = validate(save)
     if bad:
         return bad
@@ -531,6 +631,7 @@ def prepare_fact(db, args):
     save["expected_fact_sha"] = review["expected_fact_sha"]
     return dict(review, save_tool="remember", save_arguments=save,
                 extraction={"source_name": name, "source_sha": sha, "spans": spans, "status": "proposed"},
+                identity_reference=dict(reference) if selected else None,
                 next="Review whether the passages support one independent claim. Quotation matching proves provenance, not truth or completeness. Save proposals individually; this is not a batch transaction. The original remains searchable and is never superseded. Confirmation requires a new explicit revision with effective time and evidence.")
 
 
