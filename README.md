@@ -1360,3 +1360,5 @@ revisions determine factual validity. Ambiguous memory names reject feedback wit
 Identity review entry points (2.5.3) open an existing index read-only. Tool discovery also avoids initialising an index. When no readable index exists, review returns `index_pending`; run indexing explicitly. Legacy reference validation distinguishes original source quotations from reference metadata and requires the prepared group snapshot on every new reference-based save.
 
 Prepared fact names are checked again against the refreshed index before saving (2.5.4). A same-scope name added by another source returns `name_taken` before writing; another scope does not block the save, and successful identical retries remain `noop`.
+
+Reviewed identity provenance retains its exact scope and SHA. It does not generate a bare-name graph edge, which could resolve to a different project’s homonym. New reviewed proposals retain source provenance in `extracted_from` rather than generating an unqualified source edge. Existing saved memories are preserved.
