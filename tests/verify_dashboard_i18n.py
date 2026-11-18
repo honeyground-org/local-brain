@@ -294,6 +294,7 @@ def verify_history_recovery():
     good=dict(at='2000-01-01T12:00:00',axis_version=1,pipeline='word',total=42.5,axes=dict(precision=None,recall=37.5),raw=dict(precision=None))
     bad=[{},dict(at=good['at']),dict(good,total=float('nan')),dict(good,total=float('inf')),b'{"at":',b'\xff',b'['*2000,[],None,'text',1,dict(good,axes=[]),dict(good,raw=[]),dict(good,at='invalid'),dict(good,total=True),dict(good,total=10**1000)]
     bad += [dict(good,axes=dict(precision=v)) for v in ('N/A',True,[],{},float('nan'),float('inf'),-float('inf'))]
+    bad += [dict(good,axes={}),dict(good,axes=dict(precison=50)),dict(good,raw=dict(precison=.5)),dict(good,axis_version=3),dict(good,pipeline='unknown')]
     bad += [dict(good,**{field:value}) for field in ('total','axes') for value in ((-5,105) if field=='total' else (dict(precision=-5),dict(precision=105)))]
     with tempfile.TemporaryDirectory() as td,patch.object(scorecard,'_store_home',return_value=td),patch.object(scorecard,'collect',side_effect=AssertionError('fresh measurement')),patch.object(scorecard,'bench',side_effect=AssertionError('fresh benchmark')):
         path=Path(td)/'scorecard.jsonl'
@@ -304,6 +305,13 @@ def verify_history_recovery():
                 before='\n'.join(db.iterdump());original=path.read_bytes()
                 p=dashboard.payload(db);page=dashview.render(p)
                 check('history tolerates malformed row '+str((i,bool(prefix))),p['performance']==(good if prefix else None) and 'kept_memory' in page and before=='\n'.join(db.iterdump()) and original==path.read_bytes())
+        for version in (None,1,2):
+            historical=dict(good)
+            if version is None:historical.pop('axis_version')
+            else:historical['axis_version']=version
+            path.write_text(json.dumps(historical),encoding='utf-8')
+            check('supported historical ruler remains valid '+str(version),dashboard.payload(db)['performance']==historical)
+        check('current ruler schema matches published axes',scorecard.HISTORY_AXES[scorecard.AXIS_VERSION]=={axis[1] for axis in scorecard.AXES})
         for value in (0,100,None):
             boundary=dict(good,total=value,axes=dict(precision=value))
             path.write_text(json.dumps(boundary),encoding='utf-8')
@@ -344,7 +352,7 @@ def verify_workspace():
                         json.dumps(meta) if meta else '', '</script><script>bad()</script>'+'x'*900, 'A description'))
         db.commit()
         before=list(db.iterdump())
-        old=dict(at='2000-01-01',axis_version=1,pipeline='word',total=42,axes={'precision':None,'reach':42})
+        old=dict(at='2000-01-01',axis_version=1,pipeline='word',total=42,axes={'precision':None,'recall':42})
         with patch.object(scorecard,'history',return_value=[old]), patch.object(scorecard,'collect',side_effect=AssertionError('fresh measurement')), patch.object(scorecard,'bench',side_effect=AssertionError('fresh benchmark')):
             p=dashboard.payload(db)
             page=dashview.render(p)

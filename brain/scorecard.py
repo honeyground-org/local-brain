@@ -50,6 +50,10 @@ from typing import Dict, List, Optional, Tuple
 #     2 (2026-09-01~)  automatic = the above × ★share of quiet when no memory was needed★
 #                       — closed the half-count that gave no credit for reducing noise
 AXIS_VERSION = 2
+# Versions 1 and 2 differ in the automatic formula, not in their axis names.
+# Keep historical schemas explicit when a later ruler adds or renames axes.
+_HISTORY_AXES_V1 = frozenset(("recall", "precision", "efficiency", "automatic", "stability", "autonomy", "liveness"))
+HISTORY_AXES = {1: _HISTORY_AXES_V1, 2: _HISTORY_AXES_V1}
 
 # ★Axes and weights★ — derived from the goal (table above). They sum to 100.
 AXES = (
@@ -210,12 +214,16 @@ def valid_history_record(row) -> bool:
     for key in ("note", "pipeline", "judge"):
         if key in row and not isinstance(row[key], str):
             return False
-    if "axis_version" in row and (type(row["axis_version"]) is not int or row["axis_version"] <= 0):
+    version = row.get("axis_version", 1)  # Unstamped historical records use the first ruler.
+    if type(version) is not int or version not in HISTORY_AXES:
+        return False
+    if "pipeline" in row and row["pipeline"] not in ("word", "deployed"):
         return False
     values = [row.get("total")]
     for key in ("axes", "raw"):
         axes = row.get(key, {})
-        if not isinstance(axes, dict):
+        if (not isinstance(axes, dict) or not set(axes).issubset(HISTORY_AXES[version])
+                or (key == "axes" and not axes)):
             return False
         values.extend(axes.values())
     try:
