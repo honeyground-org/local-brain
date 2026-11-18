@@ -1347,3 +1347,5 @@ apply the hook gate.
 Raw cosine remains raw similarity; the returned semantic ratio includes the feedback factor. This
 is retrieval preference, not a factual retraction or permission to delete the memory. Explicit lifecycle
 revisions determine factual validity. Ambiguous memory names reject feedback without modifying any row.
+
+Identity review entry points (2.5.3) open an existing index read-only. Tool discovery also avoids initialising an index. When no readable index exists, review returns `index_pending`; run indexing explicitly. Legacy reference validation distinguishes original source quotations from reference metadata and requires the prepared group snapshot on every new reference-based save.
