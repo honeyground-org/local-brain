@@ -185,6 +185,35 @@ def main() -> int:
         feed(tool_result(tid, "fixture contents"))
     learned = db.execute("SELECT exposed FROM personal_events WHERE session='confirmed-read'").fetchall()
     check("all JSON result lanes are exposure, not independent labels", len(learned) == 3 and all(r[0] for r in learned))
+
+    # A transient veto write failure must not consume the shell/edit log line.
+    import sqlite3
+    from unittest.mock import patch
+    from brain import personal
+    for order, ending in ((o,e) for o in ('shell_read','read_shell') for e in ('lf','crlf')):
+        sid='retry-'+order+'-'+ending
+        read=tool_use('retry-read','Read',{'file_path':p('ledger_rule')})
+        shell=tool_use('retry-shell','Bash',{'command':'python3 change.py'})
+        events=[shell,read] if order=='shell_read' else [read,shell]
+        tp=os.path.join(_TMP,sid+'.jsonl')
+        transcript(tp,[user('independent question '+order+' '+ending+' café')]+events)
+        rr={'session_id':sid,'offset':0,'tail':tail._blank_tail(),'saves':0}
+        with open(tp,'rb') as fh:
+            data=b'\n'.join(fh.read().splitlines())+b'\n'
+        if ending=='crlf':data=data.replace(b'\n',b'\r\n')
+        with open(tp,'wb') as fh:fh.write(data)
+        raw_lines=data.splitlines(keepends=True)
+        expected=sum(len(x) for x in raw_lines[:next(i for i,x in enumerate(raw_lines) if b'retry-shell' in x)])
+        with patch.object(personal,'edited',side_effect=sqlite3.OperationalError('database is locked')):
+            tail.scan(tp,rr)
+        check(order+' '+ending+' veto failure preserves retry offset and turn',rr['offset']==expected and rr['use']['turn']==1)
+        # Persist/reload as the actual Stop hook does, then retry after recovery.
+        rr=json.loads(json.dumps(rr))
+        tail.scan(tp,rr)
+        rows=db.execute('SELECT edited FROM personal_events WHERE session=?',(sid,)).fetchall()
+        check(order+' '+ending+' retry excludes all reads exactly once',len(rows)==1 and rows[0][0]==1 and rr['offset']==os.path.getsize(tp) and rr['use']['turn']==1)
+        tail.scan(tp,rr)
+        check(order+' '+ending+' completed retry is idempotent',db.execute('SELECT COUNT(*) FROM personal_events WHERE session=?',(sid,)).fetchone()[0]==1)
     db.close()
 
     print("=" * 78)

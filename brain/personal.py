@@ -17,7 +17,7 @@ import time
 
 ARMS = ("baseline", "fusion", "linked")
 KEY = "personal_policy_v2"
-OBSERVATION_VERSION = 4
+OBSERVATION_VERSION = 5
 ALPHA = 0.05
 
 
@@ -63,7 +63,8 @@ def _current_ids(db, ids):
     from brain import lifecycle
     with lifecycle.view("current"):
         snap = lifecycle.snapshot(db)
-        return {did for did in ids if did in snap.resolve(did)}
+        return {did for did in ids if did in snap.resolve(did)
+                and snap.info(did).get("current") is not False}
 
 
 def certified(db, s):

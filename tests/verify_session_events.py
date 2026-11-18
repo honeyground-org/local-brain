@@ -194,6 +194,20 @@ def main() -> int:
     out = deferred.on_session_start(db)
     check("② the next session start finds nothing to do", out["reasons"] == [] and out["kicked"] is False, json.dumps(out))
 
+    # Deterministically finish the old worker between observation and lease acquisition.
+    from unittest.mock import patch
+    settle()
+    note("note_04", "A note about the amber canoe, number 4.")
+    settle()
+    take_lock = deferred._take_lock
+    def finish_before_lease():
+        deferred.run(db)
+        return take_lock()
+    with patch.object(deferred, '_take_lock', side_effect=finish_before_lease), patch.object(deferred, '_spawn') as spawn:
+        stale = deferred.on_session_start(db)
+        check("completed work is rechecked after taking the lease", not stale["reasons"] and not stale["kicked"] and not spawn.called)
+    check("unused lease is released after the recheck", not os.path.exists(deferred._lock_path()))
+
     # ── ③ ten session starts at once ────────────────────────────────────────────
     settle()
     note("note_05", "A note about the vermilion barge, number 5.")

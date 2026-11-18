@@ -203,7 +203,7 @@ def _retry(failed, seconds):
             os.remove(tmp)
 
 
-def kick(db=None, scan: bool = False) -> bool:
+def kick(db=None, scan: bool = False, recheck=None) -> bool:
     """Start the worker if there is work and no worker is running. Never waits, never raises."""
     try:
         if time.time() < float(_retry_state()[1].get("after", 0)):
@@ -213,6 +213,10 @@ def kick(db=None, scan: bool = False) -> bool:
         if not _take_lock():
             return False
         try:
+            # A previous worker may finish between observation and lease acquisition.
+            if recheck is not None and not recheck():
+                _release()
+                return False
             _spawn()
             return True
         except Exception:                                # noqa: BLE001
@@ -381,6 +385,40 @@ def _check_guard():
         fh.close()
 
 
+def _session_reasons(db, mark_work=True):
+    from brain import store
+    reasons = []
+    if store.needs_reindex(db):
+        reasons.append("files")
+    if local_embedding():
+        from brain import vectors
+        try:
+            caught_up = store.get_meta(db, EMBED_SPACE_KEY, "") == vectors.model_tag()
+        except Exception:
+            caught_up = False
+        if not caught_up and "embed" not in pending(db).get("work", []):
+            if mark_work:
+                mark(db, ["embed"])
+    if pending(db).get("work"):
+        reasons.append("pending")
+    try:
+        repos = json.loads(store.get_meta(db, GIT_REPOS_KEY, "") or "null")
+        saved = json.loads(store.get_meta(db, GIT_KEY, "") or "null")
+    except ValueError:
+        repos, saved = None, None
+    if repos is None or saved != git_fingerprint(repos):
+        reasons.append("git")
+        if mark_work:
+            mark(db, ["git"])
+    try:
+        from brain import calibrate
+        if not store.get_meta(db, calibrate._META_KEY, "") or calibrate._measured_on_another_corpus(db):
+            reasons.append("ruler")
+    except Exception:                            # noqa: BLE001
+        pass
+    return reasons
+
+
 def on_session_start(db) -> dict:
     """★Event-driven★: a session start indexes nothing by itself. It looks for the events that make work
     necessary — a source file changed, work is pending, a repository moved, the ruler no longer fits the
@@ -397,34 +435,12 @@ def on_session_start(db) -> dict:
         if not held:
             out["skipped"] = "another session start is checking"
         else:
-            if store.needs_reindex(db):
-                out["reasons"].append("files")
-            if local_embedding():
-                from brain import vectors
-                try:
-                    caught_up = store.get_meta(db, EMBED_SPACE_KEY, "") == vectors.model_tag()
-                except Exception:
-                    caught_up = False
-                if not caught_up and "embed" not in pending(db).get("work", []):
-                    mark(db, ["embed"])
-            if pending(db).get("work"):
-                out["reasons"].append("pending")
-            try:
-                repos = json.loads(store.get_meta(db, GIT_REPOS_KEY, "") or "null")
-                saved = json.loads(store.get_meta(db, GIT_KEY, "") or "null")
-            except ValueError:
-                repos, saved = None, None
-            if repos is None or saved != git_fingerprint(repos):
-                out["reasons"].append("git")
-                mark(db, ["git"])
-            try:
-                from brain import calibrate
-                if not store.get_meta(db, calibrate._META_KEY, "") or calibrate._measured_on_another_corpus(db):
-                    out["reasons"].append("ruler")
-            except Exception:                            # noqa: BLE001
-                pass
+            out["reasons"] = _session_reasons(db)
             if out["reasons"]:
-                out["kicked"] = kick(db, scan=True)
+                def recheck():
+                    out["reasons"] = _session_reasons(db, mark_work=False)
+                    return out["reasons"]
+                out["kicked"] = kick(db, scan=True, recheck=recheck)
                 if not out["kicked"] and _alive(int(_owner().get("pid") or 0)):
                     out["running"] = True       # a worker started by another session start does this work
     out["secs"] = round(time.time() - t0, 3)

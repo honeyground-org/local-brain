@@ -126,7 +126,7 @@ def verify_turn_edit_order():
             assert result['arm']==('baseline' if is_edited else 'fusion'), (order,result)
             if not is_edited:
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v3:' || substr(identity,4)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v4:' || substr(identity,4)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -134,7 +134,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v3 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v4 support rejected')
 
 
 def verify_scoped_meaning():
@@ -260,6 +260,36 @@ def verify_retired_budget():
     print('PASS: 41 SHA-pinned legacy predecessors cannot exhaust k=8; absent current vector stays empty')
 
 
+def verify_disputed_support():
+    import sqlite3
+    from brain import lifecycle, observe
+    for preexisting in (False, True):
+        db=sqlite3.connect(':memory:'); db.row_factory=sqlite3.Row; store._init(db)
+        evidence(db,16,'fusion')
+        meta=dict(topic='plant',facet='water',status='active')
+        db.execute('UPDATE docs SET lifecycle=? WHERE path=?',(json.dumps(meta),'fixture'));db.commit()
+        # Lifecycle eligibility is independent of runner speed; cost gates have their own checks.
+        with patch.object(personal.time,'monotonic',return_value=0.0), patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
+            if preexisting:
+                assert personal.update(db)['arm']=='fusion'
+                assert personal.certified(db,personal.state(db))
+            db.execute('INSERT INTO docs(path,name,source,sha,lifecycle) VALUES(?,?,?,?,?)',
+                       ('conflict','conflict','memory','different',json.dumps(meta)));db.commit()
+            did=db.execute("SELECT id FROM docs WHERE path='fixture'").fetchone()[0]
+            with lifecycle.view('current'):
+                snap=lifecycle.snapshot(db)
+                assert did in snap.resolve(did) and snap.info(did)['status']=='disputed'
+            assert did not in personal._current_ids(db,{did})
+            if preexisting:
+                assert not personal.certified(db,personal.state(db))
+            personal.record(db,'read disputed','fixture','disputed-pending',1)
+            assert personal.update(db)['arm']=='baseline'
+            assert db.execute("SELECT measured FROM personal_events WHERE session='disputed-pending'").fetchone()[0]==-1
+            assert db.execute('SELECT COUNT(*) FROM docs').fetchone()[0]==2
+        db.close()
+    print('PASS: disputed memories remain retrievable but cannot train or retain a policy certificate')
+
+
 def verify_support_and_cost():
     import sqlite3
     from brain import lifecycle, search, server, observe, recalljson
@@ -267,7 +297,8 @@ def verify_support_and_cost():
     evidence(db,16,'fusion')
     db.execute('UPDATE docs SET lifecycle=? WHERE path=?',
                (json.dumps(dict(topic='plant',facet='water',status='active')),'fixture'));db.commit()
-    with patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
+    # Support revocation is a state check; the following cases measure cost explicitly.
+    with patch.object(personal.time,'monotonic',return_value=0.0), patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
         assert personal.update(db)['arm']=='fusion'
         original=tuple(db.execute("SELECT id,sha,body,lifecycle FROM docs WHERE path='fixture'").fetchone())
         db.execute('INSERT INTO docs(path,name,source,sha,lifecycle) VALUES(?,?,?,?,?)',
@@ -410,6 +441,7 @@ def main():
     other.close(); db.close()
     clock.stop()
     cache.stop()
+    verify_disputed_support()
     verify_support_and_cost()
     verify_retired_budget()
     verify_semantic_route()
