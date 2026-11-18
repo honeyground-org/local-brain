@@ -25,7 +25,7 @@ KEY_MAX = 128
 PROJECT_MAX = 128
 SOURCE_MAX = 512
 # The fields a retry is compared on — the date of saving is not one of them (a retry tomorrow is the same request).
-PAYLOAD_FIELDS = ("description", "type", "body", "links", "search_aliases", "project_id", "source", "observed_at", "lifecycle", "extracted_from", "embed")
+PAYLOAD_FIELDS = ("description", "type", "body", "links", "search_aliases", "project_id", "source", "observed_at", "lifecycle", "extracted_from", "embed", "identity_reference")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -99,6 +99,13 @@ def validate(args: dict) -> Optional[Dict[str, Any]]:
         issue = extraction_shape(args)
         if issue:
             return error("invalid_argument", issue)
+    if "identity_reference" in args:
+        issue = identity_reference_shape(args["identity_reference"])
+        if issue:
+            return error("invalid_argument", issue)
+        if (not args.get("extracted_from") or not args.get("expected_fact_sha")
+                or args["identity_reference"]["name"] == name):
+            return error("invalid_argument", "Identity reuse requires a distinct source-bound proposal and its fact snapshot")
     return None
 
 
@@ -241,6 +248,8 @@ def payload_sha(args: dict) -> str:
         body.pop("embed", None)
     if not args.get("extracted_from"):
         body.pop("extracted_from", None)  # Keep existing retry hashes unchanged.
+    if "identity_reference" not in args:
+        body.pop("identity_reference", None)  # Preserve all pre-reference retry hashes.
     body["search_aliases"] = aliases(args)
     body["links"] = [l for l in (args.get("links") or []) if isinstance(l, str)]
     raw = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -333,6 +342,8 @@ def render(name: str, args: dict, verified_at: str) -> str:
         lines.insert(1, "embed: " + ("false" if args.get("extracted_from") or args["embed"] is False else "true"))
     if args.get("extracted_from"):
         lines.append("extracted_from: " + frontmatter_json(args["extracted_from"], sort_keys=True))
+    if args.get("identity_reference"):
+        lines.append("identity_reference: " + frontmatter_json(args["identity_reference"], sort_keys=True))
     if args.get("lifecycle"):
         lines.append("lifecycle: " + frontmatter_json(args["lifecycle"], sort_keys=True))
     if args.get("idempotency_key"):
@@ -415,6 +426,7 @@ def ack(db: sqlite3.Connection, *, name: str, path: str, result: str, conflict: 
         "conflict": conflict,
         "lifecycle": args.get("lifecycle") or cur.get("lifecycle") or None,
         "extracted_from": args.get("extracted_from"),
+        "identity_reference": args.get("identity_reference"),
         "project_id": (args.get("project_id") or None) if result != "conflict" else cur.get("project_id"),
         "idempotency_key": key,
         "payload_sha": (payload_sha(args) if result != "conflict" else cur.get("payload_sha")),
@@ -484,6 +496,28 @@ def check_extraction(db, args):
     return None
 
 
+def identity_reference_shape(value):
+    if (not isinstance(value, dict) or set(value) != {"name", "sha", "reason"}
+            or not isinstance(value["name"], str) or not 1 <= len(value["name"]) <= 200
+            or not isinstance(value["sha"], str) or not _SHA.fullmatch(value["sha"])
+            or not isinstance(value["reason"], str) or not value["reason"].strip() or len(value["reason"]) > 500):
+        return "identity_reference requires name, sha and an explicit reason of 1..500 characters"
+    return None
+
+
+def check_identity(db, args):
+    """New writes must still have the uniquely selected, valid, pinned identity."""
+    value = args.get("identity_reference")
+    if value is None:
+        return None
+    record, bad = identity_record(db, value["name"], value["sha"], args.get("project_id") or "")
+    if bad:
+        return bad
+    if any(args["lifecycle"].get(k) != record["meta"][k] for k in ("topic", "facet")):
+        return error("identity_mismatch", "The proposal must preserve the selected identity verbatim")
+    return None
+
+
 def identity_record(db, name, sha, scope, snap=None, cyclic=None):
     """Resolve an explicitly reviewed, version-pinned identity; never infer sameness."""
     from brain import lifecycle, memoryreview
@@ -494,9 +528,17 @@ def identity_record(db, name, sha, scope, snap=None, cyclic=None):
     if len(ids) != 1:
         return None, error("identity_unavailable", "Select one indexed identity in the exact project_id scope")
     record = snap.docs[ids[0]]
-    if (not record["meta"] or lifecycle.validate(record["meta"]) or ids[0] in snap.issues
-            or ids[0] in cyclic):
+    if not record["meta"] or lifecycle.validate(record["meta"]):
         return None, error("invalid_identity", "Use a tracked identity with valid metadata and revision links")
+    pending, seen = [ids[0]], set()
+    while pending:
+        did = pending.pop()
+        if did in seen:
+            continue
+        seen.add(did)
+        if did in snap.issues or did in cyclic:
+            return None, error("invalid_identity", "The selected identity and its ancestors need valid revision links")
+        pending.extend(snap.prev.get(did, ()))
     try:
         actual_sha = file_sha(record["path"])
     except (OSError, UnicodeError):
@@ -587,11 +629,9 @@ def _prepare_fact(db, args):
     selected = None
     reference = args.get("identity_reference")
     if "identity_reference" in args:
-        if (not isinstance(reference, dict) or set(reference) != {"name", "sha", "reason"}
-                or not isinstance(reference["name"], str) or not 1 <= len(reference["name"]) <= 200
-                or not isinstance(reference["sha"], str) or not _SHA.fullmatch(reference["sha"])
-                or not isinstance(reference["reason"], str) or not reference["reason"].strip() or len(reference["reason"]) > 500):
-            return error("invalid_argument", "identity_reference requires name, sha and an explicit reason of 1..500 characters")
+        issue = identity_reference_shape(reference)
+        if issue:
+            return error("invalid_argument", issue)
         bad = validate(save)
         if bad:
             return bad
@@ -638,6 +678,11 @@ def _prepare_fact(db, args):
     if not review["source_matches_index"]:
         return error("index_pending", "Refresh changed fact sources before preparing again")
     save["expected_fact_sha"] = review["expected_fact_sha"]
+    if selected:
+        save["identity_reference"] = dict(reference)
+    bad = validate(save)
+    if bad:
+        return bad
     return dict(review, save_tool="remember", save_arguments=save,
                 extraction={"source_name": name, "source_sha": sha, "spans": spans, "status": "proposed"},
                 identity_reference=dict(reference) if selected else None,

@@ -1124,13 +1124,19 @@ chosen identity and existing history remain unchanged. The new memory stays prop
 this does not merge old identity groups, supersede facts, or certify semantic equivalence. Reuse an
 existing identity only after inspecting its meaning. Different facts need distinct identifiers.
 
-Keep the returned `expected_fact_sha` in `save_arguments`: saving refreshes the local index and rejects
+Server 2.5.1 also persists structured `identity_reference` in the proposal. New saves recheck the
+reference's unique name, scope, SHA, identifiers and revision-link validity after refreshing the index.
+An unchanged group hash alone cannot catch a new same-name record in another identity group.
+Prepare unsaved 2.5.0 requests again to obtain this guard; successful older retries remain compatible.
+
+Keep both returned `identity_reference` and `expected_fact_sha` in `save_arguments`: saving refreshes the local index and rejects
 changed fact membership or source versions with `fact_changed`. Re-prepare after changes. As with other
 prepared writes, direct external file editors do not share the lock; no cross-file atomicity is claimed.
 For an actual confirmed correction, use `prepare_revision` on the applicable predecessor and resolve
 competing current claims explicitly; sharing an identifier alone does not establish a revision edge.
 
-Capabilities: `tools.remember.review_identity` and `tools.remember.identity_reference`. The five-language
+Capabilities: `tools.remember.review_identity`, `tools.remember.identity_reference`, and
+`tools.remember.identity_reference_guard` (2.5.1 save-time guard). The five-language
 fixture reduces caller-created translated identity groups from five to one through explicit reuse;
 that is a controlled identity-management result, not measured native-host answer-quality improvement.
 
