@@ -858,5 +858,9 @@
  "dash.inspect.until": "Gültig bis",
  "dash.inspect.untracked": "Gültigkeit nicht erfasst",
  "dash.inspect.vector": "Semantische Suche",
- "dash.inspect.view": "Ansicht"
+ "dash.inspect.view": "Ansicht",
+ "dash.inspect.kind": "Typ",
+ "dash.inspect.topic": "Thema",
+ "dash.inspect.facet": "Aspekt",
+ "dash.inspect.no_history": "Keine verknüpften Versionen erfasst."
 }

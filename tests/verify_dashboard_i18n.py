@@ -107,6 +107,58 @@ def verify_observatory():
             db.close()
 
 
+def verify_workspace():
+    import json
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import scorecard
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    store._init(db)
+    with tempfile.TemporaryDirectory() as temp:
+        source = Path(temp) / 'source.html'
+        source.write_text('canonical source')
+        for did, name, scope, meta in (
+                (1, 'older', 'garden', dict(topic='plant', facet='water', status='active')),
+                (2, 'current', 'garden', dict(topic='plant', facet='water', status='active', supersedes=['older'])),
+                (3, 'current', 'other', dict(topic='plant', facet='water', status='active')),
+                (4, 'unknown', '', {})):
+            db.execute("INSERT INTO docs(id,name,path,source,kind,sha,project_id,lifecycle,body,description) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                       (did,name,str(source) if did==1 else str(Path(temp)/('%s.md'%did)), 'memory','reference',str(did),scope,
+                        json.dumps(meta) if meta else '', '</script><script>bad()</script>'+'x'*900, 'A description'))
+        db.commit()
+        before=list(db.iterdump())
+        old=dict(at='2000-01-01',axis_version=1,pipeline='word',total=42,axes={'precision':None,'reach':42})
+        with patch.object(scorecard,'history',return_value=[old]), patch.object(scorecard,'collect',side_effect=AssertionError('fresh measurement')), patch.object(scorecard,'bench',side_effect=AssertionError('fresh benchmark')):
+            p=dashboard.payload(db)
+            page=dashview.render(p)
+        rows={r['id']:r for r in p['memories']}
+        check('workspace resolves current and superseded without cross-scope history', rows[1]['validity']['status']=='superseded' and rows[2]['validity']['current'] is True and rows[1]['history']==[1,2] and rows[3]['history']==[3])
+        check('untracked validity stays unknown, never a current claim', rows[4]['validity']['current'] is None and p['states']['untracked']==1)
+        check('body preview is bounded with original length retained', len(rows[1]['preview'])==800 and rows[1]['body_chars']>800)
+        check('historical measurement retains date and missing values', p['performance']['at']=='2000-01-01' and p['performance']['axes']['precision'] is None)
+        check('memory JSON cannot terminate its script', '</script><script>bad()' not in page and r'\u003c/script' in page)
+        check('view blocks outbound connections and uses text-only memory rendering', "connect-src 'none'" in page and 'innerHTML' not in dashview.WORKSPACE_JS)
+        check('opening the workspace leaves the database unchanged', before==list(db.iterdump()))
+        for target in (source, Path(temp)/'alias.html', Path(temp)/'output.md'):
+            if target.name=='alias.html':
+                os.link(source,target)
+            rejected=False
+            try:
+                dashboard.write(db,str(target),False)
+            except ValueError:
+                rejected=True
+            check('control: reject source/alias/non-HTML output '+target.name,rejected)
+        check('source bytes survive rejected output',source.read_text()=='canonical source')
+        empty=sqlite3.connect(':memory:');empty.row_factory=sqlite3.Row;store._init(empty)
+        with patch.object(scorecard,'history',return_value=[]):
+            data=dashboard.payload(empty)
+            check('empty corpus and absent measurements render without false zero score',not data['memories'] and data['performance'] is None and 'workspace-data' in dashview.render(data))
+    db.close()
+
+
 def main():
     print("=" * 72 + "\ndashboard — does everything come out in the chosen language\n" + "=" * 72)
     db = store.connect()
@@ -179,7 +231,7 @@ def main():
             check("%s's catalog is in the page (never calls a CDN)" % code,
                   '"%s"' % code in pages["en"])
         check("no request goes outward (0 http references)",
-              "http://" not in pages["en"] and "https://" not in pages["en"])
+              not re.search(r'<(?:script|link|img)[^>]+(?:src|href)=[\"\']https?://', pages["en"]) and "connect-src 'none'" in pages["en"])
 
         # ── ⑤-b ⛔ ★the JS ships without a syntax error★ — a raw newline inside a string kills it
         #    (2026-09-02: a `\n` inside a Python string became an actual newline, `Invalid or
@@ -204,6 +256,7 @@ def main():
         i18n._lang = saved_lang
         i18n._cache.clear()
 
+    verify_workspace()
     verify_observatory()
     print("=" * 72)
     print("❌ %d failure(s): %s" % (len(FAIL), ", ".join(FAIL)) if FAIL else "✅ all passed")

@@ -860,5 +860,9 @@
  "dash.inspect.until": "Valid until",
  "dash.inspect.untracked": "Validity not recorded",
  "dash.inspect.vector": "Semantic retrieval",
- "dash.inspect.view": "View"
+ "dash.inspect.view": "View",
+ "dash.inspect.kind": "Kind",
+ "dash.inspect.topic": "Topic",
+ "dash.inspect.facet": "Facet",
+ "dash.inspect.no_history": "No linked versions recorded."
 }

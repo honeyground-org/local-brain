@@ -178,3 +178,15 @@ Identity-edge follow-up (2.5.5): exact-scope SHA-pinned identity provenance no l
 New writes also reject old prepared identity requests containing automatic bare-name provenance links; successful prior retries bypass new-write guards and remain compatible.
 
 Provenance-boundary follow-up (2.6.1, generation 51): quoted frontmatter evidence never creates graph edges or aliases. Normal indexing performs a one-time derived-link rebuild without editing sources. Source/target filesystem identity is checked before extraction writes, so case aliases and hard links cannot replace the source even when expected_sha is correct.
+
+
+### Read-only inspection workspace (2.7.0, proposal #105)
+
+The default dashboard now separates recorded operating state, memory inspection, historical
+performance and explicit relationships. It reads the existing index and saved score history;
+opening it no longer runs score collection or a benchmark. A bounded memory preview and
+paginated client-side list make source/scope/validity filters and same-identity version
+navigation available offline. Unknown validity and unmeasured host benefit remain explicit.
+This UI release does not change retrieval ranking, calibration or claim a quality gain.
+Validation extends the existing dashboard check with unknown/current/superseded states,
+cross-scope isolation, missing measurements, escaping, read-only snapshots and output aliases.

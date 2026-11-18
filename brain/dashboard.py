@@ -633,79 +633,10 @@ For the full list, <code>brain help</code>.</p>
 """
 
 
-def measured_payload(db: sqlite3.Connection) -> dict:
-    """★Pure JSON★ — it builds not one piece of the picture (plan §5b-a).
-
-    ⛔ The old `collect()` returned tables ★pre-built as HTML★ (`score_html` · `bench_html`). Then the
-    data layer has to change every time the screen does, and the same number is rendered in two places
-    — the *"a rule in two places only gets fixed in one"* this repository has been burnt by repeatedly.
-    The new dashboard eats this function alone.
-    """
-    from brain import rerank, scorecard as _sk
-    d = collect(db)
-    # ⛔ ★The screen must not disagree with `brain score`★ (2026-09-28). Opening the dashboard
-    #    does not spend judge budget, so the remote axes come back empty — but a full measurement
-    #    usually sits in the history, and leaving it out put 65.9 on screen against a measured 73.5.
-    #    §scorecard.carry_remote fills them and ★says which ones and from when★, so the screen can
-    #    show that rather than pass an older number off as this moment's.
-    raw, carried, carried_at = _sk.carry_remote(_sk.collect(db, cheap=True))
-    sc = _sk.compute(raw)
-    axes = [{"key": r["key"], "score": r["score"], "raw": r["raw"],
-             "weight": r["weight"], "target": _sk.TARGET.get(r["key"]),
-             "carried": r["key"] in carried}
-            for r in sc["axes"]]
-    bd = rerank.budget(db)
-    booked = sum(x["cost"] for x in rerank.scheduled_spend())
-    # ⛔ ★The doughnut must sum to the limit★ (2026-09-02: the first version drew used 6 + reserved 300
-    #    + my share 44 = 350, so the limit 500 and 150 did not line up — what was missing is ★the
-    #    interactive reserve★. A pie chart that does not sum makes every slice untrustworthy.)
-    left = bd.get("left")
-    if left is None:                  # no daily wall we know of (§rerank.budget) — nothing to divide
-        reserve, free = 0, 0
-    else:
-        reserve = min(rerank.RESERVE, max(0, left - booked))
-        free = max(0, left - booked - reserve)
-    cal = d.get("calibration") or {}
-    return {
-        "generated_at": d["generated_at"],
-        "axes": axes,
-        "total": sc["total"],
-        "measured_weight": sc["measured_weight"],
-    # ⛔ ★What can be translated is not a name but a key★ (2026-09-02): `sc["unmeasured"]` gives the
-    #    human-readable axis names (in Korean). Put those on the screen and that one place stays Korean
-    #    even after switching to English. So ★the key★ is put on the screen and translated there.
-        "unmeasured": [a["key"] for a in axes if a["score"] is None],
-    # ★Which axes are not from this moment, and when they were★ — the screen says so out loud.
-        "carried": carried,
-        "carried_at": (carried_at[:10] if carried_at else ""),
-        "bench_rows": _sk.bench(db)["rows"],
-        "budget": {"used": bd.get("used", 0), "reserved": booked,
-                   "interactive": reserve, "free": free,
-                   "limit": bd.get("limit", 0)},
-        "sources": sorted(d["by_source"].items(), key=lambda kv: -kv[1]),
-        "issues": d["issues"],
-        "metrics": d["metrics"],
-        "monthly": d["monthly"],
-        "graph_html": d.get("graph") or "",
-        "kpi": [("dash.corpus", d["corpus"]["docs"],
-                 " · ".join("%s %d" % kv for kv in sorted(d["by_source"].items()))),
-                ("dash.memories", d["by_source"].get("memory", 0),
-                 " · ".join("%s %d" % kv for kv in sorted(d["by_kind"].items()))),
-                ("dash.links", d["corpus"]["links"], "[[link]]"),
-                ("dash.threshold", cal.get("threshold", 0),
-                 "fire %.0f%%" % (cal.get("fire_rate_pct") or 0))],
-        # ⛔ ★The old table is not put on the screen★ (2026-09-02). Folding it away seemed enough, but
-        #    ① the user's instruction is "minimise text" and ② that table is Korean prose, so on the
-        #    six-language screen ★600 characters stayed untranslated★. The same numbers are all already
-        #    above as graphs, and the place for prose is `brain score --compare` (CLI).
-        "details_html": "",
-    }
-
-
-
 def payload(db: sqlite3.Connection) -> dict:
     """A read snapshot for inspection; opening a view never runs a benchmark."""
     from collections import Counter
+    from pathlib import Path
     from brain import lifecycle, memoryreview, personal, scorecard, server, engines, vectors
     started = time.perf_counter()
     db.execute("SAVEPOINT dashboard_snapshot")
@@ -721,7 +652,6 @@ def payload(db: sqlite3.Connection) -> dict:
                 info = snap.info(item['id'])
                 if item['id'] in cycles or info.get('issue'):
                     info = dict(info, status='invalid', current=False)
-                from pathlib import Path
                 item['file_url'] = Path(item['path']).absolute().as_uri()
                 item['validity'] = info
                 item['history'] = sorted(snap.fact_members(item['id']))
@@ -755,25 +685,30 @@ def write(db: sqlite3.Connection, path: str = "", open_browser: bool = True,
     The old screen stays behind `classic=True` (`--classic`) — some days a table is what is needed, and
     there must be somewhere to fall back to when the new screen breaks.
     """
-    if not classic:
+    from pathlib import Path
+    import tempfile
+    output = Path(path or os.path.join(store.brain_home(),
+                  "dashboard-classic.html" if classic else "dashboard.html")).expanduser().resolve()
+    protected = [Path(r[0]).resolve() for r in db.execute("SELECT path FROM docs")]
+    protected.append(Path(store.db_path()).resolve())
+    if output.suffix.lower() != '.html' or output in protected:
+        raise ValueError("choose a .html output path outside indexed sources and the database")
+    if output.exists() and any(p.exists() and os.path.samefile(output, p) for p in protected):
+        raise ValueError("output aliases an indexed source or database")
+    if classic:
+        html = render(collect(db))
+    else:
         from brain import dashview
         html = dashview.render(payload(db))
-        path = path or os.path.join(store.brain_home(), "dashboard.html")
-        with open(path, "w", encoding="utf-8") as fh:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix='.brain-view-', dir=str(output.parent))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as fh:
             fh.write(html)
-        if open_browser:
-            try:
-                webbrowser.open("file://" + os.path.abspath(path))
-            except Exception:                            # noqa: BLE001
-                pass
-        return path
-    path = path or os.path.join(store.brain_home(), "dashboard-classic.html")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(render(collect(db)))
+        os.replace(temporary, str(output))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
     if open_browser:
-        try:
-            webbrowser.open("file://" + path)
-        except Exception:                                # noqa: BLE001
-            pass
-    return path
+        webbrowser.open(output.as_uri())
+    return str(output)

@@ -858,5 +858,9 @@
  "dash.inspect.until": "유효 종료",
  "dash.inspect.untracked": "유효성 미기록",
  "dash.inspect.vector": "의미 기반 검색",
- "dash.inspect.view": "보기"
+ "dash.inspect.view": "보기",
+ "dash.inspect.kind": "유형",
+ "dash.inspect.topic": "주제",
+ "dash.inspect.facet": "관점",
+ "dash.inspect.no_history": "연결된 버전 기록이 없습니다."
 }

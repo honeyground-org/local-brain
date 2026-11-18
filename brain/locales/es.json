@@ -858,5 +858,9 @@
  "dash.inspect.until": "Válido hasta",
  "dash.inspect.untracked": "Validez no registrada",
  "dash.inspect.vector": "Búsqueda semántica",
- "dash.inspect.view": "Vista"
+ "dash.inspect.view": "Vista",
+ "dash.inspect.kind": "Tipo",
+ "dash.inspect.topic": "Tema",
+ "dash.inspect.facet": "Faceta",
+ "dash.inspect.no_history": "No hay versiones vinculadas registradas."
 }

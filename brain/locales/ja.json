@@ -858,5 +858,9 @@
  "dash.inspect.until": "有効終了",
  "dash.inspect.untracked": "有効性未記録",
  "dash.inspect.vector": "意味検索",
- "dash.inspect.view": "表示"
+ "dash.inspect.view": "表示",
+ "dash.inspect.kind": "種類",
+ "dash.inspect.topic": "主題",
+ "dash.inspect.facet": "観点",
+ "dash.inspect.no_history": "関連する版の記録がありません。"
 }

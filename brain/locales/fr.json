@@ -858,5 +858,9 @@
  "dash.inspect.until": "Valide jusqu’au",
  "dash.inspect.untracked": "Validité non renseignée",
  "dash.inspect.vector": "Recherche sémantique",
- "dash.inspect.view": "Vue"
+ "dash.inspect.view": "Vue",
+ "dash.inspect.kind": "Type",
+ "dash.inspect.topic": "Sujet",
+ "dash.inspect.facet": "Facette",
+ "dash.inspect.no_history": "Aucune version liée enregistrée."
 }
