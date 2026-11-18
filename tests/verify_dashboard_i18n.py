@@ -185,7 +185,7 @@ def main():
         #    (2026-09-02: a `\n` inside a Python string became an actual newline, `Invalid or
         #     unexpected token` — ★the whole language switcher died while the screen looked fine★.)
         for code, html in pages.items():
-            js = re.search(r"<script>(.*)</script>", html, re.S)
+            js = re.search(r"<script>(.*?)</script>", html, re.S)
             check("%s: no broken string in the JS" % code, js is not None)
             if js:
                 bad = [l for l in js.group(1).split("\n")

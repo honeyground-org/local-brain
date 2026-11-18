@@ -633,7 +633,7 @@ For the full list, <code>brain help</code>.</p>
 """
 
 
-def payload(db: sqlite3.Connection) -> dict:
+def measured_payload(db: sqlite3.Connection) -> dict:
     """★Pure JSON★ — it builds not one piece of the picture (plan §5b-a).
 
     ⛔ The old `collect()` returned tables ★pre-built as HTML★ (`score_html` · `bench_html`). Then the
@@ -701,6 +701,50 @@ def payload(db: sqlite3.Connection) -> dict:
         "details_html": "",
     }
 
+
+
+def payload(db: sqlite3.Connection) -> dict:
+    """A read snapshot for inspection; opening a view never runs a benchmark."""
+    from collections import Counter
+    from brain import lifecycle, memoryreview, personal, scorecard, server, engines, vectors
+    started = time.perf_counter()
+    db.execute("SAVEPOINT dashboard_snapshot")
+    try:
+        snap = lifecycle.snapshot(db)
+        cycles = memoryreview._cycles(snap, set(snap.docs))
+        rows, states = [], Counter()
+        at = lifecycle.now()
+        with lifecycle.view('current', at):
+            for row in db.execute("SELECT id,name,path,source,kind,description,project_id,evidence_date,"
+                                  "substr(body,1,800) preview,length(body) body_chars FROM docs ORDER BY id"):
+                item = dict(row)
+                info = snap.info(item['id'])
+                if item['id'] in cycles or info.get('issue'):
+                    info = dict(info, status='invalid', current=False)
+                from pathlib import Path
+                item['file_url'] = Path(item['path']).absolute().as_uri()
+                item['validity'] = info
+                item['history'] = sorted(snap.fact_members(item['id']))
+                states[info['status']] += 1
+                rows.append(item)
+        history = scorecard.history(limit=30)
+        last = history[-1] if history else None
+        embed = health.embedding_state(db)
+        engine = engines.choice('embed')
+        embed.update(model=engine.get('model'), dim=vectors.DIM)
+        return {'workspace': True, 'generated_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'version': server.SERVER_VERSION, 'generation': calibrate.CODE_GENERATION,
+                'index_at': store.get_meta(db,'last_index',''), 'memories': rows,
+                'states': dict(states), 'sources': dict(Counter(r['source'] for r in rows)),
+                'current': sum(r['validity']['current'] is True for r in rows),
+                'stores': health.stores_state(db), 'embedding': embed,
+                'policy': personal.describe(db), 'performance': last, 'performance_history': history,
+                'axis_version': scorecard.AXIS_VERSION,
+                'recalls': db.execute('SELECT COUNT(*) FROM recalls').fetchone()[0],
+                'graph_html': graphview.render(db),
+                'seconds': round(time.perf_counter()-started,4)}
+    finally:
+        db.execute('RELEASE dashboard_snapshot')
 
 def write(db: sqlite3.Connection, path: str = "", open_browser: bool = True,
           classic: bool = False) -> str:

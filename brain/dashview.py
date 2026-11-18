@@ -707,6 +707,8 @@ def _table_for_client() -> dict:
 
 def render(p: dict) -> str:
     """Assemble the page from a pure-JSON payload (§dashboard.payload)."""
+    if p.get("workspace"):
+        return workspace(p)
     axes = p["axes"]
     kpi = p["kpi"]
     body = []
@@ -854,3 +856,149 @@ def render(p: dict) -> str:
             "<title>%s</title><style>%s</style><script>%s</script></head><body>%s"
             "</body></html>" % (i18n.lang(), _t("dash.title"), CSS + dashstyle.css() + RENEWAL_CSS,
                                 js, "".join(body)))
+
+
+WORKSPACE_CSS = """
+body{font-size:14px;line-height:1.55}.workspace{max-width:1480px;margin:auto;padding:24px 32px 48px}
+.workspace header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:20px}
+.brand{display:flex;align-items:center;gap:12px}.brand-mark{width:38px;height:38px;background:var(--g);color:var(--on-accent);border-radius:12px;display:grid;place-items:center;font-size:25px}
+.workspace h1{font-size:21px;margin:0;letter-spacing:-.03em}.workspace h2{font-size:19px;text-transform:none;letter-spacing:-.02em;margin:0 0 16px;color:var(--ink)}
+.workspace h3{font-size:14px;margin:0 0 12px}.workspace .sub{font-size:12px;color:var(--dim)}
+.workspace button,.workspace input,.workspace select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.workspace button{cursor:pointer}.workspace button:hover{background:var(--soft)}.workspace button:disabled{opacity:.5;cursor:default}
+.workspace .langs button{padding:6px;font-size:11px;border:0}.workspace .langs{display:flex;gap:2px}.workspace .langs [aria-pressed=true]{background:var(--soft);color:var(--g)}
+.workspace .mtoggle{font-size:11px}.workspace .appearance select{font-size:12px;padding:6px}.workspace .spacer{flex:1}
+.workspace nav{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 24px}.workspace nav button{background:transparent;border-color:transparent;font-weight:600;padding:9px 16px}
+.workspace nav button[aria-current=page]{color:var(--g);background:var(--soft);border-color:var(--line)}
+.workspace [hidden]{display:none!important}.workspace .intro{font-size:30px;letter-spacing:-.04em;font-weight:650;margin:0 0 6px}
+.workspace .intro-row{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-bottom:24px}.stamp{font-size:12px;color:var(--dim);text-align:right}
+.workspace .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:20px 0}
+.workspace .metric{padding:20px;border:1px solid var(--line);border-radius:13px;background:var(--card)}.metric strong{display:block;font-size:32px;letter-spacing:-.04em;font-weight:650;margin:5px 0}.metric span{color:var(--dim);font-size:12px}
+.workspace .columns{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:18px;margin:18px 0}.workspace .card{padding:22px;border-radius:13px;min-width:0}
+.role{display:grid;grid-template-columns:34px 1fr auto;gap:12px;align-items:center;padding:16px 0;border-bottom:1px solid var(--line)}.role:last-child{border:0}.role-icon{border:1px solid var(--line);border-radius:10px;padding:6px;color:var(--g);text-align:center}.role small{display:block;color:var(--dim);font-size:11px}.role-state{text-align:right;font-size:12px;max-width:190px}
+.notice{padding:12px 16px;border-radius:9px;background:var(--soft);color:var(--dim);font-size:12px;line-height:1.6}.badge{display:inline-block;border:1px solid var(--line);padding:3px 8px;border-radius:6px;font-size:11px;color:var(--dim);white-space:nowrap}.badge[data-state=active]{color:var(--g)}.badge[data-state=invalid],.badge[data-state=disputed]{color:var(--r)}.badge[data-state=proposed],.badge[data-state=expired]{color:var(--a)}
+.workspace progress{width:100%;height:9px;accent-color:var(--g);margin:12px 0}.big-value{font-size:29px;font-weight:650;letter-spacing:-.04em}.pair{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.pair span:first-child{color:var(--dim)}
+.filters{display:grid;grid-template-columns:2fr repeat(3,minmax(0,1fr));gap:12px;margin:20px 0 10px}.filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--dim)}.filters input,.filters select{width:100%;min-width:0;box-sizing:border-box}
+.library{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.9fr);gap:18px;margin-top:18px;align-items:start}.memory-list{padding:0!important;overflow:hidden}.memory-row{display:block!important;border:0!important;border-bottom:1px solid var(--line)!important;border-radius:0!important;text-align:left;width:100%;padding:14px 18px!important;overflow-wrap:anywhere}.memory-row[aria-pressed=true]{background:var(--soft)!important;box-shadow:inset 3px 0 var(--g)}.memory-row strong{display:block;font-size:13px;margin-bottom:4px}.memory-row .row-meta{display:flex;justify-content:space-between;align-items:center;gap:8px}.memory-row small{font-size:11px;color:var(--dim)}
+.pager{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px}.pager span{font-size:12px;color:var(--dim)}.inspector{position:sticky;top:20px;max-height:85vh;overflow:auto;overflow-wrap:anywhere}.inspector h2{font-size:18px}.inspector pre{white-space:pre-wrap;font:12px/1.7 ui-monospace,monospace;color:var(--ink);background:var(--soft);padding:14px;border-radius:8px;overflow-wrap:anywhere}.inspector a{display:inline-block;margin:12px 0;color:var(--g)}.inspector dl{display:grid;grid-template-columns:100px 1fr;gap:8px;font-size:12px}.inspector dt{color:var(--dim)}.inspector dd{margin:0}.history-list{display:grid;gap:6px;margin:12px 0}.history-list button{text-align:left;font-size:12px}.history-list [aria-pressed=true]{background:var(--soft)}
+.axis-row{display:grid;grid-template-columns:120px 1fr 60px;align-items:center;gap:12px;margin:18px 0;font-size:12px}.axis-row b{text-align:right}.axis-track{height:8px;border-radius:8px;background:var(--track);overflow:hidden}.axis-fill{height:100%;background:var(--g)}.workspace footer{border-top:1px solid var(--line);padding-top:18px;margin-top:28px;color:var(--dim);font-size:11px}
+.workspace .card,.workspace .metric{animation:fade .35s ease both}.workspace .graph{overflow:auto}.workspace .graph svg{min-width:600px}.workspace .graph .nd circle{animation:none}
+@media(max-width:900px){.workspace{padding:18px}.workspace .columns{grid-template-columns:1fr}.filters{grid-template-columns:1fr 1fr}.workspace .cards{grid-template-columns:1fr 1fr}.workspace .intro-row{align-items:start;flex-direction:column}.stamp{text-align:left}.workspace .intro{font-size:26px}.library{grid-template-columns:1fr}.inspector{position:static;max-height:none}}
+@media(max-width:480px){.workspace{padding:14px}.workspace header .spacer{display:none}.brand{width:100%}.workspace nav{gap:2px}.workspace nav button{font-size:12px;padding:8px}.workspace .metric{padding:14px}.metric strong{font-size:28px}.workspace .card{padding:16px}.role{grid-template-columns:28px 1fr}.role-state{grid-column:2;text-align:left}.axis-row{grid-template-columns:90px 1fr 55px}.filters{gap:8px}.workspace .appearance{margin:0}.workspace .intro{font-size:24px}}
+@media(prefers-reduced-motion:reduce){.workspace *{animation:none!important;transition:none!important}}
+"""
+
+WORKSPACE_JS = r"""
+document.addEventListener('DOMContentLoaded',function(){
+ var P=JSON.parse(document.getElementById('workspace-data').textContent);
+ var T=JSON.parse(document.getElementById('workspace-i18n').textContent);
+ var lang=document.documentElement.lang, page=0, selected=null, size=40, filtered=[];
+ var byId=new Map(P.memories.map(function(m){return [m.id,m];}));
+ function tr(k){return (T[lang]||{})['dash.inspect.'+k]||T.en['dash.inspect.'+k]||k;}
+ function node(tag,text,cls){var n=document.createElement(tag);if(text!=null)n.textContent=text;if(cls)n.className=cls;return n;}
+ function state(m){var b=node('span',tr(m.validity.status),'badge');b.dataset.state=m.validity.status;return b;}
+ function filterOptions(id,values){var s=document.getElementById(id);s.appendChild(new Option(tr('all'),''));values.forEach(function(v){s.appendChild(new Option(id==='validity'?tr(v):v,v));});}
+ filterOptions('source',Array.from(new Set(P.memories.map(function(m){return m.source||'';}))).sort());
+ filterOptions('scope',Array.from(new Set(P.memories.map(function(m){return m.project_id||'';}))).sort());
+ filterOptions('validity',Object.keys(P.states).sort());
+ function detail(id,focus){
+  var m=byId.get(id), d=document.getElementById('detail');d.replaceChildren();selected=id;
+  if(!m){d.appendChild(node('p',tr('select'),'sub'));return;}
+  var title=node('h2',m.name);title.tabIndex=-1;d.appendChild(title);d.appendChild(state(m));
+  var dl=node('dl');
+  [['source',m.source],['scope',m.project_id],['evidence',m.evidence_date],['from',m.validity.valid_from],['until',m.validity.valid_to]].forEach(function(pair){dl.appendChild(node('dt',tr(pair[0])));dl.appendChild(node('dd',pair[1]||'—'));});d.appendChild(dl);
+  d.appendChild(node('h3',tr('preview')));d.appendChild(node('pre',m.preview||m.description||'—'));
+  if(m.body_chars>800)d.appendChild(node('p',tr('preview_note'),'sub'));
+  d.appendChild(node('p',m.path,'sub'));
+  if(m.file_url){var a=node('a',tr('open'));a.href=m.file_url;d.appendChild(a);}
+  d.appendChild(node('h3',tr('history')));d.appendChild(node('p',tr('history_note'),'sub'));
+  var hs=node('div',null,'history-list');
+  m.history.forEach(function(h){var other=byId.get(h);if(!other)return;var b=node('button',other.name+' · '+tr(other.validity.status));b.type='button';b.setAttribute('aria-pressed',String(h===id));b.addEventListener('click',function(){detail(h,true);rows();});hs.appendChild(b);});d.appendChild(hs);
+  var more=node('details'), summary=node('summary',tr('raw'));more.appendChild(summary);more.appendChild(node('pre',JSON.stringify(m.validity,null,2)));d.appendChild(more);
+  if(focus)title.focus({preventScroll:false});
+ }
+ function rows(){
+  var list=document.getElementById('memory-list');list.replaceChildren();
+  filtered.slice(page*size,(page+1)*size).forEach(function(m){var b=node('button',null,'memory-row');b.type='button';b.setAttribute('aria-pressed',String(selected===m.id));b.appendChild(node('strong',m.name));var meta=node('span',null,'row-meta');meta.appendChild(node('small',(m.source||'—')+' · '+(m.project_id||'—')));meta.appendChild(state(m));b.appendChild(meta);b.addEventListener('click',function(){detail(m.id,true);rows();});list.appendChild(b);});
+  if(!filtered.length)list.appendChild(node('p',tr('empty'),'notice'));
+  document.getElementById('count').textContent=(filtered.length?page*size+1:0)+'–'+Math.min((page+1)*size,filtered.length)+' / '+filtered.length;
+  document.getElementById('prev').disabled=page===0;document.getElementById('next').disabled=(page+1)*size>=filtered.length;
+ }
+ function search(){var q=document.getElementById('search').value.toLocaleLowerCase(), src=document.getElementById('source').value, scope=document.getElementById('scope').value, validity=document.getElementById('validity').value;
+  filtered=P.memories.filter(function(m){return (!src||m.source===src)&&(!scope||m.project_id===scope)&&(!validity||m.validity.status===validity)&&(!q||[m.name,m.description,m.preview].join(' ').toLocaleLowerCase().includes(q));});page=0;rows();
+ }
+ ['search','source','scope','validity'].forEach(function(id){document.getElementById(id).addEventListener(id==='search'?'input':'change',search);});
+ document.getElementById('prev').addEventListener('click',function(){page--;rows();});document.getElementById('next').addEventListener('click',function(){page++;rows();});
+ document.querySelectorAll('[data-view]').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('[data-view]').forEach(function(n){if(n===b)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');});document.querySelectorAll('[data-panel]').forEach(function(n){n.hidden=n.dataset.panel!==b.dataset.view;});});});
+ function language(code){lang=code;document.documentElement.lang=code;var cat=T[code]||T.en;
+  document.querySelectorAll('[data-t]').forEach(function(n){var v=cat[n.dataset.t]||T.en[n.dataset.t];if(v)n.textContent=v;});
+  document.querySelectorAll('.langs button').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.lang===code));});
+  ['source','scope','validity'].forEach(function(id){var s=document.getElementById(id);s.options[0].text=tr('all');if(id==='validity')Array.from(s.options).slice(1).forEach(function(o){o.text=tr(o.value);});});
+  document.querySelectorAll('.nd[data-nd]').forEach(function(g){var p=(g.dataset.nd||'').split('|'), t=g.querySelector('title');if(t&&p.length>=3)t.textContent=p[0]+String.fromCharCode(10)+(cat['kind.'+p[1]]||p[1])+' · '+(cat['dash.links']||'links')+' '+p[2];});
+  rows();detail(selected,false);try{localStorage.setItem('brain.dash.lang',code);}catch(e){}
+ }
+ document.querySelectorAll('.langs button').forEach(function(b){b.addEventListener('click',function(){language(b.dataset.lang);});});
+ var saved=null;try{saved=localStorage.getItem('brain.dash.lang');}catch(e){}
+ search();language(T[saved]?saved:lang);
+ var mt=document.getElementById('mtoggle'), root=document.documentElement, media=window.matchMedia('(prefers-reduced-motion: reduce)');
+ function motion(){mt.disabled=media.matches;mt.setAttribute('aria-pressed',String(media.matches||root.classList.contains('reduced')));}
+ mt.addEventListener('click',function(){var off=root.classList.toggle('reduced');try{localStorage.setItem('brain.dash.motion',off?'off':'on');}catch(e){}motion();});
+ media.addEventListener('change',motion);motion();
+});
+"""
+
+
+def workspace(p: dict) -> str:
+    """An offline inspector: exact counts, explicit unknowns, no measurement on open."""
+    def label(key):
+        return tspan('dash.inspect.' + key)
+    def safe_json(value):
+        return json.dumps(value, ensure_ascii=False).replace('&', '\\u0026').replace('<', '\\u003c').replace('>', '\\u003e').replace('\u2028', '\\u2028').replace('\u2029', '\\u2029')
+    def pair(key, value):
+        return '<div class="pair"><span>%s</span><b>%s</b></div>' % (label(key), esc(value))
+    body = ['<div class="workspace"><header><div class="brand"><span class="brand-mark" aria-hidden="true">◈</span><div><h1>Cosmos Brain</h1><div class="sub">v%s · gen %s</div></div></div><div class="spacer"></div><div class="langs">' % (esc(p['version']), esc(p['generation']))]
+    for code in i18n.LANGS:
+        body.append('<button data-lang="%s" aria-pressed="%s">%s</button>' % (code, str(code == i18n.lang()).lower(), code.upper()))
+    body.append('</div>'+dashstyle.controls()+'<button id="mtoggle" class="mtoggle">'+tspan('dash.motion_off')+'</button></header><nav>')
+    for key in ('overview', 'memories', 'performance', 'connections'):
+        body.append('<button data-view="%s"%s>%s</button>' % (key, ' aria-current="page"' if key == 'overview' else '', label(key)))
+    body.append('</nav><main><section data-panel="overview"><div class="intro-row"><div><p class="intro">'+label('intro')+'</p><div class="sub">'+label('snapshot')+'</div></div><div class="stamp">'+esc(p['generated_at'])+'<br>'+label('index_at')+' · '+esc(p.get('index_at') or '—')+'</div></div><div class="cards">')
+    for key, value in (('indexed',len(p['memories'])),('current',p['current']),('untracked',p['states'].get('untracked',0)),('recalls',p['recalls'])):
+        body.append('<div class="metric"><span>%s</span><strong>%s</strong></div>' % (label(key), format(value, ',')))
+    body.append('</div><p class="notice">'+label('unknown_note')+'</p><div class="columns"><div class="card"><h2>'+label('roles')+'</h2>')
+    for role, icon in (('index','▤'),('vector','∿'),('graph','⋈')):
+        s=p['stores'].get(role,{})
+        backend=s.get('backend','SQLite')
+        state = 'in_sync' if s.get('in_sync') and s.get('ok') else 'needs_sync' if s else 'unknown'
+        if role == 'index':
+            state='indexed'
+        body.append('<div class="role"><span class="role-icon" aria-hidden="true">%s</span><div><strong>%s</strong><small>%s</small></div><div class="role-state">%s<small>%s</small></div></div>' % (icon,esc(backend),label(role),label(state),esc(s.get('at') or ('—' if role!='index' else p.get('index_at') or '—'))))
+    body.append('<p class="sub">'+label('recorded_note')+'</p></div><div class="card"><h2>'+label('embedding')+'</h2>')
+    e=p['embedding']; current=e.get('current_docs'); total=e.get('eligible_docs')
+    body.append('<div class="big-value">%s</div><div class="sub">%s · %s</div>' % (('%s / %s' % (current,total)) if current is not None and total is not None else label('not_measured'), esc(e.get('provider') or '—'),esc(e.get('state') or '—')))
+    if current is not None and total:
+        body.append('<progress value="%d" max="%d" aria-label="%s"></progress>' % (current,total,_t('dash.inspect.embedding')))
+    body.append('<p class="sub">%s · %sD</p></div></div>' % (esc(e.get('model') or '—'),esc(e.get('dim') or '—')))
+    policy=p['policy']; obs=policy['observations']
+    body.append('<div class="card"><h2>'+label('policy')+' <span class="badge">'+esc(policy['mode'])+'</span></h2><p class="sub">'+label('policy_note')+'</p>')
+    for key,value in policy['contexts'].items():
+        body.append('<div class="pair"><span>%s</span><b>%s → %s <small class="sub">(%s)</small></b></div>' % (esc(key),esc(value['selected']),esc(value['effective']),esc(value['reason'])))
+    body.append(pair('observations','%s / %s' % (obs['current_records'],obs['measured']))+pair('legacy',obs['legacy_or_other_signature'])+'</div></section>')
+    body.append('<section data-panel="memories" hidden><h2>'+label('memories')+'</h2><div class="filters"><label>'+label('search')+'<input id="search" type="search"></label>')
+    for key, ident in (('source','source'),('scope','scope'),('status','validity')):
+        body.append('<label>'+label(key)+'<select id="'+ident+'"></select></label>')
+    body.append('</div><p class="sub">'+label('preview_note')+'</p><div class="library"><div><div id="memory-list" class="card memory-list"></div><div class="pager"><button id="prev">'+label('previous')+'</button><span id="count" role="status" aria-live="polite"></span><button id="next">'+label('next')+'</button></div></div><aside id="detail" class="card inspector"></aside></div></section>')
+    body.append('<section data-panel="performance" hidden><h2>'+label('performance')+'</h2><p class="notice">'+label('measure_note')+'</p><div class="columns"><div class="card"><h3>'+label('last_measure')+'</h3>')
+    score=p.get('performance')
+    if score:
+        body.append('<div class="big-value">%s</div><p class="sub">%s · %s · axis %s</p>' % (esc(score.get('total') if score.get('total') is not None else '—'),esc(score.get('at')),esc(score.get('pipeline') or '—'),esc(score.get('axis_version') or '—')))
+        for key,value in score.get('axes',{}).items():
+            fill='<div class="axis-fill" style="width:%.2f%%"></div>' % max(0,min(100,float(value))) if value is not None else ''
+            body.append('<div class="axis-row">%s<div class="axis-track">%s</div><b>%s</b></div>' % (tspan('axis.'+key),fill,esc('%.1f' % value) if value is not None else label('not_measured')))
+    else:
+        body.append('<p class="big-value">'+label('not_measured')+'</p>')
+    body.append('</div><div class="card"><h3>'+label('host')+'</h3><p class="big-value">'+label('not_measured')+'</p><p class="sub">'+label('host_note')+'</p></div></div></section>')
+    body.append('<section data-panel="connections" hidden><h2>'+label('connections')+'</h2><div class="card">'+p.get('graph_html','')+'<p class="sub">'+tspan('dash.graph.note')+'</p></div></section></main><footer>'+label('privacy')+' · '+esc(p['seconds'])+'s</footer></div>')
+    data={k:p[k] for k in ('memories','states')}
+    js=dashstyle.INIT+'\n'+WORKSPACE_JS
+    return ('<!doctype html><html lang="%s"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; connect-src \'none\'; img-src data:; base-uri \'none\'; form-action \'none\'"><title>Cosmos Brain</title><style>%s</style><script>%s</script></head><body>%s<script type="application/json" id="workspace-data">%s</script><script type="application/json" id="workspace-i18n">%s</script></body></html>' % (i18n.lang(),CSS+dashstyle.css()+WORKSPACE_CSS,js,''.join(body),safe_json(data),safe_json(_table_for_client())))
