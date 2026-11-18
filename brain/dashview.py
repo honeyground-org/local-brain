@@ -974,11 +974,11 @@ def workspace(p: dict) -> str:
         if role == 'index':
             state='indexed'
         body.append('<div class="role"><span class="role-icon" aria-hidden="true">%s</span><div><strong>%s</strong><small>%s</small></div><div class="role-state">%s<small>%s</small></div></div>' % (icon,esc(backend),label(role),label(state),esc(s.get('at') or ('—' if role!='index' else p.get('index_at') or '—'))))
-    body.append('<p class="sub">'+label('recorded_note')+'</p></div><div class="card"><h2>'+label('embedding')+'</h2>')
+    body.append('<p class="sub">'+label('recorded_note')+'</p></div><div class="card"><h2 id="embedding-label">'+label('embedding')+'</h2>')
     e=p['embedding']; current=e.get('current_docs'); total=e.get('eligible_docs')
     body.append('<div class="big-value">%s</div><div class="sub">%s · %s</div>' % (('%s / %s' % (current,total)) if current is not None and total is not None else label('not_measured'), esc(e.get('provider') or '—'),esc(e.get('state') or '—')))
     if current is not None and total:
-        body.append('<progress value="%d" max="%d" aria-label="%s"></progress>' % (current,total,_t('dash.inspect.embedding')))
+        body.append('<progress value="%d" max="%d" aria-labelledby="embedding-label"></progress>' % (current,total))
     body.append('<p class="sub">%s · %sD</p></div></div>' % (esc(e.get('model') or '—'),esc(e.get('dim') or '—')))
     policy=p['policy']; obs=policy['observations']
     body.append('<div class="card"><h2>'+label('policy')+' <span class="badge">'+esc(policy['mode'])+'</span></h2><p class="sub">'+label('policy_note')+'</p>')

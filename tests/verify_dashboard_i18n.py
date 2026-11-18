@@ -119,7 +119,7 @@ def verify_workspace():
     store._init(db)
     with tempfile.TemporaryDirectory() as temp:
         source = Path(temp) / 'source.html'
-        source.write_text('canonical source')
+        source.write_text('canonical source', encoding='utf-8')
         for did, name, scope, meta in (
                 (1, 'older', 'garden', dict(topic='plant', facet='water', status='active')),
                 (2, 'current', 'garden', dict(topic='plant', facet='water', status='active', supersedes=['older'])),
@@ -151,7 +151,7 @@ def verify_workspace():
             except ValueError:
                 rejected=True
             check('control: reject source/alias/non-HTML output '+target.name,rejected)
-        check('source bytes survive rejected output',source.read_text()=='canonical source')
+        check('source bytes survive rejected output',source.read_text(encoding='utf-8')=='canonical source')
         empty=sqlite3.connect(':memory:');empty.row_factory=sqlite3.Row;store._init(empty)
         with patch.object(scorecard,'history',return_value=[]):
             data=dashboard.payload(empty)
