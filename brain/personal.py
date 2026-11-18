@@ -186,11 +186,12 @@ def candidates(db, query, base, arm, k, terms=()):
                 if row["path"] not in pool:
                     # The graph supplies candidates, never ranking votes. Score their own
                     # current-model vectors and body evidence by the same rules as other candidates.
+                    # Hydration may resolve an old graph ID to a newer revision: score that row.
                     import array
                     cosines = []
                     for held in db.execute("SELECT v.vec FROM vectors v JOIN docs d ON d.id=v.doc_id "
                                            "WHERE v.doc_id=? AND v.sha=d.sha AND v.model=? AND v.dim=?",
-                                           (did, vectors.model_tag(), vectors.DIM)):
+                                           (row["id"], vectors.model_tag(), vectors.DIM)):
                         v = array.array("f")
                         v.frombytes(held[0])
                         cosines.append(sum(a*b for a,b in zip(qvec, v)))
