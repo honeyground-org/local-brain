@@ -17,7 +17,7 @@ import time
 
 ARMS = ("baseline", "fusion", "linked")
 KEY = "personal_policy_v2"
-OBSERVATION_VERSION = 3
+OBSERVATION_VERSION = 4
 ALPHA = 0.05
 
 

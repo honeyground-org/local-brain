@@ -84,7 +84,7 @@ def verify_turn_edit_order():
     hosts.pin('claude-code')
     def tool(tid,name,args):
         return {'type':'assistant','message':{'content':[{'type':'tool_use','id':tid,'name':name,'input':args}]}}
-    for order in ('edit_read','read_edit','remember_read','read_remember','legacy_read','preview_read','read_only'):
+    for order in ('edit_read','read_edit','remember_read','read_remember','shell_read','read_shell','legacy_read','preview_read','read_only'):
         is_edited = order not in ('read_only','preview_read')
         path=Path(tmp.name)/(order+'.db')
         db=sqlite3.connect(str(path));db.row_factory=sqlite3.Row;store._init(db)
@@ -106,21 +106,27 @@ def verify_turn_edit_order():
                 edit=tool('edit','Edit',{'file_path':'/code.py','old_string':'old','new_string':'new'})
                 if 'remember' in order or order=='preview_read':
                     edit=tool('save','mcp__brain__remember',{'name':'note','body':'new','prepare_only':order=='preview_read'})
-                if order in ('edit_read','remember_read','preview_read'):
+                if 'shell' in order:
+                    edit=tool('shell','Bash',{'command':"printf changed >> /note"})
+                def edited_event():
                     feed(edit)
+                    if 'shell' in order:
+                        feed({'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'shell','content':'done'}]}})
+                if order in ('edit_read','remember_read','preview_read','shell_read'):
+                    edited_event()
                     # Persisted turn state survives a new connection and resumed transcript.
                     db.close();db=sqlite3.connect(str(path));db.row_factory=sqlite3.Row
                     rec=json.loads(json.dumps(rec))
                 feed(tool('read','Read',{'file_path':'/note'}))
                 feed({'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'read','content':'orchid'}]}})
-                if order in ('read_edit','read_remember'):feed(edit)
+                if order in ('read_edit','read_remember','read_shell'):edited_event()
             rows=db.execute('SELECT edited FROM personal_events').fetchall()
             assert len(rows)==12 and all(bool(r[0])==is_edited for r in rows), (order,[tuple(r) for r in rows])
             result=personal.update(db)
             assert result['arm']==('baseline' if is_edited else 'fusion'), (order,result)
             if not is_edited:
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v2:' || substr(identity,4)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v3:' || substr(identity,4)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -128,7 +134,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v2 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v3 support rejected')
 
 
 def verify_scoped_meaning():

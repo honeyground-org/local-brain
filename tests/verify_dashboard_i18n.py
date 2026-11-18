@@ -218,9 +218,27 @@ def verify_workspace_controls():
     import json
     import shutil
     import subprocess
+    import sqlite3
+    from html.parser import HTMLParser
+    from brain import graphview
     if not shutil.which('node'):
         print('SKIP workspace handler execution: Node unavailable; browser QA still required')
         return
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    for did in (1,2,3):
+        db.execute('INSERT INTO docs(id,path,name,source) VALUES(?,?,?,?)', (did,'/'+str(did),'node'+str(did),'memory'))
+    db.execute("INSERT INTO links VALUES(1,'node2')");db.commit()
+    class GraphValues(HTMLParser):
+        def __init__(self):super().__init__();self.values=[]
+        def handle_starttag(self,tag,attrs):
+            a=dict(attrs)
+            if a.get('data-t') in ('graph.meta','graph.isolates'):
+                self.values.append(dict(t=a['data-t'],v=a['data-v']))
+    parser=GraphValues();parser.feed(graphview.render(db));db.close()
+    assert len(parser.values)==2
+    assert {v['t']:json.loads(v['v']) for v in parser.values}=={'graph.meta':{'n':2,'e':1},'graph.isolates':{'n':1}}
+    catalogs={code:{key:i18n.catalog(code)[key] for key in ('graph.meta','graph.isolates')} for code in i18n.LANGS}
+    expected={code:[catalogs[code][v['t']].format(**json.loads(v['v'])) for v in parser.values] for code in i18n.LANGS}
     fixture = r"""
 const vm=require('vm'),assert=require('assert');
 class Element {
@@ -238,11 +256,16 @@ function memory(id,name,scope,status,history){return {id,name,project_id:scope,s
 const records=[memory(1,'old','','superseded',[1,2]),memory(2,'new','','active',[1,2]),memory(3,'foreign','garden','active',[3])];
 records[1].history_branches=[{topic:'separate-fact',facet:'state',members:[3]}];
 elements['workspace-data'].textContent=JSON.stringify({memories:records,states:{superseded:1,active:2}});
-elements['workspace-i18n'].textContent=JSON.stringify({en:{'dash.inspect.all':'All','dash.inspect.unscoped':'Unscoped','dash.inspect.select':'Select a memory'}});
-const langs=[new Element('button')];langs[0].dataset.lang='en';
-const doc={documentElement:new Element('html'),createElement:t=>new Element(t),getElementById:id=>elements[id],querySelectorAll:q=>q==='.langs button'?langs:[],addEventListener:(event,fn)=>{doc.ready=fn;}};doc.documentElement.lang='en';
+Object.assign(CATALOGS.en,{'dash.inspect.all':'All','dash.inspect.unscoped':'Unscoped','dash.inspect.select':'Select a memory'});
+elements['workspace-i18n'].textContent=JSON.stringify(CATALOGS);
+const translated=GRAPH.map(values=>{const el=new Element('span');el.dataset=values;return el;});
+const langs=Object.keys(CATALOGS).map(code=>{const b=new Element('button');b.dataset.lang=code;return b;});
+const doc={documentElement:new Element('html'),createElement:t=>new Element(t),getElementById:id=>elements[id],querySelectorAll:q=>q==='.langs button'?langs:q==='[data-t]'?translated:[],addEventListener:(event,fn)=>{doc.ready=fn;}};doc.documentElement.lang='en';
 const context={document:doc,Option:function(text,value){this.text=text;this.value=value;},window:{matchMedia:()=>({matches:false,addEventListener(){}})},localStorage:{getItem:()=>null,setItem(){}},Map,Set,JSON};
 vm.runInNewContext(CODE,context);doc.ready();
+assert.deepEqual(translated.map(n=>n.textContent),EXPECTED.en,'initial graph counts lost');
+langs.forEach(b=>{b.events.click();assert.deepEqual(translated.map(n=>n.textContent),EXPECTED[b.dataset.lang],'translated graph counts lost');});
+langs.find(b=>b.dataset.lang==='en').events.click();
 assert.equal(elements.count.textContent,'1–3 / 3');
 assert.equal(elements.scope.options[0].value,'');
 const unscoped=elements.scope.options.find(o=>o.text==='Unscoped');assert(unscoped&&unscoped.value!=='');
@@ -254,7 +277,7 @@ elements.scope.value=elements.scope.options.find(o=>o.text==='garden').value;ele
 elements.search.value='absent';elements.search.events.input();assert.equal(elements.count.textContent,'0–0 / 0');assert(elements.next.disabled&&elements.prev.disabled);
 console.log('PASS actual handlers: all/unscoped separation, version navigation, excluded detail clearing and empty results');
 """
-    run = subprocess.run(['node', '-e', 'const CODE='+json.dumps(dashview.WORKSPACE_JS)+';\n'+fixture],
+    run = subprocess.run(['node', '-e', 'const CODE='+json.dumps(dashview.WORKSPACE_JS)+';const GRAPH='+json.dumps(parser.values)+';const CATALOGS='+json.dumps(catalogs)+';const EXPECTED='+json.dumps(expected)+';\n'+fixture],
                          capture_output=True, text=True, encoding='utf-8')
     check('actual workspace controls preserve filters and version navigation',run.returncode==0,run.stdout.strip() or run.stderr[-700:])
 
