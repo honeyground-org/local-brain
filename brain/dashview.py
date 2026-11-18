@@ -996,7 +996,10 @@ def workspace(p: dict) -> str:
         body.append('<label>'+label(key)+'<select id="'+ident+'"></select></label>')
     body.append('</div><p class="sub">'+label('preview_note')+'</p><div class="library"><div><div id="memory-list" class="card memory-list"></div><div class="pager"><button id="prev">'+label('previous')+'</button><span id="count" role="status" aria-live="polite"></span><button id="next">'+label('next')+'</button></div></div><aside id="detail" class="card inspector"></aside></div></section>')
     body.append('<section data-panel="performance" hidden><h2>'+label('performance')+'</h2><p class="notice">'+label('measure_note')+'</p><div class="columns"><div class="card"><h3>'+label('last_measure')+'</h3>')
+    from brain import scorecard
     score=p.get('performance')
+    if not scorecard.valid_history_record(score):
+        score=None
     if score:
         body.append('<div class="big-value">%s</div><p class="sub">%s · %s · axis %s</p>' % (esc(score.get('total') if score.get('total') is not None else '—'),esc(score.get('at')),esc(score.get('pipeline') or '—'),esc(score.get('axis_version') or '—')))
         for key,value in score.get('axes',{}).items():

@@ -282,6 +282,39 @@ console.log('PASS actual handlers: all/unscoped separation, version navigation, 
     check('actual workspace controls preserve filters and version navigation',run.returncode==0,run.stdout.strip() or run.stderr[-700:])
 
 
+def verify_history_recovery():
+    import json
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import scorecard
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    db.execute("INSERT INTO docs(path,name,source,body) VALUES('/kept','kept_memory','memory','Preserved body')");db.commit()
+    good=dict(at='2000-01-01T12:00:00',axis_version=1,pipeline='word',total=42.5,axes=dict(precision=None,recall=37.5),raw=dict(precision=None))
+    bad=[{},dict(at=good['at']),dict(good,total=float('nan')),dict(good,total=float('inf')),b'{"at":',b'\xff',b'['*2000,[],None,'text',1,dict(good,axes=[]),dict(good,raw=[]),dict(good,at='invalid'),dict(good,total=True),dict(good,total=10**1000)]
+    bad += [dict(good,axes=dict(precision=v)) for v in ('N/A',True,[],{},float('nan'),float('inf'),-float('inf'))]
+    with tempfile.TemporaryDirectory() as td,patch.object(scorecard,'_store_home',return_value=td),patch.object(scorecard,'collect',side_effect=AssertionError('fresh measurement')),patch.object(scorecard,'bench',side_effect=AssertionError('fresh benchmark')):
+        path=Path(td)/'scorecard.jsonl'
+        for i,value in enumerate(bad):
+            raw=value if isinstance(value,bytes) else json.dumps(value).encode()
+            for prefix in (b'',json.dumps(good).encode()+b'\n'):
+                path.write_bytes(prefix+raw)
+                before='\n'.join(db.iterdump());original=path.read_bytes()
+                p=dashboard.payload(db);page=dashview.render(p)
+                check('history tolerates malformed row '+str((i,bool(prefix))),p['performance']==(good if prefix else None) and 'kept_memory' in page and before=='\n'.join(db.iterdump()) and original==path.read_bytes())
+        newer=dict(good,at='2001-01-01T12:00:00',total=55.5)
+        path.write_bytes(json.dumps(good).encode()+b'\n{bad\n'+json.dumps(newer).encode()+b'\n[1]')
+        check('history limit applies after filtering invalid records',scorecard.history(limit=1)==[newer] and scorecard.history(limit=2)==[good,newer] and scorecard.history(limit=0)==[])
+        p=dashboard.payload(db)
+        for language in i18n.LANGS:
+            with patch.object(i18n,'_lang',language):
+                check('recovered performance remains dated in '+language,'2001-01-01T12:00:00' in dashview.render(p))
+        p['performance']=dict(good,axes=dict(precision='N/A'))
+        check('renderer also tolerates an invalid supplied measurement','kept_memory' in dashview.render(p))
+    db.close()
+
+
 def verify_workspace():
     import json
     import sqlite3
@@ -483,6 +516,7 @@ def main():
     verify_path_scope()
     verify_workspace_controls()
     verify_workspace()
+    verify_history_recovery()
     verify_observatory()
     print("=" * 72)
     print("❌ %d failure(s): %s" % (len(FAIL), ", ".join(FAIL)) if FAIL else "✅ all passed")
