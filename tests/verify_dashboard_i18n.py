@@ -291,10 +291,11 @@ def verify_history_recovery():
     from brain import scorecard
     db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
     db.execute("INSERT INTO docs(path,name,source,body) VALUES('/kept','kept_memory','memory','Preserved body')");db.commit()
-    good=dict(at='2000-01-01T12:00:00',axis_version=1,pipeline='word',total=42.5,axes=dict(precision=None,recall=37.5),raw=dict(precision=None))
+    good=dict(at='2000-01-01T12:00:00',axis_version=1,pipeline='word',total=42.5,axes=dict(precision=None,recall=42.5),raw=dict(precision=None))
     bad=[{},dict(at=good['at']),dict(good,total=float('nan')),dict(good,total=float('inf')),b'{"at":',b'\xff',b'['*2000,[],None,'text',1,dict(good,axes=[]),dict(good,raw=[]),dict(good,at='invalid'),dict(good,total=True),dict(good,total=10**1000)]
     bad += [dict(good,axes=dict(precision=v)) for v in ('N/A',True,[],{},float('nan'),float('inf'),-float('inf'))]
     bad += [dict(good,axes={}),dict(good,axes=dict(precison=50)),dict(good,raw=dict(precison=.5)),dict(good,axis_version=3),dict(good,pipeline='unknown')]
+    bad += [dict(good,total=100,axes=dict(precision=None)),dict(good,total=100,axes=dict(precision=0)),dict(good,total=None,axes=dict(precision=100)),dict(good,total=42.4),dict(good,total=42.55,axes=dict(precision=None,recall=42.55)),dict(good,raw=dict(precision=.95)),dict(good,raw=dict(stability=.9))]
     bad += [dict(good,**{field:value}) for field in ('total','axes') for value in ((-5,105) if field=='total' else (dict(precision=-5),dict(precision=105)))]
     with tempfile.TemporaryDirectory() as td,patch.object(scorecard,'_store_home',return_value=td),patch.object(scorecard,'collect',side_effect=AssertionError('fresh measurement')),patch.object(scorecard,'bench',side_effect=AssertionError('fresh benchmark')):
         path=Path(td)/'scorecard.jsonl'
@@ -312,12 +313,18 @@ def verify_history_recovery():
             path.write_text(json.dumps(historical),encoding='utf-8')
             check('supported historical ruler remains valid '+str(version),dashboard.payload(db)['performance']==historical)
         check('current ruler schema matches published axes',scorecard.HISTORY_AXES[scorecard.AXIS_VERSION]=={axis[1] for axis in scorecard.AXES})
+        check('current ruler weights and targets match historical registry',scorecard.HISTORY_WEIGHTS[scorecard.AXIS_VERSION]=={axis[1]:axis[2] for axis in scorecard.AXES} and scorecard.HISTORY_TARGETS[scorecard.AXIS_VERSION]==scorecard.TARGET)
+        for raw in (dict(recall=.631,precision=.812,efficiency=.47),dict(automatic=.321,stability=.792,liveness=.4)):
+            computed=scorecard.compute(raw)
+            record=dict(good,total=computed['total'],axes={a['key']:a['score'] for a in computed['axes']},raw={a['key']:a['raw'] for a in computed['axes']})
+            path.write_text(json.dumps(record),encoding='utf-8')
+            check('actual weighted computation remains valid '+str(raw),dashboard.payload(db)['performance']==record)
         for value in (0,100,None):
-            boundary=dict(good,total=value,axes=dict(precision=value))
+            boundary=dict(good,total=value,axes=dict(precision=value),raw=dict(precision=None if value is None else value*.95/100))
             path.write_text(json.dumps(boundary),encoding='utf-8')
             p=dashboard.payload(db)
             check('score boundaries and unmeasured remain valid '+str(value),p['performance']==boundary and 'kept_memory' in dashview.render(p))
-        newer=dict(good,at='2001-01-01T12:00:00',total=55.5)
+        newer=dict(good,at='2001-01-01T12:00:00',total=55.5,axes=dict(precision=None,recall=55.5))
         path.write_bytes(json.dumps(good).encode()+b'\n{bad\n'+json.dumps(newer).encode()+b'\n[1]')
         check('history limit applies after filtering invalid records',scorecard.history(limit=1)==[newer] and scorecard.history(limit=2)==[good,newer] and scorecard.history(limit=0)==[])
         p=dashboard.payload(db)

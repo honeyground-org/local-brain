@@ -52,8 +52,14 @@ from typing import Dict, List, Optional, Tuple
 AXIS_VERSION = 2
 # Versions 1 and 2 differ in the automatic formula, not in their axis names.
 # Keep historical schemas explicit when a later ruler adds or renames axes.
-_HISTORY_AXES_V1 = frozenset(("recall", "precision", "efficiency", "automatic", "stability", "autonomy", "liveness"))
-HISTORY_AXES = {1: _HISTORY_AXES_V1, 2: _HISTORY_AXES_V1}
+_HISTORY_WEIGHTS_V1 = {"recall": 25, "precision": 25, "efficiency": 15, "automatic": 15,
+                       "stability": 10, "autonomy": 5, "liveness": 5}
+_HISTORY_TARGETS_V1 = {"recall": .80, "precision": .95, "efficiency": 1.0, "automatic": .50,
+                       "stability": .90, "autonomy": 1.0, "liveness": 1.0}
+HISTORY_WEIGHTS = {1: _HISTORY_WEIGHTS_V1, 2: _HISTORY_WEIGHTS_V1}
+HISTORY_TARGETS = {1: _HISTORY_TARGETS_V1, 2: _HISTORY_TARGETS_V1}
+HISTORY_PRECISION = {1: 1, 2: 1}
+HISTORY_AXES = {version: frozenset(weights) for version, weights in HISTORY_WEIGHTS.items()}
 
 # ★Axes and weights★ — derived from the goal (table above). They sum to 100.
 AXES = (
@@ -93,11 +99,21 @@ def _short_json() -> str:
     return os.path.join(_ei.eval_dir(), "short.json")
 
 
-def _pct(v: Optional[float], target: float) -> Optional[float]:
+def _pct(v: Optional[float], target: float, digits: int = 1) -> Optional[float]:
     """0–1 against the target line, as 0–100. ⛔ None passes through as None (unmeasured)."""
     if v is None:
         return None
-    return round(min(100.0, 100.0 * v / target), 1)
+    return round(min(100.0, 100.0 * v / target), digits)
+
+
+def _weighted_total(scores, version):
+    num, den = 0.0, 0.0
+    for key, weight in HISTORY_WEIGHTS[version].items():
+        score = scores.get(key)
+        if score is not None:
+            num += score * weight
+            den += weight
+    return round(num / den, HISTORY_PRECISION[version]) if den else None
 
 
 def compute(raw: Dict[str, Optional[float]]) -> dict:
@@ -106,18 +122,17 @@ def compute(raw: Dict[str, Optional[float]]) -> dict:
     The total is ★a weighted average over the measured axes★ — an unmeasured axis leaves the
     denominator too, so that "not measuring something neither raises nor lowers the score".
     """
-    rows, num, den = [], 0.0, 0.0
+    rows, den = [], 0.0
     extra = {k: v for k, v in raw.items() if k.startswith("_")}
     for _label, key, weight, _what in AXES:
         # ★reuses the dashboard's own axis./axis..what catalog keys★ — a name in two places
         # (this file's own English label and dashview's translated one) gets fixed in one (2026-09-08).
-        score = _pct(raw.get(key), TARGET[key])
+        score = _pct(raw.get(key), TARGET[key], HISTORY_PRECISION[AXIS_VERSION])
         rows.append({"axis": i18n.t("axis." + key), "key": key, "weight": weight, "score": score,
                      "raw": raw.get(key), "what": i18n.t("axis." + key + ".what")})
         if score is not None:
-            num += score * weight
             den += weight
-    total = round(num / den, 1) if den else None
+    total = _weighted_total({r["key"]: r["score"] for r in rows}, AXIS_VERSION)
     return {"axes": rows, "total": total, "extra": extra,
             "measured_weight": den, "unmeasured": [r["axis"] for r in rows
                                                    if r["score"] is None]}
@@ -230,7 +245,17 @@ def valid_history_record(row) -> bool:
         if not all(value is None or (type(value) in (int, float) and math.isfinite(value)) for value in values):
             return False
         scores = [row.get("total")] + list(row["axes"].values())
-        return all(value is None or 0 <= value <= 100 for value in scores)
+        if not all(value is None or 0 <= value <= 100 for value in scores):
+            return False
+        digits = HISTORY_PRECISION[version]
+        if any(value is not None and round(value, digits) != value for value in scores):
+            return False
+        if row["total"] != _weighted_total(row["axes"], version):
+            return False
+        raw = row.get("raw", {})
+        return (set(raw).issubset(row["axes"])
+                and all(row["axes"][key] == _pct(value, HISTORY_TARGETS[version][key], digits)
+                        for key, value in raw.items()))
     except OverflowError:
         return False
 
