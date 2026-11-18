@@ -234,3 +234,9 @@ tokens. Body `related:` lines followed by prose retain their links, with or with
 receipt and with or without a later real automatic footer. Existing checks verify both parser
 output and canonical graph restoration. Graph provenance version 5 rebuilds derived links;
 source bytes remain unchanged. Generation 56 fingerprints this parsing correction.
+
+The 2.7.4 CI run also exposed the session-check PID-file publication gap twice on Linux:
+a second starter could interpret the empty newly created file as a dead owner and unlink it.
+The checker now uses a nonblocking OS lock on a persistent inode, with automatic crash release.
+An existing session-events check reproduces the empty-PID interleaving and confirms exclusion
+and subsequent reuse; the worker lease and its retry budget are unchanged.

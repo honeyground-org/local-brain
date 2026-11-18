@@ -1417,3 +1417,7 @@ Legacy provenance filtering recognises only a complete terminal serializer list.
 line followed by ordinary prose remains authored body content, even when a historical payload
 receipt cannot reconstruct it. A real generated footer can follow that body and is filtered
 separately. Normal indexing rebuilds derived graph version 5 to restore any omitted body links.
+
+Concurrent session starts use a nonblocking OS guard on a persistent file. This avoids the
+empty PID-file publication race that could admit two checkers; process exit releases the
+guard without deleting a successor's lock. Worker work queues and retry budgets are unchanged.

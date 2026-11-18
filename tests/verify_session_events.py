@@ -121,6 +121,17 @@ def main() -> int:
         note("note_%02d" % i, "A note about %s, number %d." % (topics[i % len(topics)], i))
     settle()
     db = store.connect()
+    # Reproduce the old exclusive-create / PID-publication gap deterministically.
+    probe = ("import json; from brain import deferred;\n"
+             "with deferred._check_guard() as held: print(json.dumps(held))")
+    def probe_guard():
+        return json.loads(subprocess.check_output([sys.executable, '-c', probe],
+                          env=dict(os.environ, PYTHONPATH=ROOT), text=True, encoding='utf-8'))
+    with deferred._check_guard() as held:
+        with open(os.path.join(os.environ['BRAIN_HOME'], deferred.CHECK_LOCK), 'w', encoding='utf-8') as fh:
+            fh.write('')
+        check('empty legacy PID file cannot bypass a live check guard', held and probe_guard() is False)
+    check('released check guard is immediately reusable', probe_guard() is True)
     store.reindex(db, full=True)                          # a human-run index: calibrated, pointers built
     first = deferred.on_session_start(db)                 # records the repositories and their fingerprint
     wait_idle()

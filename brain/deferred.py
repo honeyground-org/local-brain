@@ -364,38 +364,23 @@ def _check_guard():
     """One session start checks at a time. When many sessions open together (a terminal multiplexer restoring
     twenty panes), the first checks and starts the worker if needed; the rest have nothing to add and leave."""
     from brain import store
-    path = os.path.join(store.brain_home(), CHECK_LOCK)
-    held = False
-    for _ in range(2):
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        except FileExistsError:
-            try:
-                with open(path, encoding="utf-8") as fh:
-                    pid = int((fh.read() or "0").strip() or 0)
-            except (OSError, ValueError):
-                pid = 0
-            if _alive(pid):
-                break                                    # a live session start is checking right now
-            try:
-                os.unlink(path)                          # a crashed checker's file: take it over once
-            except OSError:
-                break
-            continue
-        except OSError:
-            break
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(str(os.getpid()))
-        held = True
-        break
+    # Keep the inode stable. A PID file has an empty create/write window in
+    # which another caller can mistake its live owner for a crashed checker.
     try:
+        fh = open(os.path.join(store.brain_home(), CHECK_LOCK + ".guard"), "a+b")
+    except OSError:
+        yield False
+        return
+    held = False
+    try:
+        held = _try_guard(fh)
         yield held
     finally:
-        if held:
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
+        if held and os.name == "nt":
+            import msvcrt
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        fh.close()
 
 
 def on_session_start(db) -> dict:
