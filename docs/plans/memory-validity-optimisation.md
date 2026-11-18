@@ -262,3 +262,7 @@ Automatic-policy measurement now leaves observations without cached query vector
 ### Distinct legacy-source branches and degraded semantic retrieval
 
 A shared SHA-pinned legacy source does not make different topic/facet identities one history. Each fact retains its own revisions plus the source; a source with multiple identities offers separate branches. Dashboard and memory_history expose those branches without editing originals. Cache presence alone is not semantic availability: baseline and candidate retrieval failures leave observations pending, and a degraded live baseline is not reranked by a semantic certificate. A generation bump invalidates earlier certificates. These are correctness guards, not evidence of user-level quality superiority.
+
+### Resolved revision vectors in linked ranking
+
+Graph neighbors can name an earlier revision. Linked candidates now use the hydrated current document ID for vector lookup, matching their body and its SHA/model/dimension checks. Old-only, current-only and both-vector cases are checked through candidate measurement and certified serving. No old vector is attributed to a new body; absence of the current vector leaves that expansion out. No operational use of the faulty candidate or user-level quality advantage was observed.
