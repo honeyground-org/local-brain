@@ -483,10 +483,15 @@ def extraction_source(db, name, sha, scope):
     return actual, None
 
 
-def check_extraction(db, args):
+def check_extraction(db, args, target_path=None):
     value = args.get("extracted_from")
     if value is None:
         return None
+    if target_path is not None:
+        rows = db.execute("SELECT path FROM docs WHERE name=? AND COALESCE(project_id, '')=?",
+                          (args["name"], args.get("project_id") or "")).fetchall()
+        if any(os.path.abspath(r["path"]) != os.path.abspath(target_path) for r in rows):
+            return error("name_taken", "Another source now uses this fact name in the same scope; prepare a new name")
     source, bad = extraction_source(db, value["name"], value["sha"], args.get("project_id") or "")
     if bad:
         return bad

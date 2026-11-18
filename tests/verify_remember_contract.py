@@ -501,6 +501,27 @@ def identity_checks(db):
     finally:
         with open(os.environ['BRAIN_CONFIG'],'w',encoding='utf-8') as f:json.dump(config,f)
         store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+    target=prep(name='identity_new_target')['save_arguments']
+    os.remove(os.path.join(duplicate,'identity_anchor.md'))
+    target_copy=os.path.join(duplicate,'identity_new_target.md')
+    other_fact=original_anchor.replace('caf\u00e9','another-identity').replace('name: identity_anchor','name: identity_new_target')
+    with open(target_copy,'w',encoding='utf-8') as f:f.write(other_fact)
+    with open(os.environ['BRAIN_CONFIG'],'w',encoding='utf-8') as f:json.dump(changed_config,f)
+    try:
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+        result=_j(db,**target)
+        check('prepared target name cannot collide with another source',(result.get('error') or {}).get('code')=='name_taken' and not os.path.exists(os.path.join(_MEM,target['name']+'.md')))
+        leaked=os.path.join(_MEM,target['name']+'.md')
+        if os.path.exists(leaked):os.remove(leaked)
+        with open(target_copy,'w',encoding='utf-8') as f:f.write(other_fact.replace('project_id: '+scope,'project_id: other-target-scope'))
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+        check('same target name in another scope can save',_j(db,**target).get('result')=='new')
+        with open(target_copy,'w',encoding='utf-8') as f:f.write(other_fact)
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+        check('successful retry survives a later target name collision',_j(db,**target).get('result')=='noop')
+    finally:
+        with open(os.environ['BRAIN_CONFIG'],'w',encoding='utf-8') as f:json.dump(config,f)
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
     root=_j(db,name='identity_legacy_root',description='Single fact',type='user',body='Water on Friday.',project_id=scope)
     anchor_request=call('prepare_revision',predecessor='identity_legacy_root',name='identity_legacy_anchor',description='Tracked fact',type='user',body='Water on Friday.',project_id=scope,topic='legacy-identity',facet='water',status='proposed',valid_from='2026-01-01',change_reason='Explicit whole-record confirmation',evidence=['Fixture owner confirmed'],replace_whole_record=True)
     legacy_anchor=_j(db,**anchor_request['save_arguments'])
