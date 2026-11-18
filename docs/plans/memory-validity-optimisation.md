@@ -432,3 +432,23 @@ Existing fixtures add trailing arrows, repeated arrows and a trailing bracket, f
 168 name/format/lane/delay combinations. The previous collector falsely promotes a
 trailing-arrow related result; the corrected collector preserves baseline while the
 genuinely independent-session control still promotes.
+
+
+### Literal file names in exposure parsing (2.7.24)
+
+The index preserves leading whitespace in existing file names. The display collector
+now consumes only the single separator character added by the renderer, preserving
+all remaining whitespace as part of the name. Candidate prefixes span physical lines
+so embedded or trailing newlines also remain literal. Indexed-name membership still
+rejects body text, and ambiguous matches are conservatively all treated as exposed.
+Collector 11 excludes potentially affected collector 10 observations.
+
+The existing policy fixture covers 18 names and 432 format/lane/delay combinations,
+including leading/trailing ASCII spaces, tabs, full-width spaces, newlines, repeated
+delimiters and mixed cases. Each exposed case stays baseline and a genuinely unseen
+independent session can still certify. Prior modules falsely promote leading-space
+text direct, related and hook results. No original memory file is renamed or changed.
+
+Exposure lookup failures before persistence now retain the transcript cursor, just
+like exposure write failures. The existing retry check confirms no subsequent read
+is recorded until lookup succeeds, then confirms it remains exposed after settlement.
