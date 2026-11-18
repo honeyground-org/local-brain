@@ -17,7 +17,7 @@ import time
 
 ARMS = ("baseline", "fusion", "linked")
 KEY = "personal_policy_v2"
-OBSERVATION_VERSION = 7
+OBSERVATION_VERSION = 8
 ALPHA = 0.05
 
 
@@ -34,6 +34,8 @@ def ensure(db):
         db.execute("ALTER TABLE personal_events ADD COLUMN terms TEXT DEFAULT '[]'")
     if "settled" not in {r[1] for r in db.execute("PRAGMA table_info(personal_events)")}:
         db.execute("ALTER TABLE personal_events ADD COLUMN settled INTEGER DEFAULT 0")
+    db.execute("CREATE TABLE IF NOT EXISTS personal_exposures("
+               "session TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(session,path))")
     db.execute("CREATE INDEX IF NOT EXISTS personal_events_turn ON personal_events(session,turn)")
     db.execute("CREATE TABLE IF NOT EXISTS personal_edited_turns("
                "session TEXT NOT NULL, turn INTEGER NOT NULL, PRIMARY KEY(session,turn))")
@@ -139,8 +141,20 @@ def record(db, query, path, session, turn, exposed=False, terms=()):
         # The lookup is part of the insert, so a concurrent edit either precedes
         # this write or marks its row afterwards; neither order loses the veto.
         db.execute("INSERT OR IGNORE INTO personal_events(identity,session,turn,query,path,sha,exposed,terms,edited) "
-                   "VALUES(?,?,?,?,?,?,?,?,EXISTS(SELECT 1 FROM personal_edited_turns WHERE session=? AND turn=?))",
-                   (identity, session, turn, query, path, doc[0], int(exposed), json.dumps(terms), session, turn))
+                   "VALUES(?,?,?,?,?,?,(? OR EXISTS(SELECT 1 FROM personal_exposures WHERE session=? AND path=?)),?,"
+                   "EXISTS(SELECT 1 FROM personal_edited_turns WHERE session=? AND turn=?))",
+                   (identity, session, turn, query, path, doc[0], int(exposed), session, path, json.dumps(terms), session, turn))
+
+
+def expose(db, session, names):
+    """Persist earlier presentation independently of the bounded diagnostic rank window."""
+    ensure(db)
+    with db:
+        for start in range(0, len(names), 500):
+            group = names[start:start + 500]
+            db.execute("INSERT OR IGNORE INTO personal_exposures(session,path) "
+                       "SELECT ?,path FROM docs WHERE name IN (" + ",".join("?" for _ in group) + ")",
+                       [session] + group)
 
 
 def settle(db, session, turn):

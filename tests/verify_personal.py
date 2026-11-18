@@ -128,7 +128,7 @@ def verify_turn_edit_order():
             assert result['arm']==('baseline' if is_edited else 'fusion'), (order,result)
             if not is_edited:
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v6:' || substr(identity,4)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v7:' || substr(identity,4)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -136,7 +136,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v6 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v7 support rejected')
 
 
 def verify_scoped_meaning():
@@ -261,6 +261,60 @@ def verify_retired_budget():
         assert not why and len(rows)==1 and rows[0]['name']=='current' and rows[0]['cosine']==0.6
     db.close()
     print('PASS: 41 SHA-pinned legacy predecessors cannot exhaust k=8; absent current vector stays empty')
+
+
+def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','meaning','hook_direct','hook_related','hook_meaning'), delays=(0,10)):
+    import sqlite3
+    from brain import hosts, observe, server, tail, recalljson, hook, i18n
+    hosts.pin('claude-code')
+    for fmt in formats:
+      for lane in lanes:
+       for delay in delays:
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+        db.execute("INSERT INTO docs(path,name,source,sha,body) VALUES('/shown-note','known note','memory','sha','orchid')");db.commit()
+        row=dict(name='known note',path='/shown-note',source='memory',kind='reference',description='fixture',title='fixture',
+                 age_days=0,stale=False,why='fixture',excerpt='orchid',related=lane in ('related','hook_related'),via_vector=lane=='hook_meaning',cosine=.8,via_graph='seed',score=1)
+        rows=[] if lane=='meaning' else [row];meaning=[row] if lane=='meaning' else []
+        if fmt=='text':
+            answer=server._fmt_recall(rows)
+            if meaning:answer+='\n'+server._fmt_meaning(meaning,'','cached',1)
+        else:
+            answer=json.dumps(recalljson.response(db,query='orchid',terms=[],k=8,rows=rows,mrows=meaning,why_none='',
+                 asked_meaning=8 if meaning else 0,auto_meaning=True,request_id=None,unsure=False,bridged=[],
+                 reordered=False,embed_cached=True,t0=0,shown=800))
+        def user(t):return dict(type='user',message=dict(role='user',content=t))
+        def tool(tid,name,args):return dict(type='assistant',message=dict(content=[dict(type='tool_use',id=tid,name=name,input=args)]))
+        def result(tid,text):return dict(type='user',message=dict(content=[dict(type='tool_result',tool_use_id=tid,content=text)]))
+        def baseline(db,name,args,**kw):kw['_retrieval']['baseline_seconds']=.01;return '{}'
+        with patch.object(tail,'_db',return_value=db),patch.object(tail,'_close_db'),patch.object(observe,'write'), \
+             patch.object(vectors,'_qcache_get',return_value=[1.0]),patch.object(server,'call_tool',side_effect=baseline), \
+             patch.object(personal,'candidates',side_effect=lambda db,q,base,arm,*a,**k:base if arm=='baseline' else [dict(path='/shown-note')]), \
+             patch.object(personal.time,'monotonic',return_value=0):
+            for i in range(12):
+                sid=fmt+lane+str(delay)+'-'+str(i);events=[user('orchid '+sid)]
+                if i==11:
+                    if lane.startswith('hook_'):
+                        for language in i18n.LANGS:
+                            with patch.object(i18n,'_lang',language):rendered=hook._format([row])
+                            assert tail._names(db,rendered,tail._HOOK_LINE)==['known note'],(lane,language)
+                        events.append(dict(type='attachment',attachment=dict(type='hook_additional_context',content=[rendered])))
+                    else:events.extend([tool('recall','mcp__brain__recall',dict(query='orchid '+sid,format=fmt)),result('recall',answer)])
+                    for j in range(delay):
+                        events.extend([user('later '+str(j)),tool('empty'+str(j),'mcp__brain__recall',dict(query='empty'+str(j))),result('empty'+str(j),'{}')])
+                events.extend([tool('read','Read',dict(file_path='/shown-note')),result('read','orchid'),user('next actual turn')])
+                path=Path(tmp.name)/(sid+'.jsonl');path.write_bytes(('\r\n'.join(json.dumps(e) for e in events)+'\r\n').encode())
+                tail.scan(str(path),dict(session_id=sid,offset=0,tail=tail._blank_tail(),saves=0))
+            observed=db.execute('SELECT exposed FROM personal_events WHERE session=?',(sid,)).fetchone()[0]
+            assert personal.update(db)['arm']=='baseline',(fmt,lane,delay,'shown memory promoted a policy')
+            assert observed==1,(fmt,lane,delay,'shown memory recorded as independent')
+            assert not personal.certified(db,personal.state(db))
+            assert personal.apply(db,'orchid',['baseline'],8)==['baseline']
+            # A genuinely independent session can still supply the twelfth clean vote.
+            personal.record(db,'fresh independent','/shown-note','independent-control',1)
+            personal.settle(db,'independent-control',1)
+            assert personal.update(db)['arm']=='fusion',(fmt,lane,delay,'clean control was lost')
+        db.close()
+    print('PASS: real text/JSON direct, related, meaning and hook exposure all exclude reads, including after rank-window eviction')
 
 
 def verify_unsettled_evidence(cases=('unfinished','failed_veto','compact_summary','meta','sidechain')):
@@ -500,6 +554,7 @@ def main():
     other.close(); db.close()
     clock.stop()
     cache.stop()
+    verify_exposure_parity()
     verify_unsettled_evidence()
     verify_disputed_support()
     verify_support_and_cost()
