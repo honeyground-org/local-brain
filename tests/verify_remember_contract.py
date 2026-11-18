@@ -481,6 +481,30 @@ def identity_checks(db):
     store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
     bad_candidates=call('review_identity',names=['identity_invalid','identity_cycle_a'],project_id=scope)
     check('invalid and cyclic identities cannot be reused',all(not x['reusable'] and x['issue']=='invalid_identity' for x in bad_candidates['items']))
+    # A second SQLite connection moves the anchor after its initial validation.
+    # The planner must not compute an empty/other group guard from newer index rows.
+    real_identity=rc.identity_record
+    moved=[False]
+    def moving_identity(*a,**kw):
+        result=real_identity(*a,**kw)
+        if result[0] and not moved[0]:
+            moved[0]=True
+            path=os.path.join(_MEM,'identity_anchor.md')
+            with open(path,'w',encoding='utf-8') as f:f.write(original_anchor.replace('project_id: '+scope,'project_id: identity-moved'))
+            other=sqlite3.connect(store.db_path())
+            try:
+                other.execute('UPDATE docs SET project_id=?,sha=? WHERE name=?',('identity-moved',rc.file_sha(path),'identity_anchor'))
+                other.commit()
+            finally:other.close()
+        return result
+    rc.identity_record=moving_identity
+    try:
+        raced=prep()
+        check('identity movement during preparation cannot bypass the guard',not raced.get('ok') and raced['error']['code'] in ('index_pending','identity_unavailable','identity_changed'))
+    finally:
+        rc.identity_record=real_identity
+        with open(os.path.join(_MEM,'identity_anchor.md'),'w',encoding='utf-8') as f:f.write(original_anchor)
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
     pending=prep()['save_arguments']
     with open(os.path.join(_MEM,'identity_anchor.md'),'a',encoding='utf-8') as f:f.write('\nChanged identity source.\n')
     check('stale identity refused during preparation',prep()['error']['code']=='identity_changed')

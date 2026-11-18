@@ -563,6 +563,15 @@ def review_identity(db, args):
 
 
 def prepare_fact(db, args):
+    """Keep reference selection and the fact guard on one SQLite read snapshot."""
+    db.execute("SAVEPOINT fact_preparation")
+    try:
+        return _prepare_fact(db, args)
+    finally:
+        db.execute("RELEASE fact_preparation")
+
+
+def _prepare_fact(db, args):
     """Prepare one host-authored proposal grounded in unique verbatim source passages."""
     from brain import lifecycle
     fields = {"source_name", "source_sha", "quotes", "name", "description", "type", "body", "project_id", "topic", "facet", "identity_reference"}
