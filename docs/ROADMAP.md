@@ -31,7 +31,8 @@ the flat memory index plus `grep`, and improve on each person's own notes.
 ## Current optimisation work (2026-11-17)
 
 [Memory validity and classification plan](plans/memory-validity-optimisation.md): phase 1 adds a
-read-only review inventory. Phase 2 adds host-authored fact proposals with checked source quotations,
+read-only review inventory. Phase 3 adds explicit candidate identity review and version-pinned reuse
+across languages, without semantic auto-merging. Phase 2 adds host-authored fact proposals with checked source quotations,
 provenance and guarded saving. Reviewed multilingual identity reuse and paired native-host outcome
 measurements remain follow-on work.
 

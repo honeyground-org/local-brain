@@ -404,6 +404,118 @@ def extraction_checks(db):
     check("extraction capability follows its declaration",before['remember']['prepare_fact'] and not without['remember']['prepare_fact'])
 
 
+def identity_checks(db):
+    import sqlite3
+    import unicodedata
+    from brain import lifecycle, capabilities
+    scope='identity-fixture'
+    def call(tool, **args):
+        return json.loads(server.call_tool(db,tool,args,_measure=True))
+    def seed(name, topic, facet='water', project=scope):
+        return _j(db,name=name,description='Reviewed identity',type='user',body='Water on Friday.',project_id=project,
+                  lifecycle=dict(topic=topic,facet=facet,status='proposed'),embed=False)
+    anchor=seed('identity_anchor','caf\u00e9')
+    seed('identity_nfd',unicodedata.normalize('NFD','caf\u00e9'))
+    _j(db,name='identity_current',description='Current schedule',type='user',body='Water on Friday.',project_id=scope,
+       lifecycle=dict(topic='caf\u00e9',facet='water',status='active',valid_from='2026-01-01',evidence=['Explicit confirmation']),embed=False)
+    seed('identity_homonym','another-plant')
+    seed('identity_facet','caf\u00e9','food')
+    seed('identity_case','Caf\u00e9')
+    seed('identity_foreign','caf\u00e9',project='identity-other')
+    _j(db,name='identity_untracked',description='Untracked',type='user',body='Water on Friday.',project_id=scope)
+    names=['identity_anchor','identity_nfd','identity_homonym','identity_facet','identity_case','identity_foreign','identity_untracked']
+    before=db.total_changes
+    denied=[]
+    def authorizer(action, *rest):
+        if action in (sqlite3.SQLITE_INSERT,sqlite3.SQLITE_UPDATE,sqlite3.SQLITE_DELETE):
+            denied.append(action);return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    db.set_authorizer(authorizer)
+    try:
+        reviewed=call('review_identity',names=names,project_id=scope)
+    finally:
+        db.set_authorizer(lambda *unused: sqlite3.SQLITE_OK)
+    check('identity review has no SQL writes',reviewed.get('ok') and not denied and db.total_changes==before)
+    check('a proposed identity still shows the current fact',reviewed['items'][0]['current_fact_names']==['identity_current'] and reviewed['items'][0]['current'] is False)
+    groups={tuple(g['names']) for g in reviewed['groups']}
+    check('NFC groups only; homonyms, facets and case remain distinct',groups=={('identity_anchor','identity_nfd'),('identity_homonym',),('identity_facet',),('identity_case',)})
+    check('foreign identity not exposed and untracked identity not reusable',reviewed['items'][5]==dict(name='identity_foreign',reusable=False,issue='identity_unavailable') and not reviewed['items'][6]['reusable'])
+    check('omitted scope means unscoped only',call('review_identity',names=['identity_anchor'])['items']==[dict(name='identity_anchor',reusable=False,issue='identity_unavailable')])
+    check('duplicate and oversized candidate lists rejected',not call('review_identity',names=['a','a']).get('ok') and not call('review_identity',names=[str(i) for i in range(11)]).get('ok'))
+    texts=['Water on Friday.','\uae08\uc694\uc77c\uc5d0 \ubb3c\uc744 \uc90d\ub2c8\ub2e4.','\u91d1\u66dc\u65e5\u306b\u6c34\u3092\u3084\u308b\u3002','\u0627\u0644\u0633\u0642\u064a \u064a\u0648\u0645 \u0627\u0644\u062c\u0645\u0639\u0629.','Arroser vendredi.']
+    baseline, reused, proposals=set(),set(),[]
+    original_anchor=_read('identity_anchor')
+    for i,text in enumerate(texts):
+        source='identity_source_'+str(i)
+        saved=_j(db,name=source,description='Mixed source',type='reference',body=text+'\nOther unchanged facts.',project_id=scope)
+        original=_read(source)
+        args=dict(source_name=source,source_sha=saved['sha'],quotes=[text],name='identity_proposal_'+str(i),description='Translated proposal',type='user',body=text,project_id=scope)
+        control=call('prepare_fact',**dict(args,name='identity_control_'+str(i),topic=text,facet='water'))
+        baseline.add(lifecycle.identity(control['save_arguments']['lifecycle']))
+        _j(db,**control['save_arguments'])
+        ref=dict(name='identity_anchor',sha=anchor['sha'],reason='Reviewed as the same plant and watering fact; language differs')
+        request=call('prepare_fact',**dict(args,identity_reference=ref))
+        check('reviewed identity inherited '+str(i),request.get('ok') and request['save_arguments']['lifecycle']['topic']=='caf\u00e9' and request['identity_reference']==ref)
+        payload=request['save_arguments'];reused.add(lifecycle.identity(payload['lifecycle']));proposals.append(payload['name'])
+        result=_j(db,**payload)
+        check('identity proposal save and retry '+str(i),result.get('result')=='new' and _j(db,**payload).get('result')=='noop')
+        check('identity evidence persisted without changing original '+str(i),anchor['sha'] in _read(payload['name']) and ref['reason'] in _read(payload['name']) and _read(source)==original and _read('identity_anchor')==original_anchor)
+        snap=lifecycle.snapshot(db);did=snap.by_name[(scope,payload['name'])][0]
+        check('identity reuse does not activate or supersede '+str(i),snap.info(did)['status']=='proposed' and snap.resolve(did)==[] and not payload['lifecycle'].get('supersedes'))
+    check('controlled identity fragmentation: 5 translated groups become 1 reused group',len(baseline)==5 and len(reused)==1)
+    history=lifecycle.history(db,'identity_anchor',scope,limit=100)
+    check('shared history includes all proposals but no homonyms',set(proposals)<=set(r['name'] for r in history['revisions']) and 'identity_homonym' not in {r['name'] for r in history['revisions']})
+    args['name']='identity_pending'
+    ref=dict(name='identity_anchor',sha=anchor['sha'],reason='Same independently changing fact')
+    def prep(**extra): return call('prepare_fact',**dict(args,identity_reference=ref,**extra))
+    check('translated identity cannot override reviewed identifiers',prep(topic='translated')['error']['code']=='identity_mismatch')
+    for replacement,code in [(dict(ref,sha='0'*40),'identity_changed'),(dict(ref,name='identity_foreign'),'identity_unavailable'),(dict(ref,name='identity_untracked'),'invalid_identity'),(dict(ref,reason=''),'invalid_argument')]:
+        result=call('prepare_fact',**dict(args,identity_reference=replacement))
+        check('bad reference rejected '+code,result['error']['code']==code)
+    for n in ('identity_invalid','identity_cycle_a','identity_cycle_b'):
+        meta=dict(topic='broken-identity',facet='water',status='active',valid_from='2026-01-01',evidence=['Fixture'],change_reason='Fixture')
+        if n=='identity_invalid':meta['status']='not-a-state'
+        else:meta['supersedes']=['identity_cycle_b' if n.endswith('_a') else 'identity_cycle_a']
+        with open(os.path.join(_MEM,n+'.md'),'w',encoding='utf-8') as f:
+            f.write('---\nname: '+n+'\nproject_id: '+scope+'\nlifecycle: '+json.dumps(meta)+'\n---\nWater on Friday.\n')
+    store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+    bad_candidates=call('review_identity',names=['identity_invalid','identity_cycle_a'],project_id=scope)
+    check('invalid and cyclic identities cannot be reused',all(not x['reusable'] and x['issue']=='invalid_identity' for x in bad_candidates['items']))
+    # A second SQLite connection moves the anchor after its initial validation.
+    # The planner must not compute an empty/other group guard from newer index rows.
+    real_identity=rc.identity_record
+    moved=[False]
+    def moving_identity(*a,**kw):
+        result=real_identity(*a,**kw)
+        if result[0] and not moved[0]:
+            moved[0]=True
+            path=os.path.join(_MEM,'identity_anchor.md')
+            with open(path,'w',encoding='utf-8') as f:f.write(original_anchor.replace('project_id: '+scope,'project_id: identity-moved'))
+            other=sqlite3.connect(store.db_path())
+            try:
+                other.execute('UPDATE docs SET project_id=?,sha=? WHERE name=?',('identity-moved',rc.file_sha(path),'identity_anchor'))
+                other.commit()
+            finally:other.close()
+        return result
+    rc.identity_record=moving_identity
+    try:
+        raced=prep()
+        check('identity movement during preparation cannot bypass the guard',not raced.get('ok') and raced['error']['code'] in ('index_pending','identity_unavailable','identity_changed'))
+    finally:
+        rc.identity_record=real_identity
+        with open(os.path.join(_MEM,'identity_anchor.md'),'w',encoding='utf-8') as f:f.write(original_anchor)
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+    pending=prep()['save_arguments']
+    with open(os.path.join(_MEM,'identity_anchor.md'),'a',encoding='utf-8') as f:f.write('\nChanged identity source.\n')
+    check('stale identity refused during preparation',prep()['error']['code']=='identity_changed')
+    check('changed identity between preparation and saving is refused',_j(db,**pending)['error']['code']=='fact_changed' and not os.path.exists(os.path.join(_MEM,pending['name']+'.md')))
+    check('old saved proposal still retries after identity changes',_j(db,**payload).get('result')=='noop')
+    flags=capabilities.tool_flags(server.TOOLS)['remember']
+    removed=capabilities.tool_flags([t for t in server.TOOLS if t['name']!='review_identity'])['remember']
+    check('identity capability follows declaration',flags['review_identity'] and flags['identity_reference'] and not removed['review_identity'])
+    print('Identity fixture: 5 translated identifier groups vs 1 explicitly reused; 0 homonym/facet/scope merges. Not an answer-quality benchmark.')
+
+
 def main() -> int:
     db = _build()
     base = dict(description="harbour ledger rule", type="lesson", body="The ledger closes on friday.")
@@ -512,6 +624,7 @@ def main() -> int:
     revision_checks(db)
     review_checks()
     extraction_checks(db)
+    identity_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
         print("❌ failed: %d — %s" % (len(FAILS), " · ".join(FAILS)))
