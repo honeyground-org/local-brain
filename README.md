@@ -1400,3 +1400,9 @@ literal serializer strings, including bracketed source names. Lossy historical m
 proof, so ambiguous legacy footers are not claimed to be perfectly classified. Their original text
 and evidence remain available for inspection. Graph provenance version 3 rebuilds derived links
 once during normal indexing.
+
+New memory files (including extracted proposals) are published with an atomic no-replace link
+from the flushed temporary file. If another writer creates the destination after the final
+SHA check, saving returns a conflict without changing that file. Filesystems that cannot make
+hard links fail safely; there is no overwrite fallback. Existing-version updates retain their
+optimistic SHA checks, and successful identical retries remain noops.
