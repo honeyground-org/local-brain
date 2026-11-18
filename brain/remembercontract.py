@@ -508,6 +508,19 @@ def identity_reference_shape(value):
 def check_identity(db, args):
     """New writes must still have the uniquely selected, valid, pinned identity."""
     value = args.get("identity_reference")
+    if value is None and args.get("extracted_from"):
+        # 2.5.0 stored references in evidence. Preserve payload bytes while
+        # enforcing the same guard for new writes of those prepared requests.
+        legacy = [e[len("Identity selected: "):] for e in
+                  (args.get("lifecycle") or {}).get("evidence", [])
+                  if e.startswith("Identity selected: ")]
+        if legacy:
+            try:
+                value = json.loads(legacy[0]) if len(legacy) == 1 else None
+            except (ValueError, TypeError):
+                value = None
+            if identity_reference_shape(value):
+                return error("identity_reprepare_required", "Prepare this legacy identity request again")
     if value is None:
         return None
     record, bad = identity_record(db, value["name"], value["sha"], args.get("project_id") or "")
@@ -538,6 +551,13 @@ def identity_record(db, name, sha, scope, snap=None, cyclic=None):
         seen.add(did)
         if did in snap.issues or did in cyclic:
             return None, error("invalid_identity", "The selected identity and its ancestors need valid revision links")
+        if did != ids[0]:
+            try:
+                ancestor_sha = file_sha(snap.docs[did]["path"])
+            except (OSError, UnicodeError):
+                ancestor_sha = None
+            if ancestor_sha != snap.docs[did]["sha"]:
+                return None, error("invalid_identity", "Refresh changed ancestor sources before choosing this identity")
         pending.extend(snap.prev.get(did, ()))
     try:
         actual_sha = file_sha(record["path"])

@@ -1127,7 +1127,10 @@ existing identity only after inspecting its meaning. Different facts need distin
 Server 2.5.1 also persists structured `identity_reference` in the proposal. New saves recheck the
 reference's unique name, scope, SHA, identifiers and revision-link validity after refreshing the index.
 An unchanged group hash alone cannot catch a new same-name record in another identity group.
-Prepare unsaved 2.5.0 requests again to obtain this guard; successful older retries remain compatible.
+Server 2.5.2 also validates the evidence-carried reference in unsaved 2.5.0 requests; malformed
+legacy references require preparation again. Successful older retries remain compatible. Candidate
+review and preparation compare ancestor file versions with the index, rejecting stale ancestry
+even before an index refresh. External file edits are not a cross-file atomic transaction.
 
 Keep both returned `identity_reference` and `expected_fact_sha` in `save_arguments`: saving refreshes the local index and rejects
 changed fact membership or source versions with `fact_changed`. Re-prepare after changes. As with other
