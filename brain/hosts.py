@@ -368,14 +368,14 @@ class ClaudeCode(Host):
             if x.get("type") == "tool_use":
                 name = x.get("name") or ""
                 if name in read:
-                    out.append(("read", (x.get("input") or {}).get("file_path") or ""))
+                    out.append(("read_call", x.get("id") or "", (x.get("input") or {}).get("file_path") or ""))
                 elif name == "recall" or name.endswith("__recall"):
                     out.append(("recall_call", x.get("id") or "", x.get("input") or {}))
             elif x.get("type") == "tool_result":
                 c = x.get("content")
                 text = c if isinstance(c, str) else " ".join(
                     y.get("text", "") for y in c or [] if isinstance(y, dict) and y.get("type") == "text")
-                out.append(("result", x.get("tool_use_id") or "", text))
+                out.append(("result", x.get("tool_use_id") or "", text, not bool(x.get("is_error"))))
         return out
 
     def hook_calls(self, line: str) -> List[tuple]:

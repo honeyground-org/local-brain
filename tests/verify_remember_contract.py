@@ -501,6 +501,26 @@ def identity_checks(db):
     finally:
         with open(os.environ['BRAIN_CONFIG'],'w',encoding='utf-8') as f:json.dump(config,f)
         store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+    # A reviewed reference is scope/SHA-qualified; graph name links are not.
+    foreign_anchor=os.path.join(duplicate,'identity_anchor.md')
+    with open(foreign_anchor,'w',encoding='utf-8') as f:
+        f.write(original_anchor.replace('project_id: '+scope,'project_id: foreign-homonym').replace('caf\u00e9','billing'))
+    with open(os.environ['BRAIN_CONFIG'],'w',encoding='utf-8') as f:json.dump(changed_config,f)
+    try:
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+        scoped=prep(name='identity_scoped_reference')['save_arguments']
+        check('identity provenance is not an ambiguous graph name',scoped['identity_reference']==ref and scoped['links']==[])
+        old_request=dict(scoped,links=[scoped['extracted_from']['name'],ref['name']])
+        rejected=_j(db,**old_request)
+        check('old unsaved generated links require preparation again',(rejected.get('error') or {}).get('code')=='identity_reprepare_required')
+        check('scoped reference saves with foreign homonym',_j(db,**scoped).get('result')=='new')
+        from brain import graphstore
+        proposal_id=db.execute('SELECT id FROM docs WHERE name=?',(scoped['name'],)).fetchone()[0]
+        foreign_id=db.execute('SELECT id FROM docs WHERE path=?',(foreign_anchor,)).fetchone()[0]
+        check('foreign homonym receives no generated identity edge',not graphstore.LOCAL.linked(db,proposal_id,foreign_id))
+    finally:
+        with open(os.environ['BRAIN_CONFIG'],'w',encoding='utf-8') as f:json.dump(config,f)
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
     target=prep(name='identity_new_target')['save_arguments']
     os.remove(os.path.join(duplicate,'identity_anchor.md'))
     target_copy=os.path.join(duplicate,'identity_new_target.md')

@@ -285,6 +285,18 @@ def _doc_of(db, path: str):
 def _use(ev: tuple, rec: dict) -> None:
     u = rec.setdefault("use", {"turn": 0, "shown": [], "calls": [], "opened": []})
     kind = ev[0]
+    if kind == "read_call":
+        pending = u.setdefault("pending_reads", {})
+        pending[ev[1]] = {"path": ev[2], "turn": u["turn"], "request": u.get("recall_args")}
+        while len(pending) > SHOWN_KEEP:
+            pending.pop(next(iter(pending)))
+        return
+    if kind == "result" and ev[1] in u.get("pending_reads", {}):
+        pending = u["pending_reads"].pop(ev[1])
+        if (len(ev) > 3 and ev[3] and pending["turn"] == u["turn"]
+                and pending["request"] == u.get("recall_args")):
+            _use(("read", pending["path"]), rec)
+        return
     if kind == "recall_call":
         u["calls"] = (u["calls"] + [ev[1]])[-SHOWN_KEEP:]
         if len(ev) > 2:
@@ -298,6 +310,14 @@ def _use(ev: tuple, rec: dict) -> None:
     elif kind == "result" and ev[1] in u["calls"]:
         names = [n for _rank, n in sorted((int(m.group(1)), m.group(2)) for m in
                                           (_RECALL_LINE.match(x) for x in (ev[2] or "").splitlines()) if m)]
+        try:
+            structured = json.loads(ev[2])
+            if isinstance(structured, dict):
+                all_rows = list(structured.get("results") or []) + list(structured.get("related") or [])
+                all_rows += (structured.get("meaning") or {}).get("rows") or []
+                names += [r["name"] for r in all_rows if isinstance(r, dict) and r.get("name")]
+        except (ValueError, TypeError, AttributeError):
+            pass
         names = [n for i, n in enumerate(names) if n not in names[:i]
                  and db.execute("SELECT 1 FROM docs WHERE name=?", (n,)).fetchone()]
         u["shown"] = (u["shown"] + [{"via": "recall", "names": names, "turn": u["turn"]}])[-SHOWN_KEEP:]
@@ -315,7 +335,7 @@ def _use(ev: tuple, rec: dict) -> None:
                               "turns_ago": u["turn"] - hit["turn"] if hit else None})
         from brain import personal
         request = u.get("recall_args") or {}
-        if not request.get("sources") and not request.get("kinds") and int(request.get("k") or 8) == 8:
+        if personal.eligible(request):
             personal.record(db, request.get("query") or u.get("query", ""), doc["path"],
                             rec.get("session_id", ""), u["turn"], exposed=bool(hit),
                             terms=request.get("terms") or [])

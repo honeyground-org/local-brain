@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.5.4"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.6.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -628,8 +628,8 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             if mrows or not auto:
                 more = "\n\n" + _fmt_meaning(mrows, why, cost, start, auto=auto)
         if not _measure:
-            if not args.get("scope") and not args.get("kinds") and not args.get("sources") and k == 8 and args.get("semantic_k") != 0:
-                from brain import personal
+            from brain import personal
+            if personal.eligible(args):
                 rows = personal.apply(db, q, rows, k, terms=terms)
                 if mrows is not None:
                     shown = {r["name"] for r in rows}

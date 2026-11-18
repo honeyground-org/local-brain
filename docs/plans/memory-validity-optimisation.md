@@ -146,3 +146,33 @@ Save-guard follow-up (2.5.2): legacy evidence-carried references receive the sam
 Entry-point follow-up (2.5.3): read-only MCP identity review and discovery never initialise the index. Legacy reference recognition excludes exact source-span evidence, and both reference formats require the group snapshot for new writes. Existing successful retries remain compatible.
 
 Target-name follow-up (2.5.4): source-bound fact writes recheck the target name in the refreshed exact scope, preventing a competing source from making history ambiguous after preparation. Other scopes and successful retries remain compatible.
+
+## Adaptive serving follow-up (proposal #101)
+
+Confirmed successful reads and structured exposure handling precede automatic serving. Versioned
+observations cannot reuse earlier collector evidence. A held-out winner serves only the context it
+was measured for; baseline, observation-only mode and explicit disable remain available. Supporting
+versions, measurement generation and embedding space are checked before applying it. Capability
+output distinguishes selected from effective policy. No answer-quality benefit is inferred from
+synthetic promotion/rollback checks.
+
+### Further general memory capabilities to evaluate
+
+1. **Explicit forgetting and reingestion prevention**: distinguish reversible archival from deletion
+   and suppress reimport of an explicitly forgotten source. Measure leakage after reindex, restoration,
+   cross-host retrieval and paraphrased reingestion. Costs: deletion across derived stores, backups and
+   false-positive suppression. Requires a separate privacy contract; not implemented by this change.
+2. **Bounded current-context projection**: reuse current validity and existing hook context to create a
+   compact provenance-backed view for host context budgets. Measure stale-current answers, coverage,
+   token usage and regeneration cost against existing hooks. Do not create a second truth store.
+3. **Typed entity relationships**: document links already exist; optional evidence-backed entity,
+   predicate and time-qualified relations would enable finer questions. Measure relationship accuracy,
+   ambiguity and multi-hop retrieval against document links. Extraction and conflict management add cost.
+4. **Events and plans as optional views**: topic/facet and lifecycle already represent generic memories;
+   event timelines and plan transitions would be an application view, not a mandatory domain ontology.
+   Require language-independent structured fields and retain source quotations and uncertainty.
+
+These are assessed directions, not shipped features. Prefer privacy and current-context correctness
+before adding another storage backend or copying language-specific assertion heuristics.
+Identity-edge follow-up (2.5.5): exact-scope SHA-pinned identity provenance no longer becomes an unqualified graph name link. Cross-project homonyms cannot acquire a new automatic identity edge. Existing saved content is preserved; typed identity-edge traversal is not implemented.
+New writes also reject old prepared identity requests containing automatic bare-name provenance links; successful prior retries bypass new-write guards and remain compatible.

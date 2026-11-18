@@ -214,7 +214,7 @@ def _corpus(db: sqlite3.Connection, memory_dir: str) -> Dict[str, Any]:
 def describe(db: sqlite3.Connection, tools: List[dict], protocol: str, memory_dir: str,
              shown: int) -> Dict[str, Any]:
     """The whole answer. `tools` is the declaration the host was given (§server.tools_for)."""
-    from brain import calibrate, hook, store, textindex
+    from brain import calibrate, hook, store, textindex, personal
     flags = tool_flags(tools)
     try:
         db_schema: Optional[str] = store.get_meta(db, "schema_version") or None
@@ -228,6 +228,7 @@ def describe(db: sqlite3.Connection, tools: List[dict], protocol: str, memory_di
                    "code_generation": calibrate.CODE_GENERATION,
                    "schema_version": store.SCHEMA_VERSION, "db_schema_version": db_schema,
                    "tokenizer_version": textindex.TOKENIZER_VERSION},
+        "personalisation": personal.describe(db),
         "embed": _embed(db),
         "judge": _judge(),
         "stores": _stores(db),

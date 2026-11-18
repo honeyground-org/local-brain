@@ -22,7 +22,7 @@ def evidence(db, n, winner, start=0):
         for i in range(start, start+n):
             scores = {a: int(a == winner) for a in personal.ARMS}
             db.execute('INSERT INTO personal_events(identity,session,turn,query,path,sha,exposed,measured,scores,costs) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                       (str(i), 'session-'+str(i), 1, 'fixture', 'fixture', 'sha', 0, 1, json.dumps(scores),
+                       (personal.evidence_prefix()+str(i), 'session-'+str(i), 1, 'fixture', 'fixture', 'sha', 0, 1, json.dumps(scores),
                         json.dumps({a: .01 for a in personal.ARMS})))
 
 def main():
@@ -38,13 +38,13 @@ def main():
     assert personal.state(db, 'terms')['arm'] == 'baseline'  # contexts cannot share a winner
     original = personal.candidates
     personal.candidates = lambda *args, **kwargs: ['candidate']
+    os.environ['BRAIN_PERSONAL_MODE'] = 'observe'
     assert personal.apply(db, 'fixture', ['baseline'], 8) == ['baseline']
-    os.environ['BRAIN_PERSONAL_EXPERIMENT'] = '1'
+    del os.environ['BRAIN_PERSONAL_MODE']
     assert personal.apply(db, 'fixture', ['baseline'], 8) == ['candidate']
     os.environ['BRAIN_PERSONAL_DISABLED'] = '1'
     assert personal.apply(db, 'fixture', ['baseline'], 8) == ['baseline']
     del os.environ['BRAIN_PERSONAL_DISABLED']
-    del os.environ['BRAIN_PERSONAL_EXPERIMENT']
     personal.candidates = original
     evidence(db, 16, 'baseline', 16)
     assert personal.update(db)['arm'] == 'baseline'  # new independent harm rolls back
@@ -56,12 +56,43 @@ def main():
     assert personal.state(db)['history'][-1]['reason'] == 'holdout_rejected'
     # Editing a turn withdraws its behavioral signal.
     personal.edited(db, 'session-47', 1)
-    assert db.execute('SELECT edited FROM personal_events WHERE identity="47"').fetchone()[0] == 1
+    assert db.execute('SELECT edited FROM personal_events WHERE identity=?', (personal.evidence_prefix()+'47',)).fetchone()[0] == 1
     # Another user's home starts with no inherited policy or observations.
     os.environ['BRAIN_HOME'] = str(Path(tmp.name)/'another')
     other = store.connect()
     assert personal.state(other)['arm'] == 'baseline'
     assert personal.update(other)['observations'] == 0
+    # A previous collector's records cannot bootstrap the new automatic policy.
+    evidence(other, 16, 'fusion')
+    other.execute("UPDATE personal_events SET identity='legacy-' || id")
+    other.commit()
+    assert personal.update(other)['arm'] == 'baseline'
+    evidence(other, 16, 'fusion', 16)
+    assert personal.update(other)['arm'] == 'fusion'
+    assert personal.describe(other)['contexts']['query']['effective'] == 'fusion'
+    personal.edited(other, 'session-20', 1)
+    assert personal.apply(other, 'fixture', ['baseline'], 8) == ['baseline']
+    assert personal.state(other)['history'][-1]['reason'] == 'support_invalidated'
+    evidence(other, 16, 'fusion', 32)
+    assert personal.update(other)['arm'] == 'fusion'
+    selected = personal.state(other)
+    # A changed measurement/embedding signature revokes serving even if all files remain.
+    selected['signature'] = ['obsolete']
+    store.set_meta(other, personal.KEY, json.dumps(selected))
+    assert personal.apply(other, 'fixture', ['baseline'], 8) == ['baseline']
+    evidence(other, 16, 'fusion', 48)
+    assert personal.update(other)['arm'] == 'fusion'
+    selected = personal.state(other)
+    selected['cost_limit'] = 1e-12
+    store.set_meta(other, personal.KEY, json.dumps(selected))
+    personal.candidates = lambda *args, **kwargs: ['candidate']
+    assert personal.apply(other, 'fixture', ['baseline'], 8) == ['baseline']
+    assert personal.state(other)['history'][-1]['reason'] == 'serving_cost'
+    personal.candidates = original
+    assert personal.eligible({})
+    for request in ({'view':'history'}, {'as_of':'2026-01-01'}, {'scope':'p'},
+                    {'k':4}, {'semantic_k':0}, {'semantic_k':20}, {'sources':['x']}):
+        assert not personal.eligible(request), request
     other.close(); db.close()
     print('PASS: weak evidence retained, independent holdout promoted, drift rolled back, users isolated')
 
