@@ -306,6 +306,38 @@ def _doc_of(db, path: str):
     return None
 
 
+def _context_names(db, value):
+    """Literal references anywhere in a structured Brain response or its arguments.
+
+    Metadata, nested history revisions, graph neighbours and name arrays all count.
+    Name ambiguity excludes all matching paths, as for recall. No text is retained.
+    """
+    pending = [value]
+    names = []
+    seen = set()
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            for key in ("id", "doc_id", "document_id", "ids"):
+                value = item.get(key)
+                ids = value if isinstance(value, list) else [value]
+                for did in ids:
+                    if type(did) is int:
+                        row = db.execute("SELECT name FROM docs WHERE id=?", (did,)).fetchone()
+                        if row and row[0] not in names:
+                            names.append(row[0])
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, str) and item not in seen:
+            seen.add(item)
+            for row in db.execute("SELECT name FROM docs WHERE name=? OR path=?", (item, item)):
+                if row[0] not in names:
+                    names.append(row[0])
+    return names
+
+
 def _use(ev: tuple, rec: dict) -> None:
     u = rec.setdefault("use", {"turn": 0, "shown": [], "calls": [], "opened": []})
     kind = ev[0]
@@ -321,8 +353,17 @@ def _use(ev: tuple, rec: dict) -> None:
                 and pending["request"] == u.get("recall_args")):
             _use(("read", pending["path"]), rec)
         return
+    if kind == "context_call":
+        calls = u.setdefault("context_calls", [])
+        if len(calls) + len(u["calls"]) >= SHOWN_KEEP and ev[1] not in calls:
+            rec["personal_history_unknown"] = True
+        _expose(rec, _context_names(_db(), ev[2]))
+        if not ev[3]:
+            rec["personal_history_unknown"] = True  # an unclassified future response
+        u["context_calls"] = (calls + [ev[1]])[-SHOWN_KEEP:]
+        return
     if kind == "recall_call":
-        if len(u["calls"]) >= SHOWN_KEEP and ev[1] not in u["calls"]:
+        if len(u["calls"]) + len(u.get("context_calls", [])) >= SHOWN_KEEP and ev[1] not in u["calls"]:
             rec["personal_history_unknown"] = True  # an outstanding response may be lost
         u["calls"] = (u["calls"] + [ev[1]])[-SHOWN_KEEP:]
         if len(ev) > 2:
@@ -334,6 +375,16 @@ def _use(ev: tuple, rec: dict) -> None:
         if names:
             _expose(rec, names)
             u["shown"] = (u["shown"] + [{"via": "hook", "names": names, "turn": u["turn"]}])[-SHOWN_KEEP:]
+    elif kind == "result" and ev[1] in u.get("context_calls", []):
+        try:
+            response = json.loads(ev[2])
+        except (ValueError, TypeError):
+            response = None
+        if not isinstance(response, (dict, list)):
+            rec["personal_history_unknown"] = True
+        else:
+            _expose(rec, _context_names(db, response))
+        u["context_calls"] = [call for call in u["context_calls"] if call != ev[1]]
     elif kind == "result" and ev[1] in u["calls"]:
         names = _names(db, ev[2], _RECALL_LINE)
         names += _names(db, ev[2], _RELATED_LINE)
@@ -435,7 +486,7 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
             # Losing exposure or an outstanding recall ID must not turn later reads
             # into independent labels. Retry this line even when lookup failed
             # before the durable exposure write was reached.
-            if ev[0] in ("hook", "recall_call") or (ev[0] == "result" and ev[1] in rec.get("use", {}).get("calls", [])):
+            if ev[0] in ("hook", "recall_call", "context_call") or (ev[0] == "result" and ev[1] in (rec.get("use", {}).get("calls", []) + rec.get("use", {}).get("context_calls", []))):
                 raise EvidenceVetoUnavailable() from exc
             pass                                         # optional diagnostics may fail quietly
     for name, kind, arg in calls:

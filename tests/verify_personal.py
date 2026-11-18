@@ -125,10 +125,12 @@ def verify_turn_edit_order():
             rows=db.execute('SELECT edited FROM personal_events').fetchall()
             assert len(rows)==12 and all(bool(r[0])==is_edited for r in rows), (order,[tuple(r) for r in rows])
             result=personal.update(db)
-            assert result['arm']==('baseline' if is_edited else 'fusion'), (order,result)
-            if not is_edited:
+            assert result['arm']==('fusion' if order=='read_only' else 'baseline'), (order,result)
+            if order=='preview_read':
+                assert all(r[0] for r in db.execute('SELECT exposed FROM personal_events'))
+            if order=='read_only':
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v10:' || substr(identity,5)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v11:' || substr(identity,5)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -136,7 +138,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v10 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v11 support rejected')
 
 
 def verify_scoped_meaning():
@@ -263,7 +265,7 @@ def verify_retired_budget():
     print('PASS: 41 SHA-pinned legacy predecessors cannot exhaust k=8; absent current vector stays empty')
 
 
-def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','meaning','hook_direct','hook_related','hook_meaning'), delays=(0,10), name='known note'):
+def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','meaning','hook_direct','hook_related','hook_meaning'), delays=(0,10), name='known note', context_tool=None, expected_exposed=True):
     import sqlite3
     from brain import hosts, observe, server, tail, recalljson, hook, i18n
     hosts.pin('claude-code')
@@ -282,6 +284,17 @@ def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','m
             answer=json.dumps(recalljson.response(db,query='orchid',terms=[],k=8,rows=rows,mrows=meaning,why_none='',
                  asked_meaning=8 if meaning else 0,auto_meaning=True,request_id=None,unsure=False,bridged=[],
                  reordered=False,embed_cached=True,t0=0,shown=800))
+        context_args = {'memory_history': {'name': name}, 'review_identity': {'names': [name]},
+                        'memory_review': {'only_attention': False}, 'neighbors': {'name': name},
+                        'timeline': {}, 'brain_analyse': {'limit': 10}, 'brain_status': {},
+                        'brain_suggest': {}, 'brain_capabilities': {}}.get(context_tool, {})
+        if context_tool == 'brain_suggest':
+            db.execute("INSERT INTO usage(path,wrong) VALUES('/shown-note',2)");db.commit()
+        if context_tool == 'timeline':
+            db.execute("UPDATE docs SET mtime=?",(__import__('time').time(),));db.commit()
+        if context_tool:
+            answer = (server.call_tool(db, context_tool, context_args) if context_tool != 'future_context'
+                      else json.dumps({'body': 'orchid'}))
         def user(t):return dict(type='user',message=dict(role='user',content=t))
         def tool(tid,name,args):return dict(type='assistant',message=dict(content=[dict(type='tool_use',id=tid,name=name,input=args)]))
         def result(tid,text):return dict(type='user',message=dict(content=[dict(type='tool_result',tool_use_id=tid,content=text)]))
@@ -298,17 +311,17 @@ def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','m
                             with patch.object(i18n,'_lang',language):rendered=hook._format([row])
                             assert tail._names(db,rendered,tail._HOOK_LINE)==[name],(lane,language)
                         events.append(dict(type='attachment',attachment=dict(type='hook_additional_context',content=[rendered])))
-                    else:events.extend([tool('recall','mcp__brain__recall',dict(query='orchid '+sid,format=fmt)),result('recall',answer)])
+                    else:events.extend([tool('recall','mcp__brain__'+(context_tool or 'recall'),context_args if context_tool else dict(query='orchid '+sid,format=fmt)),result('recall',answer)])
                     for j in range(delay):
                         events.extend([user('later '+str(j)),tool('empty'+str(j),'mcp__brain__recall',dict(query='empty'+str(j))),result('empty'+str(j),'{}')])
                 events.extend([tool('read','Read',dict(file_path='/shown-note')),result('read','orchid'),user('next actual turn')])
                 path=Path(tmp.name)/(sid+'.jsonl');path.write_bytes(('\r\n'.join(json.dumps(e) for e in events)+'\r\n').encode())
                 tail.scan(str(path),dict(session_id=sid,offset=0,tail=tail._blank_tail(),saves=0))
             observed=db.execute('SELECT exposed FROM personal_events WHERE session=?',(sid,)).fetchone()[0]
-            assert personal.update(db)['arm']=='baseline',(fmt,lane,delay,'shown memory promoted a policy')
-            assert observed==1,(fmt,lane,delay,'shown memory recorded as independent')
-            assert not personal.certified(db,personal.state(db))
-            assert personal.apply(db,'orchid',['baseline'],8)==['baseline']
+            assert personal.update(db)['arm']==('baseline' if expected_exposed else 'fusion'),(context_tool,fmt,lane,delay,'shown memory promoted a policy')
+            assert observed==int(expected_exposed),(context_tool,fmt,lane,delay,'shown memory recorded as independent')
+            assert personal.certified(db,personal.state(db)) is (not expected_exposed)
+            assert (personal.apply(db,'orchid',['baseline'],8)==['baseline']) is expected_exposed
             # A genuinely independent session can still supply the twelfth clean vote.
             personal.record(db,'fresh independent','/shown-note','independent-control',1)
             personal.settle(db,'independent-control',1)
@@ -560,6 +573,12 @@ def main():
                  '\u3000orchid', 'orchid\u3000', 'orchid\nrelease', '\norchid', 'orchid\n',
                  '  orchid ←\n[release]  '):
         verify_exposure_parity(name=name)
+    from brain import hosts, server
+    assert {tool['name'] for tool in server.TOOLS} <= hosts.BRAIN_TOOLS
+    for tool in ('memory_history', 'review_identity', 'memory_review', 'neighbors',
+                 'timeline', 'brain_analyse', 'brain_status', 'brain_suggest', 'future_context'):
+        verify_exposure_parity(formats=('json',), lanes=('direct',), context_tool=tool)
+    verify_exposure_parity(formats=('json',), lanes=('direct',), context_tool='brain_capabilities', expected_exposed=False)
     verify_unsettled_evidence()
     verify_disputed_support()
     verify_support_and_cost()

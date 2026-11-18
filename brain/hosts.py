@@ -105,6 +105,13 @@ _SHARED_EVENTS = {"user_prompt_submit": "UserPromptSubmit", "session_start": "Se
                   "pre_tool_use": "PreToolUse", "post_tool_use": "PostToolUse"}
 
 
+# Every public Brain tool is classified so a new response cannot silently escape
+# exposure collection. Recall retains its separate ranking-request semantics.
+BRAIN_TOOLS = frozenset(("recall", "remember", "neighbors", "brain_analyse", "brain_view",
+    "brain_status", "timeline", "brain_suggest", "brain_feedback", "reindex", "brain_capabilities",
+    "memory_history", "memory_review", "review_identity", "prepare_fact", "prepare_revision"))
+
+
 class Host:
     """What one LLM tool can give the brain. ⛔ What it can't give, it answers with ★an empty value★."""
 
@@ -350,7 +357,8 @@ class ClaudeCode(Host):
 
     def brain_events(self, line: str) -> List[tuple]:
         """`attachment.hook_additional_context` carries what the recall hook attached; a `tool_use` of a
-        name ending in `recall` and its `tool_result` carry MCP recall; `Read` carries the opened file."""
+        `recall` carries ranking requests; all other Brain tools carry context references.
+        Their `tool_result` responses are matched by ID; `Read` carries the opened file."""
         if '"hook_additional_context"' not in line and '"tool_use"' not in line and '"tool_result"' not in line:
             return []
         try:
@@ -375,6 +383,9 @@ class ClaudeCode(Host):
                     out.append(("read_call", x.get("id") or "", (x.get("input") or {}).get("file_path") or ""))
                 elif name == "recall" or name.endswith("__recall"):
                     out.append(("recall_call", x.get("id") or "", x.get("input") or {}))
+                elif name.rsplit("__", 1)[-1] in BRAIN_TOOLS or name.startswith("mcp__brain__"):
+                    tool = name.rsplit("__", 1)[-1]
+                    out.append(("context_call", x.get("id") or "", x.get("input") or {}, tool in BRAIN_TOOLS))
             elif x.get("type") == "tool_result":
                 c = x.get("content")
                 text = c if isinstance(c, str) else " ".join(

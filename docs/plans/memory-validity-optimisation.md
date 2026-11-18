@@ -452,3 +452,28 @@ text direct, related and hook results. No original memory file is renamed or cha
 Exposure lookup failures before persistence now retain the transcript cursor, just
 like exposure write failures. The existing retry check confirms no subsequent read
 is recorded until lookup succeeds, then confirms it remains exposed after settlement.
+
+
+### All Brain response exposure (2.7.25)
+
+Memory history, identity review, review queues, neighbours, activity analysis and
+health suggestions can disclose a document before it is opened, independently of
+recall. The host adapter now classifies every public Brain tool. Context calls keep
+their own bounded pending IDs and never replace the ranking query. Literal names,
+paths and document IDs in arguments or nested structured results are persisted as
+exposure. Explicitly requested memories are conservatively excluded even if the
+request later fails. Pending responses survive transcript reloads; lookup/persistence
+failures retain the cursor for retry. A mixed pending-call overflow remains diagnostic.
+
+Unclassified future Brain tools and non-structured context responses (including the
+text timeline) mark the rest of that session as having unknown exposure history.
+This reduces learning samples but cannot silently certify an unparsed response.
+Capability metadata without document references still permits independent evidence.
+A catalog check prevents a new public tool from being added without classification.
+Collector 12 excludes the affected collector 11 observations without deleting them.
+
+Actual server responses from memory_history, review_identity, memory_review, neighbours,
+timeline, brain_analyse, brain_status and brain_suggest pass twelve-session policy
+checks, immediately and after ten turns. An unseen independent session remains a
+positive control. The prior collector falsely certifies the history response.
+These are eligibility checks with synthetic ranking costs, not measured user uplift.
