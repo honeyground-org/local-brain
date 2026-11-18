@@ -294,6 +294,7 @@ def verify_history_recovery():
     good=dict(at='2000-01-01T12:00:00',axis_version=1,pipeline='word',total=42.5,axes=dict(precision=None,recall=37.5),raw=dict(precision=None))
     bad=[{},dict(at=good['at']),dict(good,total=float('nan')),dict(good,total=float('inf')),b'{"at":',b'\xff',b'['*2000,[],None,'text',1,dict(good,axes=[]),dict(good,raw=[]),dict(good,at='invalid'),dict(good,total=True),dict(good,total=10**1000)]
     bad += [dict(good,axes=dict(precision=v)) for v in ('N/A',True,[],{},float('nan'),float('inf'),-float('inf'))]
+    bad += [dict(good,**{field:value}) for field in ('total','axes') for value in ((-5,105) if field=='total' else (dict(precision=-5),dict(precision=105)))]
     with tempfile.TemporaryDirectory() as td,patch.object(scorecard,'_store_home',return_value=td),patch.object(scorecard,'collect',side_effect=AssertionError('fresh measurement')),patch.object(scorecard,'bench',side_effect=AssertionError('fresh benchmark')):
         path=Path(td)/'scorecard.jsonl'
         for i,value in enumerate(bad):
@@ -303,6 +304,11 @@ def verify_history_recovery():
                 before='\n'.join(db.iterdump());original=path.read_bytes()
                 p=dashboard.payload(db);page=dashview.render(p)
                 check('history tolerates malformed row '+str((i,bool(prefix))),p['performance']==(good if prefix else None) and 'kept_memory' in page and before=='\n'.join(db.iterdump()) and original==path.read_bytes())
+        for value in (0,100,None):
+            boundary=dict(good,total=value,axes=dict(precision=value))
+            path.write_text(json.dumps(boundary),encoding='utf-8')
+            p=dashboard.payload(db)
+            check('score boundaries and unmeasured remain valid '+str(value),p['performance']==boundary and 'kept_memory' in dashview.render(p))
         newer=dict(good,at='2001-01-01T12:00:00',total=55.5)
         path.write_bytes(json.dumps(good).encode()+b'\n{bad\n'+json.dumps(newer).encode()+b'\n[1]')
         check('history limit applies after filtering invalid records',scorecard.history(limit=1)==[newer] and scorecard.history(limit=2)==[good,newer] and scorecard.history(limit=0)==[])

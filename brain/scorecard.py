@@ -219,7 +219,10 @@ def valid_history_record(row) -> bool:
             return False
         values.extend(axes.values())
     try:
-        return all(value is None or (type(value) in (int, float) and math.isfinite(value)) for value in values)
+        if not all(value is None or (type(value) in (int, float) and math.isfinite(value)) for value in values):
+            return False
+        scores = [row.get("total")] + list(row["axes"].values())
+        return all(value is None or 0 <= value <= 100 for value in scores)
     except OverflowError:
         return False
 
