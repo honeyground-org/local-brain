@@ -547,6 +547,26 @@ def identity_checks(db):
         unmarked_path=os.path.join(_MEM,unmarked['name']+'.md')
         with open(unmarked_path,'w',encoding='utf-8') as f:f.write(rc.render(unmarked['name'],rc.prepared(unmarked),''))
         check('older authored footer is retained when its payload receipt proves it','identity_quoted_source' in store.read_doc(unmarked_path,'memory')['links'])
+        middle = dict(unmarked, name='identity_middle_related', links=['identity_quoted_source'],
+                      body='Keep [[body_authored]].\n\nrelated: [[identity_quoted_source]] · [[identity_anchor]]\n\nA later paragraph.')
+        middle_path = os.path.join(_MEM, middle['name']+'.md')
+        for receipt in (False, True):
+            for footer in (False, True):
+                text = rc.render(middle['name'], rc.prepared(middle), '')
+                if not footer:
+                    text = text.rsplit('\n\nrelated: ', 1)[0]+'\n'
+                if not receipt:
+                    import re
+                    text = re.sub(r'(?m)^payload_sha:[^\n]*\n', '', text)
+                with open(middle_path, 'w', encoding='utf-8') as f: f.write(text)
+                check('middle related links survive receipt='+str(receipt)+' footer='+str(footer),
+                      set(store.read_doc(middle_path, 'memory')['links']) == {'body_authored','identity_quoted_source','identity_anchor'})
+                store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False)
+                mid = db.execute('SELECT id FROM docs WHERE path=?', (middle_path,)).fetchone()[0]
+                sid = db.execute('SELECT id FROM docs WHERE name=? AND project_id=?', ('identity_quoted_source', scope)).fetchone()[0]
+                check('reindex restores authored middle relation receipt='+str(receipt)+' footer='+str(footer),
+                      graphstore.LOCAL.linked(db, mid, sid))
+        os.remove(middle_path)
         bracket_path=os.path.join(_MEM,'plant[old].md')
         with open(bracket_path,'w',encoding='utf-8') as f:f.write('---\nname: plant[old]\nproject_id: '+scope+'\n---\nBracket source evidence.\n')
         bracket_foreign=os.path.join(duplicate,'bracket-foreign.md')
@@ -587,7 +607,7 @@ def identity_checks(db):
         db.commit()
         check('legacy graph fixture starts with contaminated edge',graphstore.LOCAL.linked(db,quoted_id,foreign_id))
         store.reindex(db,recalibrate=True,sync=False,heal=False,queue_embedding=False,refresh_history=False)
-        check('normal indexing repairs legacy provenance edges without file edits',store.get_meta(db,'graph_provenance_version')=='4' and not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
+        check('normal indexing repairs legacy provenance edges without file edits',store.get_meta(db,'graph_provenance_version')=='5' and not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
 
 
     finally:

@@ -1412,3 +1412,8 @@ index read-only, including the first call in a fresh MCP session. If no readable
 they return `index_pending` without creating a home or initialising schema. Run indexing
 explicitly. Malformed optional historical evidence or unrelated metadata does not disable
 filtering of a valid recorded automatic source footer; authored body links remain available.
+
+Legacy provenance filtering recognises only a complete terminal serializer list. A `related:`
+line followed by ordinary prose remains authored body content, even when a historical payload
+receipt cannot reconstruct it. A real generated footer can follow that body and is filtered
+separately. Normal indexing rebuilds derived graph version 5 to restore any omitted body links.

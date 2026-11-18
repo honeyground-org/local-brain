@@ -228,3 +228,9 @@ state. Historical graph parsing isolates malformed optional JSON and evidence ty
 known source provenance still gets filtered. Graph provenance version 4 repairs derived links
 without rewriting sources; generation 55 fingerprints the repair. Existing contract checks
 exercise first-call subprocesses and null/scalar/object evidence plus malformed optional JSON.
+
+2.7.4 limits the legacy mixed-footer fallback to a complete terminal sequence of serializer
+tokens. Body `related:` lines followed by prose retain their links, with or without a payload
+receipt and with or without a later real automatic footer. Existing checks verify both parser
+output and canonical graph restoration. Graph provenance version 5 rebuilds derived links;
+source bytes remain unchanged. Generation 56 fingerprints this parsing correction.
