@@ -313,3 +313,8 @@ Collector version 3 persists a session/turn edit veto independently of read rows
 The veto covers explicit memory saves as well as file edits, in either order. A prepare-only memory preview does not mark the turn edited; both preview/read and ordinary read controls can still certify.
 
 A resumed turn from an older collector is conservatively vetoed: edits before its saved transcript offset cannot be reconstructed from later reads alone. A new user turn starts under the current collector and is eligible normally. The seventh parser scenario covers this upgrade boundary.
+
+
+### Shell uncertainty and translated graph counts
+
+Collector version 4 treats shell-bearing turns as diagnostic only, before or after reads. Arbitrary shell programs can mutate documents indirectly; command-text heuristics cannot establish a read-only boundary. This intentionally reduces eligible evidence, including benign shell turns, rather than certifying contaminated labels. Dedicated Read-only and prepare-only controls remain eligible. Version 3 observations remain diagnostic but cannot certify generation 69. The inspector also interpolates the graph's `data-v` counts during initialisation and every language switch; the actual graph renderer and JavaScript are checked together across all six languages.

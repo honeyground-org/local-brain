@@ -406,9 +406,16 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
             if base and base not in tail["files"]:
                 tail["files"] = (tail["files"] + [base])[-LIST_CAP:]
             continue
-        if kind == "shell" and _COMMIT_RE.search(str(arg or "")):
-            tail["commits"] += 1
-            tail["since"] = tail["since"] or int(time.time())
+        if kind == "shell":
+            # Arbitrary shell programs can write indirectly. Without a verified
+            # read-only boundary, these turns are diagnostic, not positive labels.
+            try:
+                personal.edited(_db(), rec.get("session_id", ""), rec.get("use", {}).get("turn", 0))
+            except Exception:
+                pass
+            if _COMMIT_RE.search(str(arg or "")):
+                tail["commits"] += 1
+                tail["since"] = tail["since"] or int(time.time())
 
 
 # ---- verdict -----------------------------------------------------------------
