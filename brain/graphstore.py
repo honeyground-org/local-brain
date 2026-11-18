@@ -1,7 +1,8 @@
 """Graph stores — ★where traversal of the links between notes runs★ (§stores for the shape and the rules).
 
 The graph is ★resolved edges between documents★: a link written in a note (`[[name]]`, a path) is
-resolved through `name_map` (names, aliases, declarations) into `(source doc id, target doc id)`.
+resolved through `name_map` for names/aliases/declarations, or directly by exact path, into
+`(source doc id, target doc id)`.
 Resolution stays local — it is about your files and their names. What a graph store holds and answers
 is the resolved structure, through five questions every backend answers identically:
 
@@ -11,7 +12,7 @@ is the resolved structure, through five questions every backend answers identica
   targets(db)          every document something links to       (orphans = memories outside this set)
   edges(db)            every resolved edge                      (the graph view)
 
-  sqlite   the local `links` table joined through `name_map` — the default, and the canonical copy
+  sqlite   named links through `name_map` plus exact `path_links` — the default canonical copy
   others   one file each in `brain/backends/` (§stores "One file per backend"); a Cypher database
            needs only its connection (§backends._cypher.CypherGraph)
 
