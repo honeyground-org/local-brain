@@ -133,6 +133,11 @@ def verify_resolved_vector(real_semantic=False):
             assert bool(current)==(3 in ids), ('serving version mismatch',case,real_semantic,personal.state(db),served)
             if current:
                 assert current[0]['cosine']==-1.0, 'serving used the predecessor vector '+case
+            if real_semantic and case=='old_only':
+                db.execute('DELETE FROM vectors WHERE doc_id=1')
+                db.commit()
+                assert vectors.search(db,'retired only',k=8)==[], 'all-retired candidates must be empty'
+                assert search.meaning(db,'retired only',8)==([],''), 'empty current pool is not a backend failure'
         db.close()
     print('PASS: old-only/current-only/both vectors bind to the resolved revision in measurement and serving')
 
