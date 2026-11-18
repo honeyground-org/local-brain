@@ -216,6 +216,11 @@ def apply(db, query, rows, k, terms=()):
     if not certified(db, s):
         _save(db, s, "baseline", "support_invalidated", _latest(db))
         return rows
+    from brain import vectors
+    # Certification uses automatic semantic retrieval with a cached query vector.
+    # A cold lexical-only request is a different route; retain its baseline.
+    if vectors._qcache_get(db, query) is None:
+        return rows
     t = time.monotonic()
     try:
         result = candidates(db, query, rows, arm, k, terms=terms)
@@ -276,9 +281,11 @@ def update(db, mode="query"):
         terms = json.loads(ev["terms"] or "[]")
         base = []
         args = {"query": ev["query"], "terms": terms, "k": 8}
-        # Missing query vectors must never trigger paid/background embedding.
+        # Never certify the automatic semantic route using a lexical-only substitute.
+        # Leave cold observations pending; ordinary recall may populate the cache later.
+        # Measurement itself must not request a new embedding.
         if vectors._qcache_get(db, ev["query"]) is None:
-            args["semantic_k"] = 0
+            continue
         server.call_tool(db, "recall", args, _measure=True, _capture=base)
         baseline_cost = time.monotonic() - t
         scores, costs = {}, {}

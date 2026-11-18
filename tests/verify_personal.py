@@ -13,7 +13,8 @@ sys.path.insert(0, str(ROOT))
 tmp = tempfile.TemporaryDirectory(prefix="brain-personal-")
 os.environ['BRAIN_HOME'] = tmp.name
 os.environ['BRAIN_CONFIG'] = str(Path(tmp.name) / 'config.json')
-from brain import personal, store
+from brain import personal, store, vectors
+from unittest.mock import patch
 
 def evidence(db, n, winner, start=0):
     personal.ensure(db)
@@ -25,7 +26,46 @@ def evidence(db, n, winner, start=0):
                        (personal.evidence_prefix()+str(i), 'session-'+str(i), 1, 'fixture', 'fixture', 'sha', 0, 1, json.dumps(scores),
                         json.dumps({a: .01 for a in personal.ARMS})))
 
+def verify_semantic_route():
+    import sqlite3
+    from brain import observe, search, server, recalljson
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    store._init(db)
+    base = [dict(name='route'+str(i), path='/route'+str(i)) for i in range(8)]
+    hit = base[3]
+    for row in base:
+        db.execute("INSERT INTO docs(name,path,source,sha,title,description,body) VALUES(?,?,?,?,?,?,?)",
+                   (row['name'],row['path'],'memory','sha','','','orchid' if row==hit else 'unrelated'))
+    with patch.object(observe, 'write'), patch.object(vectors, '_qcache_get', return_value=None) as cache, \
+         patch.object(server, '_words_unsure', return_value=True), \
+         patch.object(search, 'recall', return_value=base), \
+         patch.object(search, 'query_weights', return_value=[('orchid',1,['orchid'])]), \
+         patch.object(search, 'union', return_value=([hit]+[r for r in base if r!=hit], '')) as union, \
+         patch.object(search, 'meaning', return_value=([],'')), \
+         patch.object(server, '_note_recall'), \
+         patch.object(recalljson, 'response', return_value={}), \
+         patch.object(personal.time, 'monotonic', return_value=1):
+        for i in range(12):
+            personal.record(db,'orchid '+str(i),hit['path'],'route-session-'+str(i),1)
+        result = personal.update(db)
+        assert result['arm']=='baseline', 'cold observations certified a semantic policy'
+        assert db.execute('SELECT COUNT(*) FROM personal_events WHERE measured=0').fetchone()[0]==12
+        assert union.call_count==0, 'cold measurement requested semantic retrieval'
+        cache.return_value=[1.0]
+        with patch.object(server, 'call_tool', wraps=server.call_tool) as recall:
+            personal.update(db)
+        assert union.call_count==12, 'warm measurement did not use the automatic semantic route'
+        assert db.execute('SELECT COUNT(*) FROM personal_events WHERE measured=1').fetchone()[0]==12
+        assert all(c.args[2].get('semantic_k') is None for c in recall.call_args_list)
+        assert personal.state(db)['arm']=='baseline', 'a losing reranker was promoted'
+    db.close()
+    print('PASS: cold evidence stays pending; warm evidence uses the actual automatic semantic route')
+
+
 def main():
+    cache = patch.object(vectors, "_qcache_get", return_value=[1.0])
+    cache.start()
     db = store.connect()
     assert personal.state(db)['arm'] == 'baseline'
     assert personal.update(db)['decision'] == 'insufficient'
@@ -41,6 +81,8 @@ def main():
     os.environ['BRAIN_PERSONAL_MODE'] = 'observe'
     assert personal.apply(db, 'fixture', ['baseline'], 8) == ['baseline']
     del os.environ['BRAIN_PERSONAL_MODE']
+    with patch.object(vectors, '_qcache_get', return_value=None):
+        assert personal.apply(db, 'fixture', ['baseline'], 8) == ['baseline']
     assert personal.apply(db, 'fixture', ['baseline'], 8) == ['candidate']
     os.environ['BRAIN_PERSONAL_DISABLED'] = '1'
     assert personal.apply(db, 'fixture', ['baseline'], 8) == ['baseline']
@@ -94,6 +136,8 @@ def main():
                     {'k':4}, {'semantic_k':0}, {'semantic_k':20}, {'sources':['x']}):
         assert not personal.eligible(request), request
     other.close(); db.close()
+    cache.stop()
+    verify_semantic_route()
     print('PASS: weak evidence retained, independent holdout promoted, drift rolled back, users isolated')
 
 if __name__ == '__main__':

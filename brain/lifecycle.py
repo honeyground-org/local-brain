@@ -231,7 +231,8 @@ class Snapshot:
         pending = list(members)
         while pending:
             did = pending.pop()
-            for linked in self.prev.get(did, set()) | self.next.get(did, set()):
+            for linked in (self.prev.get(did, set()) | self.next.get(did, set())
+                           | set(self.fact_members(did))):
                 if linked not in members:
                     members.add(linked)
                     pending.append(linked)
