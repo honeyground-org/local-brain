@@ -80,7 +80,10 @@ The host discovers candidates with existing recall and reads full sources/histor
 
 `prepare_fact.identity_reference` requires a name, source SHA and explicit reason. A unique, fresh,
 tracked identity with valid metadata/links supplies topic/facet verbatim; contradictory identifiers
-are refused. The selection is recorded in existing lifecycle evidence, with a link to the anchor.
+are refused. The selection is recorded in lifecycle evidence and structured provenance.
+Old releases also appended bare-name source/anchor links; 2.7.0 excludes those generated footer
+entries from the derived graph without rewriting original files or history. New proposals do
+not append provenance links; separately authored body links remain explicit relationships.
 Server 2.5.1 also stores structured `identity_reference` frontmatter and revalidates its unique name,
 scope, source SHA, exact identifiers and revision links immediately before new writes. Absent-reference
 payloads retain their original retry hashes; identical successful retries skip the new-write guard.
@@ -190,3 +193,11 @@ navigation available offline. Unknown validity and unmeasured host benefit remai
 This UI release does not change retrieval ranking, calibration or claim a quality gain.
 Validation extends the existing dashboard check with unknown/current/superseded states,
 cross-scope isolation, missing measurements, escaping, read-only snapshots and output aliases.
+
+
+2.7.0 also refuses an occupied extraction destination during preparation and immediately
+before a new write, even when the file belongs to another scope or an expected SHA matches.
+Source aliases are rejected in both phases. Successful identical retries still return noop,
+and names in other scopes remain valid when their actual paths differ. Graph provenance
+version 2 triggers one normal full index refresh to remove legacy generated footer edges;
+no source bytes or historical evidence are changed.

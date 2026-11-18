@@ -436,7 +436,36 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
         # Structured provenance is quoted data, not user-authored graph edges.
         header = re.sub(r"(?m)^[ \t]*(?:extracted_from|identity_reference|lifecycle):[^\r\n]*(?:\r?\n|$)",
                         "", front.group(1))
-        graph_text = header + raw[front.end():]
+        graph_body = raw[front.end():]
+        # Old prepare_fact releases appended unqualified provenance to a related
+        # footer. Exclude only those generated footer entries from the derived
+        # graph; keep the source bytes, history, and body-authored links intact.
+        try:
+            extracted = json.loads(meta.get("extracted_from") or "null")
+            reference = json.loads(meta.get("identity_reference") or "null")
+            life = json.loads(meta.get("lifecycle") or "null")
+            if isinstance(extracted, dict) and isinstance(extracted.get("name"), str):
+                generated = {extracted["name"]}
+                if isinstance(reference, dict) and isinstance(reference.get("name"), str):
+                    generated.add(reference["name"])
+                if isinstance(life, dict):
+                    for evidence in life.get("evidence", []):
+                        if isinstance(evidence, str) and evidence.startswith("Identity selected: "):
+                            try:
+                                selected = json.loads(evidence[len("Identity selected: "):])
+                                if isinstance(selected, dict) and isinstance(selected.get("name"), str):
+                                    generated.add(selected["name"])
+                            except (ValueError, TypeError):
+                                pass
+                footer = re.search(r"\n\nrelated: (\[\[[^\r\n]+)\s*$", graph_body)
+                if footer:
+                    entries = footer.group(1).strip().split(" · ")
+                    if all(re.fullmatch(r"\[\[[^\[\]\r\n]+\]\]", entry) for entry in entries):
+                        kept = [entry for entry in entries if entry[2:-2] not in generated]
+                        graph_body = graph_body[:footer.start()] + ("\n\nrelated: " + " · ".join(kept) if kept else "")
+        except (ValueError, TypeError):
+            pass
+        graph_text = header + graph_body
     scan = _CODE_FENCE.sub(" ", graph_text)
     scan = _CODE_SPAN.sub(" ", scan)
     links = set()
@@ -1318,7 +1347,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     #    `brain-session` announces it at the next session start. The first human-run index (`brain index`,
     #    the MCP `reindex`, `install`) rebuilds — once.
     tok_stale = tokenizer_stale(db)
-    graph_stale = get_meta(db, "graph_provenance_version", "0") != "1"
+    graph_stale = get_meta(db, "graph_provenance_version", "0") != "2"
     if (tok_stale or graph_stale) and recalibrate:
         full = True
     # ★Sources carry different weights★ — give a memory a human curated by hand (a ⛔ rule) the
@@ -1439,7 +1468,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # so the next human-run index still rebuilds.
     if full or not existing:
         set_meta(db, "tokenizer", str(textindex.TOKENIZER_VERSION))
-        set_meta(db, "graph_provenance_version", "1")
+        set_meta(db, "graph_provenance_version", "2")
     stats = {"added": added, "updated": updated, "skipped": skipped,
              "removed": len(removed), "duplicates": dups,
              "seconds": round(time.time() - t0, 2)}
