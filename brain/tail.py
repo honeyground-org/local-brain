@@ -366,8 +366,9 @@ def _use(ev: tuple, rec: dict) -> None:
         if len(u["calls"]) + len(u.get("context_calls", [])) >= SHOWN_KEEP and ev[1] not in u["calls"]:
             rec["personal_history_unknown"] = True  # an outstanding response may be lost
         u["calls"] = (u["calls"] + [ev[1]])[-SHOWN_KEEP:]
-        if len(ev) > 2:
-            u["recall_args"] = ev[2]
+        from brain import recalljson
+        u["recall_args"] = ev[2] if len(ev) > 2 else {}
+        u["recall_rejected"] = bool(recalljson.validate(u["recall_args"]))
         return
     db = _db()
     if kind == "hook":
@@ -386,11 +387,15 @@ def _use(ev: tuple, rec: dict) -> None:
             _expose(rec, _context_names(db, response))
         u["context_calls"] = [call for call in u["context_calls"] if call != ev[1]]
     elif kind == "result" and ev[1] in u["calls"]:
+        if len(ev) > 3 and not ev[3]:
+            u["recall_rejected"] = True
         names = _names(db, ev[2], _RECALL_LINE)
         names += _names(db, ev[2], _RELATED_LINE)
         try:
             structured = json.loads(ev[2])
             if isinstance(structured, dict):
+                if structured.get("ok") is False:
+                    u["recall_rejected"] = True
                 all_rows = list(structured.get("results") or []) + list(structured.get("related") or [])
                 all_rows += (structured.get("meaning") or {}).get("rows") or []
                 names += [r["name"] for r in all_rows if isinstance(r, dict) and r.get("name")]
@@ -415,7 +420,7 @@ def _use(ev: tuple, rec: dict) -> None:
                               "turns_ago": u["turn"] - hit["turn"] if hit else None})
         from brain import personal
         request = u.get("recall_args") or {}
-        if personal.eligible(request):
+        if not u.get("recall_rejected") and personal.eligible(request):
             personal.record(db, request.get("query") or u.get("query", ""), doc["path"],
                             rec.get("session_id", ""), u["turn"], exposed=bool(hit) or bool(rec.get("personal_history_unknown")),
                             terms=request.get("terms") or [])
@@ -466,6 +471,7 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
         u["query"] = text[:USER_SAY_CHARS]
         u["collector_version"] = personal.OBSERVATION_VERSION
         u.pop("recall_args", None)
+        u.pop("recall_rejected", None)
         return
     u = rec.get("use")
     if u and u.get("collector_version") != personal.OBSERVATION_VERSION:
