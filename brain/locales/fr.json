@@ -863,5 +863,6 @@
  "dash.inspect.topic": "Sujet",
  "dash.inspect.facet": "Facette",
  "dash.inspect.no_history": "Aucune version liée enregistrée.",
- "dash.inspect.unscoped": "Sans périmètre"
+ "dash.inspect.unscoped": "Sans périmètre",
+ "cli.dashboard.index_unavailable": "Index absent, indisponible ou incompatible. Aucun index créé ni migré. Exécutez explicitement brain index, puis réessayez."
 }

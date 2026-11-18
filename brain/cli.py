@@ -543,6 +543,22 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "dashboard" and args.serve:
         ap.error("--serve requires --explore")
+    if args.cmd == "dashboard":
+        import sqlite3
+        from contextlib import closing
+        from brain import dashboard
+        try:
+            with closing(store.connect(readonly=True)) as db:
+                if store.get_meta(db, "schema_version") != store.SCHEMA_VERSION:
+                    print(i18n.t("cli.dashboard.index_unavailable"))
+                    return 2
+                path = dashboard.write(db, args.out, open_browser=not args.no_open,
+                                       classic=args.classic)
+                print(path)
+        except sqlite3.DatabaseError:
+            print(i18n.t("cli.dashboard.index_unavailable"))
+            return 2
+        return 0
     db = store.connect()
 
     if args.cmd == "index":
@@ -911,10 +927,6 @@ def main(argv=None) -> int:
                 for line in _wrap(v["why_metric"], 92):
                     print("      %s" % line)
         print("\n%s" % i18n.t("cli.status.json_footer"))
-    elif args.cmd == "dashboard":
-        from brain import dashboard
-        path = dashboard.write(db, args.out, open_browser=not args.no_open, classic=args.classic)
-        print(path)
     elif args.cmd == "eval-init":
         from brain import evalinit
         print(evalinit.render(evalinit.write(db, args.out, args.limit)))

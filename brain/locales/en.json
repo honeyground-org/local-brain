@@ -865,5 +865,6 @@
  "dash.inspect.topic": "Topic",
  "dash.inspect.facet": "Facet",
  "dash.inspect.no_history": "No linked versions recorded.",
- "dash.inspect.unscoped": "Unscoped"
+ "dash.inspect.unscoped": "Unscoped",
+ "cli.dashboard.index_unavailable": "The index is missing, unavailable or incompatible. No index was created or migrated. Run brain index explicitly, then retry."
 }

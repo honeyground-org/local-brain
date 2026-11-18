@@ -863,5 +863,6 @@
  "dash.inspect.topic": "Thema",
  "dash.inspect.facet": "Aspekt",
  "dash.inspect.no_history": "Keine verknüpften Versionen erfasst.",
- "dash.inspect.unscoped": "Ohne Bereich"
+ "dash.inspect.unscoped": "Ohne Bereich",
+ "cli.dashboard.index_unavailable": "Der Index fehlt, ist nicht verfügbar oder inkompatibel. Kein Index wurde erstellt oder migriert. Führen Sie brain index ausdrücklich aus und versuchen Sie es erneut."
 }

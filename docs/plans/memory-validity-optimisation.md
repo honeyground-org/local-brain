@@ -246,3 +246,7 @@ file reads. It preserves the original request payload hash, key and stored bytes
 previously saved CRLF records. Existing tests cover LF/CRLF/CR reviewed preparation, unchanged
 new/noop retries, byte/receipt preservation, real-edit refusal and ordinary saves. Generation 57
 tracks the receipt-module repair; graph provenance remains version 5.
+
+### Read-only dashboard entry point
+
+The default dashboard CLI now opens the existing index read-only, before rendering. Missing, unavailable or incompatible schema versions return an actionable message without initialisation or migration. The actual CLI is checked against absent, old-schema and current indexes; this covers the connection boundary that renderer-only tests missed. This does not measure retrieval-quality improvements.
