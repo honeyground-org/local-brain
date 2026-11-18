@@ -83,6 +83,10 @@ elif shape == "lock":
 elif shape == "normal":
     hook.fallback = lambda db, prompt, **k: []
 sys.stdin = io.StringIO(json.dumps({"prompt": "a prompt long enough to pass the length gate"}))
+# Model startup/import scheduling outside main's clock. The host's five-second
+# wall still includes this delay; widening the assertion would hide the failure.
+if shape == "lock":
+    time.sleep(0.5)
 try:
     sys.exit(hook.main())
 except SystemExit:

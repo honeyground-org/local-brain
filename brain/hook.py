@@ -66,7 +66,9 @@ EXCERPT_CHARS = 200
 HOOK_TIMEOUT_SEC = 5
 # The watchdog fires this long before the wall. Measured 2026-09-29: spawn → `main()` costs 31ms
 # (median, max 35ms of 20 runs), and writing the answer is a single write. 0.5s is ten times that.
-WATCHDOG_MARGIN_SEC = 0.5
+# Reserve startup and output time inside the unchanged host wall. macOS CI
+# observed 4.566s in main but 5.03s for the process with the former 0.5s reserve.
+WATCHDOG_MARGIN_SEC = 1.0
 
 
 

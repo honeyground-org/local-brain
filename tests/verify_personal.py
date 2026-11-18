@@ -271,6 +271,12 @@ def verify_support_and_cost():
 
 
 def main():
+    # These policy/support fixtures supply synthetic 10ms scores, so validation
+    # time must also be synthetic. Wall-clock cost boundaries are checked below.
+    import itertools
+    ticks = itertools.count(0, 0.000001)
+    clock = patch.object(personal.time, 'monotonic', side_effect=lambda:next(ticks))
+    clock.start()
     cache = patch.object(vectors, "_qcache_get", return_value=[1.0])
     cache.start()
     db = store.connect()
@@ -343,6 +349,7 @@ def main():
                     {'k':4}, {'semantic_k':0}, {'semantic_k':20}, {'sources':['x']}):
         assert not personal.eligible(request), request
     other.close(); db.close()
+    clock.stop()
     cache.stop()
     verify_support_and_cost()
     verify_retired_budget()
