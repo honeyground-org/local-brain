@@ -243,9 +243,9 @@ def scan(transcript: str, rec: dict) -> dict:
 # it says at which rank the needed memory sat, or that brain never showed it at all (a miss nobody saw).
 # ⛔ Recorded, not acted on: `usage.opens` grows, the document's weight does not (`health.feedback("open")`
 #    would move the ranking — unmeasured); the per-request record (§observe "use") holds no name.
-_RECALL_LINE = re.compile(r"^\s*(\d+)\.\s+(.+?)\s+\[")
-_HOOK_LINE = re.compile(r"^\s*[·•]\s+(.+?)\s+\[")
-_RELATED_LINE = re.compile(r"^\s*[·•]\s+(.+?)\s+←\s+")
+_RECALL_LINE = re.compile(r"^\s*\d+\.\s+(.+)$")
+_HOOK_LINE = re.compile(r"^\s*[·•]\s+(.+)$")
+_RELATED_LINE = re.compile(r"^\s*[·•]\s+(?P<related>.+)$")
 SHOWN_KEEP = 8          # bounded diagnostic ranks; independent evidence uses durable session exposure
 _DB: list = []          # one connection for a whole scan, opened only when brain's events appear in it
 
@@ -271,9 +271,15 @@ def _names(db, text: str, pattern) -> list:
         m = pattern.match(line)
         if not m:
             continue
-        n = m.groups()[-1]
-        if n not in out and db.execute("SELECT 1 FROM docs WHERE name=?", (n,)).fetchone():
-            out.append(n)
+        # Display separators are legal inside a document name. Check every boundary
+        # against the index rather than truncating at the first one. If the text is
+        # ambiguous, conservatively exclude every matching document from learning.
+        content = m.group(1)
+        separator = r"\s+←\s+" if pattern is _RELATED_LINE else r"\s+\["
+        for boundary in re.finditer(separator, content):
+            n = content[:boundary.start()]
+            if n not in out and db.execute("SELECT 1 FROM docs WHERE name=?", (n,)).fetchone():
+                out.append(n)
     return out
 
 
@@ -327,8 +333,7 @@ def _use(ev: tuple, rec: dict) -> None:
             _expose(rec, names)
             u["shown"] = (u["shown"] + [{"via": "hook", "names": names, "turn": u["turn"]}])[-SHOWN_KEEP:]
     elif kind == "result" and ev[1] in u["calls"]:
-        names = [n for _rank, n in sorted((int(m.group(1)), m.group(2)) for m in
-                                          (_RECALL_LINE.match(x) for x in (ev[2] or "").splitlines()) if m)]
+        names = _names(db, ev[2], _RECALL_LINE)
         names += _names(db, ev[2], _RELATED_LINE)
         try:
             structured = json.loads(ev[2])

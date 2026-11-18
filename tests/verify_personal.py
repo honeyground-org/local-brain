@@ -128,7 +128,7 @@ def verify_turn_edit_order():
             assert result['arm']==('baseline' if is_edited else 'fusion'), (order,result)
             if not is_edited:
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v7:' || substr(identity,4)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v8:' || substr(identity,4)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -136,7 +136,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v7 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v8 support rejected')
 
 
 def verify_scoped_meaning():
@@ -263,7 +263,7 @@ def verify_retired_budget():
     print('PASS: 41 SHA-pinned legacy predecessors cannot exhaust k=8; absent current vector stays empty')
 
 
-def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','meaning','hook_direct','hook_related','hook_meaning'), delays=(0,10)):
+def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','meaning','hook_direct','hook_related','hook_meaning'), delays=(0,10), name='known note'):
     import sqlite3
     from brain import hosts, observe, server, tail, recalljson, hook, i18n
     hosts.pin('claude-code')
@@ -271,8 +271,8 @@ def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','m
       for lane in lanes:
        for delay in delays:
         db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
-        db.execute("INSERT INTO docs(path,name,source,sha,body) VALUES('/shown-note','known note','memory','sha','orchid')");db.commit()
-        row=dict(name='known note',path='/shown-note',source='memory',kind='reference',description='fixture',title='fixture',
+        db.execute("INSERT INTO docs(path,name,source,sha,body) VALUES('/shown-note',?,'memory','sha','orchid')",(name,));db.commit()
+        row=dict(name=name,path='/shown-note',source='memory',kind='reference',description='fixture',title='fixture',
                  age_days=0,stale=False,why='fixture',excerpt='orchid',related=lane in ('related','hook_related'),via_vector=lane=='hook_meaning',cosine=.8,via_graph='seed',score=1)
         rows=[] if lane=='meaning' else [row];meaning=[row] if lane=='meaning' else []
         if fmt=='text':
@@ -296,7 +296,7 @@ def verify_exposure_parity(formats=('text','json'), lanes=('direct','related','m
                     if lane.startswith('hook_'):
                         for language in i18n.LANGS:
                             with patch.object(i18n,'_lang',language):rendered=hook._format([row])
-                            assert tail._names(db,rendered,tail._HOOK_LINE)==['known note'],(lane,language)
+                            assert tail._names(db,rendered,tail._HOOK_LINE)==[name],(lane,language)
                         events.append(dict(type='attachment',attachment=dict(type='hook_additional_context',content=[rendered])))
                     else:events.extend([tool('recall','mcp__brain__recall',dict(query='orchid '+sid,format=fmt)),result('recall',answer)])
                     for j in range(delay):
@@ -554,7 +554,8 @@ def main():
     other.close(); db.close()
     clock.stop()
     cache.stop()
-    verify_exposure_parity()
+    for name in ('known note', 'orchid [release]', 'orchid ← release', 'orchid [release] ← next [version]'):
+        verify_exposure_parity(name=name)
     verify_unsettled_evidence()
     verify_disputed_support()
     verify_support_and_cost()
