@@ -508,8 +508,9 @@ def identity_checks(db):
     with open(os.environ['BRAIN_CONFIG'],'w',encoding='utf-8') as f:json.dump(changed_config,f)
     try:
         store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
-        scoped=prep(name='identity_scoped_reference')['save_arguments']
-        check('identity provenance is not an ambiguous graph name',scoped['identity_reference']==ref and scoped['links']==[])
+        scoped_ref=dict(ref,reason='Reviewed same fact as [[identity_anchor]].')
+        scoped=call('prepare_fact',**dict(args,name='identity_scoped_reference',identity_reference=scoped_ref))['save_arguments']
+        check('identity provenance is not an ambiguous graph name',scoped['identity_reference']==scoped_ref and scoped['links']==[])
         old_request=dict(scoped,links=[scoped['extracted_from']['name'],ref['name']])
         rejected=_j(db,**old_request)
         check('old unsaved generated links require preparation again',(rejected.get('error') or {}).get('code')=='identity_reprepare_required')
@@ -518,6 +519,20 @@ def identity_checks(db):
         proposal_id=db.execute('SELECT id FROM docs WHERE name=?',(scoped['name'],)).fetchone()[0]
         foreign_id=db.execute('SELECT id FROM docs WHERE path=?',(foreign_anchor,)).fetchone()[0]
         check('foreign homonym receives no generated identity edge',not graphstore.LOCAL.linked(db,proposal_id,foreign_id))
+        quote='Source evidence mentioning [[identity_anchor]].'
+        quoted_source=_j(db,name='identity_quoted_source',description='Quoted source',type='reference',body=quote,project_id=scope)
+        quoted=call('prepare_fact',source_name='identity_quoted_source',source_sha=quoted_source['sha'],quotes=[quote],name='identity_quoted_proposal',description='Quoted evidence',type='user',body='Independent proposed fact.',project_id=scope,identity_reference=scoped_ref)['save_arguments']
+        _j(db,**quoted)
+        quoted_id=db.execute('SELECT id FROM docs WHERE name=?',(quoted['name'],)).fetchone()[0]
+        check('source quotation metadata is not a graph edge',not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
+        db.execute('INSERT OR IGNORE INTO links(src_id,dst_name) VALUES(?,?)',(quoted_id,ref['name']))
+        store.set_meta(db,'graph_provenance_version','0')
+        db.commit()
+        check('legacy graph fixture starts with contaminated edge',graphstore.LOCAL.linked(db,quoted_id,foreign_id))
+        store.reindex(db,recalibrate=True,sync=False,heal=False,queue_embedding=False,refresh_history=False)
+        check('normal indexing repairs legacy provenance edges without file edits',store.get_meta(db,'graph_provenance_version')=='1' and not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
+
+
     finally:
         with open(os.environ['BRAIN_CONFIG'],'w',encoding='utf-8') as f:json.dump(config,f)
         store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
@@ -542,6 +557,21 @@ def identity_checks(db):
     finally:
         with open(os.environ['BRAIN_CONFIG'],'w',encoding='utf-8') as f:json.dump(config,f)
         store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+    alias_source=_j(db,name='CaseSource',description='Case source',type='reference',body='Preserve this original.',project_id=scope)
+    alias=call('prepare_fact',source_name='CaseSource',source_sha=alias_source['sha'],quotes=['Preserve this original.'],name='casesource',description='Proposed fact',type='user',body='Proposed.',project_id=scope,identity_reference=ref)['save_arguments']
+    original_case=_read('CaseSource')
+    alias_path=os.path.join(_MEM,'casesource.md')
+    made_alias=not os.path.exists(alias_path)
+    if made_alias:os.link(os.path.join(_MEM,'CaseSource.md'),alias_path)
+    from unittest.mock import patch
+    real_samefile=os.path.samefile
+    def alias_samefile(a,b):
+        if os.path.abspath(a).casefold()==os.path.abspath(b).casefold():return True
+        return real_samefile(a,b)
+    with patch.object(os.path,'samefile',side_effect=alias_samefile):
+        rejected=_j(db,**dict(alias,expected_sha=alias_source['sha']))
+    check('case alias cannot overwrite extraction source even with SHA',(rejected.get('error') or {}).get('code')=='source_target_alias' and _read('CaseSource')==original_case)
+    if made_alias:os.remove(alias_path)
     root=_j(db,name='identity_legacy_root',description='Single fact',type='user',body='Water on Friday.',project_id=scope)
     anchor_request=call('prepare_revision',predecessor='identity_legacy_root',name='identity_legacy_anchor',description='Tracked fact',type='user',body='Water on Friday.',project_id=scope,topic='legacy-identity',facet='water',status='proposed',valid_from='2026-01-01',change_reason='Explicit whole-record confirmation',evidence=['Fixture owner confirmed'],replace_whole_record=True)
     legacy_anchor=_j(db,**anchor_request['save_arguments'])

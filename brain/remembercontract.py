@@ -488,6 +488,16 @@ def check_extraction(db, args, target_path=None):
     if value is None:
         return None
     if target_path is not None:
+        origins = db.execute("SELECT path FROM docs WHERE name=? AND COALESCE(project_id, '')=?",
+                             (value["name"], args.get("project_id") or "")).fetchall()
+        for origin in origins:
+            try:
+                if os.path.samefile(target_path, origin["path"]):
+                    return error("source_target_alias", "Keep the source file; choose a distinct fact path")
+            except FileNotFoundError:
+                pass  # A genuinely new target has no inode yet.
+            except OSError:
+                return error("source_unavailable", "Cannot verify source and target file identity")
         rows = db.execute("SELECT path FROM docs WHERE name=? AND COALESCE(project_id, '')=?",
                           (args["name"], args.get("project_id") or "")).fetchall()
         if any(os.path.abspath(r["path"]) != os.path.abspath(target_path) for r in rows):
