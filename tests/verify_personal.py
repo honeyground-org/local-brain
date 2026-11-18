@@ -84,7 +84,7 @@ def verify_turn_edit_order():
     hosts.pin('claude-code')
     def tool(tid,name,args):
         return {'type':'assistant','message':{'content':[{'type':'tool_use','id':tid,'name':name,'input':args}]}}
-    for order in ('edit_read','read_edit','remember_read','read_remember','preview_read','read_only'):
+    for order in ('edit_read','read_edit','remember_read','read_remember','legacy_read','preview_read','read_only'):
         is_edited = order not in ('read_only','preview_read')
         path=Path(tmp.name)/(order+'.db')
         db=sqlite3.connect(str(path));db.row_factory=sqlite3.Row;store._init(db)
@@ -101,6 +101,8 @@ def verify_turn_edit_order():
                 rec={'session_id':order+str(i)}; trace=tail._blank_tail()
                 def feed(value):tail._apply(json.dumps(value),trace,rec)
                 feed({'type':'user','message':{'role':'user','content':'orchid '+order+str(i)}})
+                if order=='legacy_read':
+                    rec['use'].pop('collector_version')  # old saved offset, earlier edits unknown
                 edit=tool('edit','Edit',{'file_path':'/code.py','old_string':'old','new_string':'new'})
                 if 'remember' in order or order=='preview_read':
                     edit=tool('save','mcp__brain__remember',{'name':'note','body':'new','prepare_only':order=='preview_read'})
