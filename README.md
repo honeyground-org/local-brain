@@ -1363,3 +1363,4 @@ Prepared fact names are checked again against the refreshed index before saving 
 
 Reviewed identity provenance retains its exact scope and SHA. It does not generate a bare-name graph edge, which could resolve to a different project’s homonym. New reviewed proposals retain source provenance in `extracted_from` rather than generating an unqualified source edge. Existing saved memories are preserved.
 Unsaved requests prepared with old automatic provenance links must be prepared again; successful saved retries still return their original acknowledgement.
+Structured provenance fields are excluded from graph-link parsing. The next normal index pass rebuilds derived links once; latency-sensitive hook passes do not force this rebuild. Source-bound proposals also reject a target that aliases the source inode, including case-insensitive names, even with a matching overwrite SHA.

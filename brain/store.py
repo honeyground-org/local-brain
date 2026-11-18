@@ -430,7 +430,14 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
     # A `[[link]]` written in a document **as an example** was parsed as a link, producing a
     # broken link to a document called "link" that never existed. In Markdown, what is inside
     # backticks is code, not a link — the parser must follow that rule or diagnostics lie.
-    scan = _CODE_FENCE.sub(" ", raw)
+    graph_text = raw
+    front = _FRONT.match(raw)
+    if front:
+        # Structured provenance is quoted data, not user-authored graph edges.
+        header = re.sub(r"(?m)^[ \t]*(?:extracted_from|identity_reference|lifecycle):[^\r\n]*(?:\r?\n|$)",
+                        "", front.group(1))
+        graph_text = header + raw[front.end():]
+    scan = _CODE_FENCE.sub(" ", graph_text)
     scan = _CODE_SPAN.sub(" ", scan)
     links = set()
     for t in _WIKILINK.findall(scan):
@@ -1311,7 +1318,8 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     #    `brain-session` announces it at the next session start. The first human-run index (`brain index`,
     #    the MCP `reindex`, `install`) rebuilds — once.
     tok_stale = tokenizer_stale(db)
-    if tok_stale and recalibrate:
+    graph_stale = get_meta(db, "graph_provenance_version", "0") != "1"
+    if (tok_stale or graph_stale) and recalibrate:
         full = True
     # ★Sources carry different weights★ — give a memory a human curated by hand (a ⛔ rule) the
     # same weight as an automatically accumulated document, and whichever side has more volume
@@ -1431,6 +1439,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # so the next human-run index still rebuilds.
     if full or not existing:
         set_meta(db, "tokenizer", str(textindex.TOKENIZER_VERSION))
+        set_meta(db, "graph_provenance_version", "1")
     stats = {"added": added, "updated": updated, "skipped": skipped,
              "removed": len(removed), "duplicates": dups,
              "seconds": round(time.time() - t0, 2)}
