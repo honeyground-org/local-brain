@@ -494,19 +494,13 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
                     at = graph_body.rfind(marker)
                     if at >= 0 and not removed_footer:
                         tail = graph_body[at + len(marker):].rstrip()
-                        # Match the serializer's exact strings, not wiki syntax:
-                        # source filenames can contain brackets or the separator.
-                        for provenance_name in sorted(generated, key=len, reverse=True):
-                            token = "[[%s]]" % provenance_name
-                            if tail == token:
-                                tail = ""
-                            elif tail.startswith(token + " · "):
-                                tail = tail[len(token) + 3:]
-                            elif tail.endswith(" · " + token):
-                                tail = tail[:-len(token) - 3]
-                            else:
-                                tail = tail.replace(" · " + token + " · ", " · ")
-                        graph_body = graph_body[:at] + (marker + tail if tail else "")
+                        # Only a complete terminal serializer list is a footer.
+                        # A related: line followed by prose is authored body text.
+                        known = {"[[%s]]" % n for n in generated}
+                        atom = "(?:" + "|".join(re.escape(t) for t in sorted(known, key=len, reverse=True)) + r"|\[\[[^\[\]\r\n]+\]\])"
+                        if re.fullmatch(atom + "(?: · " + atom + ")*", tail):
+                            kept = [m.group() for m in re.finditer(atom, tail) if m.group() not in known]
+                            graph_body = graph_body[:at] + (marker + " · ".join(kept) if kept else "")
         except (ValueError, TypeError):
             pass
         graph_text = header + graph_body
@@ -1391,7 +1385,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     #    `brain-session` announces it at the next session start. The first human-run index (`brain index`,
     #    the MCP `reindex`, `install`) rebuilds — once.
     tok_stale = tokenizer_stale(db)
-    graph_stale = get_meta(db, "graph_provenance_version", "0") != "4"
+    graph_stale = get_meta(db, "graph_provenance_version", "0") != "5"
     if (tok_stale or graph_stale) and recalibrate:
         full = True
     # ★Sources carry different weights★ — give a memory a human curated by hand (a ⛔ rule) the
@@ -1512,7 +1506,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # so the next human-run index still rebuilds.
     if full or not existing:
         set_meta(db, "tokenizer", str(textindex.TOKENIZER_VERSION))
-        set_meta(db, "graph_provenance_version", "4")
+        set_meta(db, "graph_provenance_version", "5")
     stats = {"added": added, "updated": updated, "skipped": skipped,
              "removed": len(removed), "duplicates": dups,
              "seconds": round(time.time() - t0, 2)}

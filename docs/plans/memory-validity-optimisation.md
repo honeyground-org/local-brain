@@ -228,3 +228,15 @@ state. Historical graph parsing isolates malformed optional JSON and evidence ty
 known source provenance still gets filtered. Graph provenance version 4 repairs derived links
 without rewriting sources; generation 55 fingerprints the repair. Existing contract checks
 exercise first-call subprocesses and null/scalar/object evidence plus malformed optional JSON.
+
+2.7.4 limits the legacy mixed-footer fallback to a complete terminal sequence of serializer
+tokens. Body `related:` lines followed by prose retain their links, with or without a payload
+receipt and with or without a later real automatic footer. Existing checks verify both parser
+output and canonical graph restoration. Graph provenance version 5 rebuilds derived links;
+source bytes remain unchanged. Generation 56 fingerprints this parsing correction.
+
+The 2.7.4 CI run also exposed the session-check PID-file publication gap twice on Linux:
+a second starter could interpret the empty newly created file as a dead owner and unlink it.
+The checker now uses a nonblocking OS lock on a persistent inode, with automatic crash release.
+An existing session-events check reproduces the empty-PID interleaving and confirms exclusion
+and subsequent reuse; the worker lease and its retry budget are unchanged.
