@@ -72,14 +72,29 @@ def certified(db, s):
 def describe(db):
     """Read-only diagnostics; never expose queries or document paths."""
     modes = {}
+    counts = {"current_records": 0, "pending": 0, "measured": 0, "excluded": 0, "legacy_or_other_signature": 0}
+    try:
+        prefix = evidence_prefix()
+        for row in db.execute("SELECT identity, measured, edited, exposed FROM personal_events"):
+            if not row[0].startswith(prefix):
+                counts["legacy_or_other_signature"] += 1
+                continue
+            counts["current_records"] += 1
+            key = "excluded" if row[1] < 0 or row[2] or row[3] else ("measured" if row[1] == 1 else "pending")
+            counts[key] += 1
+    except sqlite3.Error:
+        pass
     for mode in ("query", "terms"):
         s = state(db, mode)
         valid = s["arm"] != "baseline" and certified(db, s)
         effective = s["arm"] if valid and serving_mode() == "auto" else "baseline"
         modes[mode] = {"selected": s["arm"], "effective": effective,
-                       "certified": bool(valid), "history": s.get("history", [])}
+                       "certified": bool(valid), "history": s.get("history", []),
+                       "reason": ("no_validated_winner" if s["arm"] == "baseline" else
+                                  "support_invalidated" if not valid else
+                                  "serving" if serving_mode() == "auto" else serving_mode())}
     return {"mode": serving_mode(), "observation_version": OBSERVATION_VERSION,
-            "contexts": modes, "eligibility": "current, unfiltered, k=8, automatic semantic width",
+            "contexts": modes, "observations": counts, "eligibility": "current, unfiltered, k=8, automatic semantic width",
             "observation_hosts": ["claude-code"], "native_host_outcome_benefit": "unmeasured"}
 
 
