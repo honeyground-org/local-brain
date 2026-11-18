@@ -403,3 +403,20 @@ These are collector and policy-mechanics checks, not native-host outcome measure
 Completed recall request IDs leave the pending set. If too many outstanding requests force
 an ID to be dropped, that session is marked as having unknown exposure history instead of
 letting an unmatched response become an independent reading label.
+
+
+### Display separators in memory names (2.7.22)
+
+A bracket or a left arrow is legal in a file name. Treating its first occurrence as
+the display separator missed exposure and could falsely certify a ranking policy.
+The collector now checks every possible separator boundary against indexed names.
+Ambiguous prefixes are conservatively all excluded; this may reduce learning samples
+but cannot turn a displayed document into an independent label. This applies to
+numbered recall, related bullets and six-language hook output. No network calls or
+new database schema are needed. Collector 9 retires potentially affected observations.
+
+The existing twelve-session ranking regression covers plain names, brackets, arrows
+and mixed repeated delimiters, in both formats and all lanes, immediately and after
+ten turns. Every exposed case retains baseline; a clean independent control promotes.
+The previous collector falsely promotes bracketed direct and arrow-containing related
+results. These checks establish evidence eligibility, not native-host quality uplift.
