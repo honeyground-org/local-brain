@@ -305,6 +305,10 @@ class ClaudeCode(Host):
             return ""
         if not isinstance(d, dict) or d.get("type") != "user":
             return ""
+        # Host-generated summaries, metadata and sidechain messages are not
+        # new human turns, even when their transport role is "user".
+        if any(d.get(flag) for flag in ("isCompactSummary", "isMeta", "isSidechain")):
+            return ""
         content = (d.get("message") or {}).get("content")
         text = content if isinstance(content, str) else " ".join(
             c.get("text", "") for c in content or []
