@@ -862,5 +862,6 @@
  "dash.inspect.kind": "Type",
  "dash.inspect.topic": "Sujet",
  "dash.inspect.facet": "Facette",
- "dash.inspect.no_history": "Aucune version liée enregistrée."
+ "dash.inspect.no_history": "Aucune version liée enregistrée.",
+ "dash.inspect.unscoped": "Sans périmètre"
 }

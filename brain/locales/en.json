@@ -864,5 +864,6 @@
  "dash.inspect.kind": "Kind",
  "dash.inspect.topic": "Topic",
  "dash.inspect.facet": "Facet",
- "dash.inspect.no_history": "No linked versions recorded."
+ "dash.inspect.no_history": "No linked versions recorded.",
+ "dash.inspect.unscoped": "Unscoped"
 }

@@ -862,5 +862,6 @@
  "dash.inspect.kind": "種類",
  "dash.inspect.topic": "主題",
  "dash.inspect.facet": "観点",
- "dash.inspect.no_history": "関連する版の記録がありません。"
+ "dash.inspect.no_history": "関連する版の記録がありません。",
+ "dash.inspect.unscoped": "範囲未指定"
 }

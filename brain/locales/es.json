@@ -862,5 +862,6 @@
  "dash.inspect.kind": "Tipo",
  "dash.inspect.topic": "Tema",
  "dash.inspect.facet": "Faceta",
- "dash.inspect.no_history": "No hay versiones vinculadas registradas."
+ "dash.inspect.no_history": "No hay versiones vinculadas registradas.",
+ "dash.inspect.unscoped": "Sin ámbito"
 }

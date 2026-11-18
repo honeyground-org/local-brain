@@ -862,5 +862,6 @@
  "dash.inspect.kind": "유형",
  "dash.inspect.topic": "주제",
  "dash.inspect.facet": "관점",
- "dash.inspect.no_history": "연결된 버전 기록이 없습니다."
+ "dash.inspect.no_history": "연결된 버전 기록이 없습니다.",
+ "dash.inspect.unscoped": "범위 미지정"
 }
