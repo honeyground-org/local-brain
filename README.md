@@ -394,7 +394,7 @@ All commands work from any directory once installed (`brain <command>`).
 | Command | What it does |
 |---|---|
 | `brain status` | Health check — what to fix, separated from what to merely watch |
-| `brain dashboard` | Status + performance comparison as a local HTML page, opened in your browser |
+| `brain dashboard` | Read-only local workspace: recorded health, memory validity/history, performance evidence and relationships |
 | `brain dashboard --explore` | Offline 3D topic planets and memory bubbles |
 | `brain dashboard --explore --serve` | Local Observatory with refresh and saved analysis feedback |
 | `brain recall <text> -t <synonyms>` | Recall, right in the terminal (pass synonyms with `-t`, see below) |
@@ -538,6 +538,27 @@ file modification dates remain separate. The screen describes recorded activity,
 account of someone's life. Static HTML contains private memory summaries: keep it local.
 
 ## Languages
+
+### Inspect your local Brain
+
+`brain dashboard` opens an offline snapshot with four views: overview, memory library,
+performance and connections. The overview shows the configured storage roles, recorded sync
+state, embedding coverage and selected versus effective ranking policies. It does not probe
+live services or start a benchmark/model call. Rebuild the snapshot to refresh it.
+
+Search memory names, descriptions and the first 800 body characters; filter by source, scope
+and validity. The detail panel preserves the original text, source link, evidence date,
+topic/facet, validity dates and related versions in the same recorded identity and scope.
+Untracked validity remains unknown rather than being labelled current or wrong. Related
+versions are not an inferred chronological timeline; inspect their dates and metadata.
+
+Performance values retain their measurement date and pipeline. Historical component scores
+are not proof of current quality, improvement, or benefit over native Claude/Codex; the latter
+remains unmeasured in this view until paired host-study evidence is connected. The page ships
+all six UI languages, light/dark themes, keyboard controls and reduced motion without a CDN.
+It contains private memory previews and local paths: keep the generated HTML private.
+`--classic` and `--explore` remain available. `--out` accepts an HTML destination and refuses
+indexed sources, database paths and existing aliases; output is published atomically.
 
 ### Interface (dashboard, CLI status output)
 
@@ -1175,7 +1196,7 @@ normalisation. At most ten quotes of 1,000 characters each are accepted.
 
 Preparation writes nothing, performs no indexing or model calls, and returns `save_arguments` for
 `remember`. Review the claim and quotations before saving. The request records a `proposed` lifecycle,
-links the source without superseding it, and includes `extracted_from: {name,sha,spans}`; span offsets
+preserves the source without superseding it, and records `extracted_from: {name,sha,spans}`; span offsets
 count Unicode code points in that trimmed body. Provenance is retained in frontmatter and quoted
 lifecycle evidence. Source scope, SHA and quote spans are checked again before a new save. A changed
 source returns `source_changed`; a changed related fact snapshot returns `fact_changed`. Reread and
@@ -1364,3 +1385,10 @@ Prepared fact names are checked again against the refreshed index before saving 
 Reviewed identity provenance retains its exact scope and SHA. It does not generate a bare-name graph edge, which could resolve to a different project’s homonym. New reviewed proposals retain source provenance in `extracted_from` rather than generating an unqualified source edge. Existing saved memories are preserved.
 Unsaved requests prepared with old automatic provenance links must be prepared again; successful saved retries still return their original acknowledgement.
 Structured provenance fields are excluded from graph-link parsing. The next normal index pass rebuilds derived links once; latency-sensitive hook passes do not force this rebuild. Source-bound proposals also reject a target that aliases the source inode, including case-insensitive names, even with a matching overwrite SHA.
+
+
+Extraction proposals require a new physical destination: preparation and save reject existing
+files, including cross-project occupants and source aliases, even with an expected SHA.
+Identical completed retries remain noops. Indexing also excludes legacy automatically appended
+source/identity entries in extraction `related:` footers from the derived graph. Source files,
+evidence and history remain byte-preserved; separately authored body links remain relationships.

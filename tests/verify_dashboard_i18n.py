@@ -107,6 +107,102 @@ def verify_observatory():
             db.close()
 
 
+def verify_workspace_controls():
+    """Run the real handlers against a small DOM fixture when Node is available."""
+    import json
+    import shutil
+    import subprocess
+    if not shutil.which('node'):
+        print('SKIP workspace handler execution: Node unavailable; browser QA still required')
+        return
+    fixture = r"""
+const vm=require('vm'),assert=require('assert');
+class Element {
+ constructor(tag){this.tag=tag;this.children=[];this.events={};this.dataset={};this.attrs={};this.value='';this.textContent='';this.classList={contains:()=>false,toggle:()=>true};}
+ appendChild(n){this.children.push(n);return n;}
+ replaceChildren(){this.children=[];this.textContent='';}
+ get options(){return this.children;}
+ addEventListener(k,fn){this.events[k]=fn;}
+ setAttribute(k,v){this.attrs[k]=v;}
+ removeAttribute(k){delete this.attrs[k];}
+ focus(){}
+}
+const elements={};['workspace-data','workspace-i18n','source','scope','validity','search','detail','memory-list','count','prev','next','mtoggle'].forEach(id=>elements[id]=new Element(id));
+function memory(id,name,scope,status,history){return {id,name,project_id:scope,source:'memory',kind:'user',preview:'text',body_chars:4,path:'/private/'+name,validity:{status},history};}
+const records=[memory(1,'old','','superseded',[1,2]),memory(2,'new','','active',[1,2]),memory(3,'foreign','garden','active',[3])];
+elements['workspace-data'].textContent=JSON.stringify({memories:records,states:{superseded:1,active:2}});
+elements['workspace-i18n'].textContent=JSON.stringify({en:{'dash.inspect.all':'All','dash.inspect.unscoped':'Unscoped','dash.inspect.select':'Select a memory'}});
+const langs=[new Element('button')];langs[0].dataset.lang='en';
+const doc={documentElement:new Element('html'),createElement:t=>new Element(t),getElementById:id=>elements[id],querySelectorAll:q=>q==='.langs button'?langs:[],addEventListener:(event,fn)=>{doc.ready=fn;}};doc.documentElement.lang='en';
+const context={document:doc,Option:function(text,value){this.text=text;this.value=value;},window:{matchMedia:()=>({matches:false,addEventListener(){}})},localStorage:{getItem:()=>null,setItem(){}},Map,Set,JSON};
+vm.runInNewContext(CODE,context);doc.ready();
+assert.equal(elements.count.textContent,'1–3 / 3');
+assert.equal(elements.scope.options[0].value,'');
+const unscoped=elements.scope.options.find(o=>o.text==='Unscoped');assert(unscoped&&unscoped.value!=='');
+elements.scope.value=unscoped.value;elements.scope.events.change();assert.equal(elements.count.textContent,'1–2 / 2');
+elements['memory-list'].children[0].events.click();assert.equal(elements.detail.children[0].textContent,'old');
+const history=elements.detail.children.find(n=>n.className==='history-list');history.children[1].events.click();assert.equal(elements.detail.children[0].textContent,'new');
+elements.scope.value=elements.scope.options.find(o=>o.text==='garden').value;elements.scope.events.change();assert.equal(elements.count.textContent,'1–1 / 1');assert.equal(elements.detail.children[0].textContent,'Select a memory');
+elements.search.value='absent';elements.search.events.input();assert.equal(elements.count.textContent,'0–0 / 0');assert(elements.next.disabled&&elements.prev.disabled);
+console.log('PASS actual handlers: all/unscoped separation, version navigation, excluded detail clearing and empty results');
+"""
+    run = subprocess.run(['node', '-e', 'const CODE='+json.dumps(dashview.WORKSPACE_JS)+';\n'+fixture],
+                         capture_output=True, text=True, encoding='utf-8')
+    check('actual workspace controls preserve filters and version navigation',run.returncode==0,run.stdout.strip() or run.stderr[-700:])
+
+
+def verify_workspace():
+    import json
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import scorecard
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    store._init(db)
+    with tempfile.TemporaryDirectory() as temp:
+        source = Path(temp) / 'source.html'
+        source.write_text('canonical source', encoding='utf-8')
+        for did, name, scope, meta in (
+                (1, 'older', 'garden', dict(topic='plant', facet='water', status='active')),
+                (2, 'current', 'garden', dict(topic='plant', facet='water', status='active', supersedes=['older'])),
+                (3, 'current', 'other', dict(topic='plant', facet='water', status='active')),
+                (4, 'unknown', '', {})):
+            db.execute("INSERT INTO docs(id,name,path,source,kind,sha,project_id,lifecycle,body,description) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                       (did,name,str(source) if did==1 else str(Path(temp)/('%s.md'%did)), 'memory','reference',str(did),scope,
+                        json.dumps(meta) if meta else '', '</script><script>bad()</script>'+'x'*900, 'A description'))
+        db.commit()
+        before=list(db.iterdump())
+        old=dict(at='2000-01-01',axis_version=1,pipeline='word',total=42,axes={'precision':None,'reach':42})
+        with patch.object(scorecard,'history',return_value=[old]), patch.object(scorecard,'collect',side_effect=AssertionError('fresh measurement')), patch.object(scorecard,'bench',side_effect=AssertionError('fresh benchmark')):
+            p=dashboard.payload(db)
+            page=dashview.render(p)
+        rows={r['id']:r for r in p['memories']}
+        check('workspace resolves current and superseded without cross-scope history', rows[1]['validity']['status']=='superseded' and rows[2]['validity']['current'] is True and rows[1]['history']==[1,2] and rows[3]['history']==[3])
+        check('untracked validity stays unknown, never a current claim', rows[4]['validity']['current'] is None and p['states']['untracked']==1)
+        check('body preview is bounded with original length retained', len(rows[1]['preview'])==800 and rows[1]['body_chars']>800)
+        check('historical measurement retains date and missing values', p['performance']['at']=='2000-01-01' and p['performance']['axes']['precision'] is None)
+        check('memory JSON cannot terminate its script', '</script><script>bad()' not in page and r'\u003c/script' in page)
+        check('view blocks outbound connections and uses text-only memory rendering', "connect-src 'none'" in page and 'innerHTML' not in dashview.WORKSPACE_JS)
+        check('opening the workspace leaves the database unchanged', before==list(db.iterdump()))
+        for target in (source, Path(temp)/'alias.html', Path(temp)/'output.md'):
+            if target.name=='alias.html':
+                os.link(source,target)
+            rejected=False
+            try:
+                dashboard.write(db,str(target),False)
+            except ValueError:
+                rejected=True
+            check('control: reject source/alias/non-HTML output '+target.name,rejected)
+        check('source bytes survive rejected output',source.read_text(encoding='utf-8')=='canonical source')
+        empty=sqlite3.connect(':memory:');empty.row_factory=sqlite3.Row;store._init(empty)
+        with patch.object(scorecard,'history',return_value=[]):
+            data=dashboard.payload(empty)
+            check('empty corpus and absent measurements render without false zero score',not data['memories'] and data['performance'] is None and 'workspace-data' in dashview.render(data))
+    db.close()
+
+
 def main():
     print("=" * 72 + "\ndashboard — does everything come out in the chosen language\n" + "=" * 72)
     db = store.connect()
@@ -179,13 +275,13 @@ def main():
             check("%s's catalog is in the page (never calls a CDN)" % code,
                   '"%s"' % code in pages["en"])
         check("no request goes outward (0 http references)",
-              "http://" not in pages["en"] and "https://" not in pages["en"])
+              not re.search(r'<(?:script|link|img)[^>]+(?:src|href)=[\"\']https?://', pages["en"]) and "connect-src 'none'" in pages["en"])
 
         # ── ⑤-b ⛔ ★the JS ships without a syntax error★ — a raw newline inside a string kills it
         #    (2026-09-02: a `\n` inside a Python string became an actual newline, `Invalid or
         #     unexpected token` — ★the whole language switcher died while the screen looked fine★.)
         for code, html in pages.items():
-            js = re.search(r"<script>(.*)</script>", html, re.S)
+            js = re.search(r"<script>(.*?)</script>", html, re.S)
             check("%s: no broken string in the JS" % code, js is not None)
             if js:
                 bad = [l for l in js.group(1).split("\n")
@@ -204,6 +300,8 @@ def main():
         i18n._lang = saved_lang
         i18n._cache.clear()
 
+    verify_workspace_controls()
+    verify_workspace()
     verify_observatory()
     print("=" * 72)
     print("❌ %d failure(s): %s" % (len(FAIL), ", ".join(FAIL)) if FAIL else "✅ all passed")

@@ -174,6 +174,10 @@ def prepare_revision(db, args: dict) -> dict:
     issue = lifecycle.check_write(db, save["name"], save, {})
     if issue:
         return error("invalid_argument", issue)
+    from brain.server import _memory_dir
+    bad = check_extraction(db, save, os.path.join(_memory_dir(), save["name"] + ".md"))
+    if bad:
+        return bad
     review = lifecycle.prepare(db, save["name"], save)
     if not review["source_matches_index"]:
         return dict(error("index_pending", "A fact source changed; refresh the index and prepare again"), retryable=True)
@@ -498,6 +502,10 @@ def check_extraction(db, args, target_path=None):
                 pass  # A genuinely new target has no inode yet.
             except OSError:
                 return error("source_unavailable", "Cannot verify source and target file identity")
+        # A proposal is a new file, never update authority over an occupied path.
+        # Identical saved retries are decided before this new-write guard.
+        if os.path.lexists(target_path):
+            return error("target_occupied", "Keep the existing file; choose a new fact path")
         rows = db.execute("SELECT path FROM docs WHERE name=? AND COALESCE(project_id, '')=?",
                           (args["name"], args.get("project_id") or "")).fetchall()
         if any(os.path.abspath(r["path"]) != os.path.abspath(target_path) for r in rows):
@@ -707,7 +715,7 @@ def _prepare_fact(db, args):
             return error("ambiguous_quote", "Include enough surrounding source text to identify one passage")
         spans.append(dict(start=start, end=start+len(quote), text=quote))
     save["extracted_from"] = dict(name=name, sha=sha, spans=spans)
-    save["links"] = [] if selected else [name]
+    save["links"] = []
     save["embed"] = False
     save["lifecycle"]["evidence"] = ["%s@%s [%s:%s]: %s" % (name, sha, s["start"], s["end"], s["text"]) for s in spans]
     if selected:
@@ -715,6 +723,10 @@ def _prepare_fact(db, args):
         # Keep the scope/SHA-qualified reference as provenance. A bare name graph
         # edge can resolve to homonyms in other projects and is not equivalent.
     bad = validate(save)
+    if bad:
+        return bad
+    from brain.server import _memory_dir
+    bad = check_extraction(db, save, os.path.join(_memory_dir(), save["name"] + ".md"))
     if bad:
         return bad
     review = lifecycle.prepare(db, save["name"], save)
