@@ -269,7 +269,7 @@ def verify_disputed_support():
         meta=dict(topic='plant',facet='water',status='active')
         db.execute('UPDATE docs SET lifecycle=? WHERE path=?',(json.dumps(meta),'fixture'));db.commit()
         # Lifecycle eligibility is independent of runner speed; cost gates have their own checks.
-        with patch.object(personal.time,'perf_counter',return_value=0.0), patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
+        with patch.object(personal.time,'monotonic',return_value=0.0), patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
             if preexisting:
                 assert personal.update(db)['arm']=='fusion'
                 assert personal.certified(db,personal.state(db))
@@ -298,7 +298,7 @@ def verify_support_and_cost():
     db.execute('UPDATE docs SET lifecycle=? WHERE path=?',
                (json.dumps(dict(topic='plant',facet='water',status='active')),'fixture'));db.commit()
     # Support revocation is a state check; the following cases measure cost explicitly.
-    with patch.object(personal.time,'perf_counter',return_value=0.0), patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
+    with patch.object(personal.time,'monotonic',return_value=0.0), patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
         assert personal.update(db)['arm']=='fusion'
         original=tuple(db.execute("SELECT id,sha,body,lifecycle FROM docs WHERE path='fixture'").fetchone())
         db.execute('INSERT INTO docs(path,name,source,sha,lifecycle) VALUES(?,?,?,?,?)',
