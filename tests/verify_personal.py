@@ -128,7 +128,7 @@ def verify_turn_edit_order():
             assert result['arm']==('baseline' if is_edited else 'fusion'), (order,result)
             if not is_edited:
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v5:' || substr(identity,4)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v6:' || substr(identity,4)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -136,7 +136,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v5 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v6 support rejected')
 
 
 def verify_scoped_meaning():
@@ -263,7 +263,7 @@ def verify_retired_budget():
     print('PASS: 41 SHA-pinned legacy predecessors cannot exhaust k=8; absent current vector stays empty')
 
 
-def verify_unsettled_evidence(cases=('unfinished','failed_veto')):
+def verify_unsettled_evidence(cases=('unfinished','failed_veto','compact_summary','meta','sidechain')):
     import sqlite3
     from brain import hosts, observe, server, tail
     hosts.pin('claude-code')
@@ -282,8 +282,13 @@ def verify_unsettled_evidence(cases=('unfinished','failed_veto')):
                 sid=case+str(i);path=Path(tmp.name)/(sid+'.jsonl')
                 events=[user('orchid '+sid),tool('read','Read',{'file_path':'/note'}),
                         dict(type='user',message=dict(content=[dict(type='tool_result',tool_use_id='read',content='orchid')]))]
-                if case=='failed_veto':
-                    if i==11:events.append(tool('shell','Bash',{'command':'python3 change.py'}))
+                if case!='unfinished':
+                    if i==11:
+                        if case!='failed_veto':
+                            synthetic=user('Host-generated continuation context')
+                            synthetic[dict(compact_summary='isCompactSummary',meta='isMeta',sidechain='isSidechain')[case]]=True
+                            events.append(synthetic)
+                        events.append(tool('shell','Bash',{'command':'python3 change.py'}))
                     events.append(user('next turn'))
                 path.write_bytes(('\r\n'.join(json.dumps(e) for e in events)+'\r\n').encode())
                 rec=dict(session_id=sid,offset=0,tail=tail._blank_tail(),saves=0)
@@ -306,8 +311,9 @@ def verify_unsettled_evidence(cases=('unfinished','failed_veto')):
                 tail.scan(str(path),json.loads(json.dumps(rec)))
             result=personal.update(db)
             assert result['arm']==('fusion' if case=='unfinished' else 'baseline'),(case,result)
-            if case=='failed_veto':
+            if case!='unfinished':
                 assert db.execute('SELECT edited,settled FROM personal_events WHERE session=?',(case+'11',)).fetchone()[:]==(1,1)
+                assert records[-1][1]['use']['turn']==(1 if case=='failed_veto' else 2), 'synthetic input advanced the turn'
             else:assert personal.certified(db,personal.state(db))
         db.close()
     print('PASS: EOF is not turn completion; failed-veto retry cannot train or certify; next user confirms clean turns')

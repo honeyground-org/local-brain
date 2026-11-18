@@ -364,3 +364,17 @@ a read and before a shell exclusion, and invokes training and serving before ret
 retain the baseline; recovery marks the edited turn excluded. A separate clean-turn control
 stays pending at EOF and becomes eligible only after a subsequent user message. Explicit
 premeasured support cannot bypass the settled flag. Native-host outcome benefit is unmeasured.
+
+
+### Native versus synthetic user messages (2.7.20)
+
+Claude Code can transport automatic compact summaries and metadata with a `user` role.
+The host adapter excludes `isCompactSummary`, `isMeta` and `isSidechain` records from human
+turn boundaries. Their text cannot settle the preceding reading evidence or increment its
+turn number. The decision uses protocol flags, not language-specific summary wording.
+Collector 7 invalidates earlier certificates while retaining diagnostic observations.
+
+The twelve-transcript regression inserts each synthetic record between a read and a shell
+call, followed by a real user message. The read and shell remain in the same turn; the read
+is excluded from learning, certification and serving. Real user messages still confirm clean
+turns. Existing unfinished-EOF and failed-veto controls remain in the same regression.
