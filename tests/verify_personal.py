@@ -73,6 +73,22 @@ def main():
     personal.edited(other, 'session-20', 1)
     assert personal.apply(other, 'fixture', ['baseline'], 8) == ['baseline']
     assert personal.state(other)['history'][-1]['reason'] == 'support_invalidated'
+    evidence(other, 16, 'fusion', 32)
+    assert personal.update(other)['arm'] == 'fusion'
+    selected = personal.state(other)
+    # A changed measurement/embedding signature revokes serving even if all files remain.
+    selected['signature'] = ['obsolete']
+    store.set_meta(other, personal.KEY, json.dumps(selected))
+    assert personal.apply(other, 'fixture', ['baseline'], 8) == ['baseline']
+    evidence(other, 16, 'fusion', 48)
+    assert personal.update(other)['arm'] == 'fusion'
+    selected = personal.state(other)
+    selected['cost_limit'] = 1e-12
+    store.set_meta(other, personal.KEY, json.dumps(selected))
+    personal.candidates = lambda *args, **kwargs: ['candidate']
+    assert personal.apply(other, 'fixture', ['baseline'], 8) == ['baseline']
+    assert personal.state(other)['history'][-1]['reason'] == 'serving_cost'
+    personal.candidates = original
     assert personal.eligible({})
     for request in ({'view':'history'}, {'as_of':'2026-01-01'}, {'scope':'p'},
                     {'k':4}, {'semantic_k':0}, {'semantic_k':20}, {'sources':['x']}):

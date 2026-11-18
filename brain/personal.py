@@ -56,11 +56,15 @@ def serving_mode():
 def certified(db, s):
     if s.get("signature") != signature() or not s.get("support") or not s.get("cost_limit"):
         return False
-    for eid in s["support"]:
-        row = db.execute("SELECT 1 FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
-                         "WHERE e.id=? AND e.measured=1 AND e.edited=0 AND e.exposed=0 "
-                         "AND e.identity LIKE 'v2:%'", (eid,)).fetchone()
-        if row is None:
+    support = s["support"]
+    # Chunk for SQLite's portable bind limit; one query per batch, not one per observation.
+    for start in range(0, len(support), 500):
+        ids = support[start:start + 500]
+        found = db.execute("SELECT COUNT(*) FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
+                           "WHERE e.id IN (" + ",".join("?" for _ in ids) + ") "
+                           "AND e.measured=1 AND e.edited=0 AND e.exposed=0 AND e.identity LIKE 'v2:%'",
+                           ids).fetchone()[0]
+        if found != len(ids):
             return False
     return True
 
