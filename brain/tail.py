@@ -191,6 +191,10 @@ def scan(transcript: str, rec: dict) -> dict:
     tail = rec.get("tail") or _blank_tail()
     offset = int(rec.get("offset") or 0)
     saves = int(rec.get("saves") or 0)
+    from brain import personal
+    if offset and (rec.get("use") or {}).get("collector_version") != personal.OBSERVATION_VERSION:
+        # A resumed older cursor has no complete durable exposure history.
+        rec["personal_history_unknown"] = True
 
     try:
         size = os.path.getsize(transcript)
@@ -239,9 +243,10 @@ def scan(transcript: str, rec: dict) -> dict:
 # it says at which rank the needed memory sat, or that brain never showed it at all (a miss nobody saw).
 # ⛔ Recorded, not acted on: `usage.opens` grows, the document's weight does not (`health.feedback("open")`
 #    would move the ranking — unmeasured); the per-request record (§observe "use") holds no name.
-_RECALL_LINE = re.compile(r"^\s*(\d+)\.\s+(\S+)\s+\[")
-_HOOK_LINE = re.compile(r"^\s*[·•]\s+(\S+)")
-SHOWN_KEEP = 8          # the last few things shown are enough: a memory is opened right after it is shown
+_RECALL_LINE = re.compile(r"^\s*(\d+)\.\s+(.+?)\s+\[")
+_HOOK_LINE = re.compile(r"^\s*[·•]\s+(.+?)\s+\[")
+_RELATED_LINE = re.compile(r"^\s*[·•]\s+(.+?)\s+←\s+")
+SHOWN_KEEP = 8          # bounded diagnostic ranks; independent evidence uses durable session exposure
 _DB: list = []          # one connection for a whole scan, opened only when brain's events appear in it
 
 
@@ -309,6 +314,8 @@ def _use(ev: tuple, rec: dict) -> None:
             _use(("read", pending["path"]), rec)
         return
     if kind == "recall_call":
+        if len(u["calls"]) >= SHOWN_KEEP and ev[1] not in u["calls"]:
+            rec["personal_history_unknown"] = True  # an outstanding response may be lost
         u["calls"] = (u["calls"] + [ev[1]])[-SHOWN_KEEP:]
         if len(ev) > 2:
             u["recall_args"] = ev[2]
@@ -317,10 +324,12 @@ def _use(ev: tuple, rec: dict) -> None:
     if kind == "hook":
         names = _names(db, ev[1], _HOOK_LINE)
         if names:
+            _expose(rec, names)
             u["shown"] = (u["shown"] + [{"via": "hook", "names": names, "turn": u["turn"]}])[-SHOWN_KEEP:]
     elif kind == "result" and ev[1] in u["calls"]:
         names = [n for _rank, n in sorted((int(m.group(1)), m.group(2)) for m in
                                           (_RECALL_LINE.match(x) for x in (ev[2] or "").splitlines()) if m)]
+        names += _names(db, ev[2], _RELATED_LINE)
         try:
             structured = json.loads(ev[2])
             if isinstance(structured, dict):
@@ -331,6 +340,8 @@ def _use(ev: tuple, rec: dict) -> None:
             pass
         names = [n for i, n in enumerate(names) if n not in names[:i]
                  and db.execute("SELECT 1 FROM docs WHERE name=?", (n,)).fetchone()]
+        _expose(rec, names)
+        u["calls"] = [call for call in u["calls"] if call != ev[1]]
         u["shown"] = (u["shown"] + [{"via": "recall", "names": names, "turn": u["turn"]}])[-SHOWN_KEEP:]
     elif kind == "read":
         doc = _doc_of(db, str(ev[1] or ""))
@@ -348,7 +359,7 @@ def _use(ev: tuple, rec: dict) -> None:
         request = u.get("recall_args") or {}
         if personal.eligible(request):
             personal.record(db, request.get("query") or u.get("query", ""), doc["path"],
-                            rec.get("session_id", ""), u["turn"], exposed=bool(hit),
+                            rec.get("session_id", ""), u["turn"], exposed=bool(hit) or bool(rec.get("personal_history_unknown")),
                             terms=request.get("terms") or [])
         with db:
             db.execute("INSERT INTO usage(path, opens) VALUES(?, 1) "
@@ -357,6 +368,16 @@ def _use(ev: tuple, rec: dict) -> None:
 
 class EvidenceVetoUnavailable(RuntimeError):
     """Evidence state must be durable before scanning can pass its line."""
+
+
+def _expose(rec, names):
+    if not names:
+        return
+    from brain import personal
+    try:
+        personal.expose(_db(), rec.get("session_id", ""), names)
+    except Exception as exc:
+        raise EvidenceVetoUnavailable() from exc
 
 
 def _exclude_turn(rec):
@@ -401,6 +422,8 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
     for ev in host.brain_events(line):
         try:
             _use(ev, rec)
+        except EvidenceVetoUnavailable:
+            raise
         except Exception:                                # noqa: BLE001
             pass                                         # a record must never cost the tail
     for name, kind, arg in calls:

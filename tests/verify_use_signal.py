@@ -214,6 +214,45 @@ def main() -> int:
         check(order+' '+ending+' retry excludes all reads exactly once',len(rows)==1 and rows[0][0]==1 and rr['offset']==os.path.getsize(tp) and rr['use']['turn']==1)
         tail.scan(tp,rr)
         check(order+' '+ending+' completed retry is idempotent',db.execute('SELECT COUNT(*) FROM personal_events WHERE session=?',(sid,)).fetchone()[0]==1)
+
+    tp=os.path.join(_TMP,'exposure-retry.jsonl')
+    transcript(tp,[user('exposure retry'),tool_use('recall-exposure','mcp__brain__recall',{'query':'exposure retry'}),
+                   tool_result('recall-exposure','  · ledger_rule ← seed'),tool_use('after-exposure','Read',{'file_path':p('ledger_rule')}),user('next turn')])
+    rr={'session_id':'exposure-retry','offset':0,'tail':tail._blank_tail(),'saves':0}
+    with patch.object(personal,'expose',side_effect=sqlite3.OperationalError('locked')):
+        tail.scan(tp,rr)
+    check('failed exposure persistence stops before subsequent reads',rr['offset']<os.path.getsize(tp) and
+          db.execute("SELECT COUNT(*) FROM personal_events WHERE session='exposure-retry'").fetchone()[0]==0)
+    rr=json.loads(json.dumps(rr));tail.scan(tp,rr)
+    row=db.execute("SELECT exposed,settled FROM personal_events WHERE session='exposure-retry'").fetchone()
+    check('exposure retry remains excluded after turn completion',row is not None and tuple(row)==(1,1))
+
+    rr['use']['shown']=[]  # diagnostic ranks can disappear; durable exposure cannot
+    with open(tp,'a',encoding='utf-8') as fh:
+        for event in [user('later different read'),tool_use('later-exposed','Read',{'file_path':p('ledger_rule')}),
+                      tool_result('later-exposed','fixture'),user('following turn')]:fh.write(json.dumps(event)+'\n')
+    rr=json.loads(json.dumps(rr));tail.scan(tp,rr)
+    rows=db.execute("SELECT exposed,settled FROM personal_events WHERE session='exposure-retry'").fetchall()
+    check('session exposure survives connection close and saved rank loss',len(rows)==2 and all(tuple(r)==(1,1) for r in rows) and not rr.get('personal_history_unknown'))
+
+    tp=os.path.join(_TMP,'legacy-exposure.jsonl')
+    transcript(tp,[user('old turn'),user('new turn after upgrade'),tool_use('legacy-exposure','Read',{'file_path':p('ledger_rule')}),user('next turn')])
+    with open(tp,'rb') as fh:first=fh.readline()
+    rr={'session_id':'legacy-exposure','offset':len(first),'tail':tail._blank_tail(),'saves':0,
+        'use':{'turn':1,'shown':[],'calls':[],'opened':[],'collector_version':personal.OBSERVATION_VERSION-1}}
+    tail.scan(tp,rr)
+    row=db.execute("SELECT edited,exposed,settled FROM personal_events WHERE session='legacy-exposure'").fetchone()
+    check('resumed old cursor cannot invent an independent exposure history',tuple(row)==(0,1,1) and rr['personal_history_unknown'])
+
+    tp=os.path.join(_TMP,'overflow-exposure.jsonl')
+    events=[user('too many outstanding recalls')]
+    events += [tool_use('overflow'+str(i),'mcp__brain__recall',{'query':'overflow '+str(i)}) for i in range(tail.SHOWN_KEEP+1)]
+    events += [tool_result('overflow0','  · ledger_rule ← seed'),tool_use('overflow-read','Read',{'file_path':p('ledger_rule')}),user('next turn')]
+    transcript(tp,events)
+    rr={'session_id':'overflow-exposure','offset':0,'tail':tail._blank_tail(),'saves':0}
+    tail.scan(tp,rr)
+    row=db.execute("SELECT exposed FROM personal_events WHERE session='overflow-exposure'").fetchone()
+    check('overflowed outstanding recalls cannot become independent evidence',row[0]==1 and rr['personal_history_unknown'])
     db.close()
 
     print("=" * 78)

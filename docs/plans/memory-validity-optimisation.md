@@ -378,3 +378,28 @@ The twelve-transcript regression inserts each synthetic record between a read an
 call, followed by a real user message. The read and shell remain in the same turn; the read
 is excluded from learning, certification and serving. Real user messages still confirm clean
 turns. Existing unfinished-EOF and failed-veto controls remain in the same regression.
+
+
+### Recall exposure parity and durable session history (2.7.21)
+
+Text recall presents related context as a bullet with a link-origin arrow, while direct and
+meaning results are numbered. All lanes now register exposure just like JSON, including names
+containing spaces. Hook exposure uses the same durable session/path ledger. Recent rank details
+remain bounded for diagnostics, but their eviction or passage of several user turns cannot make
+an already presented memory count as independent evidence. This conservatively excludes that
+path for the remainder of the session even if its content changes.
+
+Exposure persistence failure retains the transcript cursor before subsequent reads, using the
+same retry mechanism as edit exclusions. A resumed older cursor has incomplete exposure history
+and remains diagnostic for that session; a new session observed from its start can contribute.
+Collector 8 invalidates previous potentially misclassified observations without deleting them.
+
+Controlled checks render actual text and JSON for direct, related and meaning lanes, plus hook
+attachments; twelve-session policy fixtures keep the baseline for all exposed reads, both
+immediately and beyond the rank window. An independent thirteenth session supplies a clean
+positive control. SQLite exposure-write failure and old-cursor resumption are checked separately.
+These are collector and policy-mechanics checks, not native-host outcome measurements.
+
+Completed recall request IDs leave the pending set. If too many outstanding requests force
+an ID to be dropped, that session is marked as having unknown exposure history instead of
+letting an unmatched response become an independent reading label.
