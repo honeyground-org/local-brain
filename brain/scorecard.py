@@ -196,14 +196,52 @@ def save(sc: dict, note: str = "", path: str = "") -> str:
     return path
 
 
-def history(path: str = "", limit: int = 10) -> List[dict]:
-    path = path or os.path.join(_store_home(), "scorecard.jsonl")
+def valid_history_record(row) -> bool:
+    """A partial/corrupt optional log must not become a displayed measurement."""
+    import datetime
+    import math
+    if (not isinstance(row, dict) or not isinstance(row.get("at"), str)
+            or "total" not in row or "axes" not in row):
+        return False
     try:
-        with open(path, encoding="utf-8") as fh:
-            rows = [json.loads(l) for l in fh if l.strip()]
-    except (OSError, ValueError):
+        datetime.datetime.fromisoformat(row["at"].replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    for key in ("note", "pipeline", "judge"):
+        if key in row and not isinstance(row[key], str):
+            return False
+    if "axis_version" in row and (type(row["axis_version"]) is not int or row["axis_version"] <= 0):
+        return False
+    values = [row.get("total")]
+    for key in ("axes", "raw"):
+        axes = row.get(key, {})
+        if not isinstance(axes, dict):
+            return False
+        values.extend(axes.values())
+    try:
+        return all(value is None or (type(value) in (int, float) and math.isfinite(value)) for value in values)
+    except OverflowError:
+        return False
+
+
+def history(path: str = "", limit: int = 10) -> List[dict]:
+    from collections import deque
+    if limit <= 0:
         return []
-    return rows[-limit:]
+    path = path or os.path.join(_store_home(), "scorecard.jsonl")
+    rows = deque(maxlen=limit)
+    try:
+        with open(path, "rb") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line.decode("utf-8"))
+                except (ValueError, UnicodeError, RecursionError):
+                    continue
+                if valid_history_record(row):
+                    rows.append(row)
+    except OSError:
+        pass
+    return list(rows)
 
 
 # ★Axes that cost remote calls★ — `collect(cheap=True)` leaves these empty (§collect).
