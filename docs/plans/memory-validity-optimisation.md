@@ -338,3 +338,8 @@ certificates while keeping them for diagnosis. Conflicting memory files are not 
 The controlled regressions compare the same checks against the previous modules. These
 checks validate evidence eligibility and recovery, not a measured user-level improvement
 over native Claude Code or Codex.
+
+The concurrent-session check also exposed a stale-observation race: a worker can finish
+between a session detecting work and acquiring the worker lease. Session starts now recheck
+the reasons under their acquired lease before spawning. A deterministic completion-between-
+checks control covers this gap; the existing ten-process check remains unchanged.
