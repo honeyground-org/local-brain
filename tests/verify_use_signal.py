@@ -215,6 +215,24 @@ def main() -> int:
         tail.scan(tp,rr)
         check(order+' '+ending+' completed retry is idempotent',db.execute('SELECT COUNT(*) FROM personal_events WHERE session=?',(sid,)).fetchone()[0]==1)
 
+    from brain import server
+    tp=os.path.join(_TMP,'context-retry.jsonl')
+    transcript(tp,[user('original query'),tool_use('context-query','mcp__brain__recall',{'query':'retained query'}),
+                   tool_result('context-query','{}'),tool_use('history','mcp__brain__memory_history',{'name':'other'})])
+    rr={'session_id':'context-retry','offset':0,'tail':tail._blank_tail(),'saves':0};tail.scan(tp,rr)
+    assert rr['use']['context_calls']==['history']
+    answer=server.call_tool(db,'memory_history',{'name':'ledger_rule'})
+    with open(tp,'a',encoding='utf-8') as fh:
+        for event in [tool_result('history',answer),tool_use('context-read','Read',{'file_path':p('ledger_rule')}),
+                      tool_result('context-read','fixture'),user('next turn')]:fh.write(json.dumps(event)+'\n')
+    rr=json.loads(json.dumps(rr))
+    with patch.object(tail,'_context_names',side_effect=sqlite3.OperationalError('locked')):tail.scan(tp,rr)
+    check('context response lookup failure preserves pending response and cursor',rr['use']['context_calls']==['history'] and
+          db.execute("SELECT COUNT(*) FROM personal_events WHERE session='context-retry'").fetchone()[0]==0)
+    rr=json.loads(json.dumps(rr));tail.scan(tp,rr)
+    row=db.execute("SELECT query,exposed,settled FROM personal_events WHERE session='context-retry'").fetchone()
+    check('history response after reload excludes reads without replacing recall query',row is not None and tuple(row)==('retained query',1,1) and not rr['use']['context_calls'])
+
     tp=os.path.join(_TMP,'lookup-retry.jsonl')
     transcript(tp,[user('lookup retry'),tool_use('recall-lookup','mcp__brain__recall',{'query':'lookup retry'}),
                    tool_result('recall-lookup','  · ledger_rule ← seed'),tool_use('after-lookup','Read',{'file_path':p('ledger_rule')}),user('next turn')])
