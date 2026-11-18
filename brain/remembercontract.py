@@ -226,7 +226,12 @@ def atomic_write(path: str, text: str, expected_sha: Optional[str]) -> None:
             os.fsync(stream.fileno())
         if os.path.islink(path) or file_sha(path) != expected_sha:
             raise FileExistsError("Memory changed while preparing the write; read its current version")
-        os.replace(temporary, path)
+        if expected_sha is None:
+            # Publish the fully flushed file without replacing any directory entry.
+            # A non-cooperating writer may create the destination after our check.
+            os.link(temporary, path)
+        else:
+            os.replace(temporary, path)
         if os.name != "nt":
             directory_fd = os.open(directory, os.O_RDONLY)
             try:

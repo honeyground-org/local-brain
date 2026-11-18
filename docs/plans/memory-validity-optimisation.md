@@ -214,3 +214,10 @@ footers cannot be classified perfectly; source bytes and evidence remain availab
 Graph provenance version 3 rebuilds only derived links during normal indexing. Generation 53
 includes the receipt helper in the measurement fingerprint. This is a correctness repair,
 not evidence of improved retrieval scores or native-host work efficiency.
+
+2.7.2 closes the new-file check/publish race: the fully flushed temporary file is atomically
+linked into an absent destination instead of replaced over it. Concurrent file or symlink
+creation causes a conflict; unsupported hard-link filesystems fail without overwriting. An
+existing contract fixture creates a foreign-scope record immediately after the final SHA read
+and checks preservation, cleanup and a subsequent successful create/noop pair. Generation 54
+tracks the updated receipt/write module. No new database or runtime service is introduced.

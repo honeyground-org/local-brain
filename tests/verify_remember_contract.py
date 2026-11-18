@@ -711,6 +711,40 @@ def identity_checks(db):
     print('Identity fixture: 5 translated identifier groups vs 1 explicitly reused; 0 homonym/facet/scope merges. Not an answer-quality benchmark.')
 
 
+def exclusive_create_checks(db):
+    from unittest.mock import patch
+    source = _j(db, name='race_source', description='Source', type='user',
+                body='The review happens on Friday.', project_id='race-scope')
+    prepared = json.loads(server.call_tool(db, 'prepare_fact', dict(
+        source_name='race_source', source_sha=source['sha'], quotes=['The review happens on Friday.'],
+        name='race_proposal', description='Draft', type='user', body='Friday review.',
+        project_id='race-scope', topic='review', facet='day'), _measure=True))['save_arguments']
+    target = os.path.join(_MEM, 'race_proposal.md')
+    foreign = '---\nname: race_proposal\nproject_id: other-scope\n---\nPreserve the competing record.\n'
+    original_write, original_sha = rc.atomic_write, rc.file_sha
+    raced = []
+    def race_write(path, text, expected_sha):
+        def race_sha(candidate):
+            value = original_sha(candidate)
+            if candidate == target and value is None and not raced:
+                with open(target, 'w', encoding='utf-8') as f:
+                    f.write(foreign)
+                raced.append(True)
+            return value
+        with patch.object(rc, 'file_sha', side_effect=race_sha):
+            return original_write(path, text, expected_sha)
+    with patch.object(rc, 'atomic_write', side_effect=race_write):
+        outcome = _j(db, **prepared)
+    check('destination created after final SHA check returns conflict', bool(raced) and outcome.get('result') == 'conflict')
+    check('concurrent foreign memory remains byte-identical', _read('race_proposal') == foreign)
+    check('conflicting create cleans temporary files', not any(n.startswith('.brain-write-') for n in os.listdir(_MEM)))
+    os.remove(target)
+    outcome = _j(db, **prepared)
+    text = _read('race_proposal')
+    check('uncontended create and identical retry remain new and noop', outcome.get('result') == 'new' and
+          _j(db, **prepared).get('result') == 'noop' and _read('race_proposal') == text)
+
+
 def main() -> int:
     import subprocess
     cold=os.path.join(_TMP,'cold-review')
@@ -830,6 +864,7 @@ def main() -> int:
     review_checks()
     extraction_checks(db)
     identity_checks(db)
+    exclusive_create_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
         print("❌ failed: %d — %s" % (len(FAILS), " · ".join(FAILS)))
