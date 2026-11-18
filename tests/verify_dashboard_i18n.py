@@ -107,6 +107,50 @@ def verify_observatory():
             db.close()
 
 
+def verify_workspace_controls():
+    """Run the real handlers against a small DOM fixture when Node is available."""
+    import json
+    import shutil
+    import subprocess
+    if not shutil.which('node'):
+        print('SKIP workspace handler execution: Node unavailable; browser QA still required')
+        return
+    fixture = r"""
+const vm=require('vm'),assert=require('assert');
+class Element {
+ constructor(tag){this.tag=tag;this.children=[];this.events={};this.dataset={};this.attrs={};this.value='';this.textContent='';this.classList={contains:()=>false,toggle:()=>true};}
+ appendChild(n){this.children.push(n);return n;}
+ replaceChildren(){this.children=[];this.textContent='';}
+ get options(){return this.children;}
+ addEventListener(k,fn){this.events[k]=fn;}
+ setAttribute(k,v){this.attrs[k]=v;}
+ removeAttribute(k){delete this.attrs[k];}
+ focus(){}
+}
+const elements={};['workspace-data','workspace-i18n','source','scope','validity','search','detail','memory-list','count','prev','next','mtoggle'].forEach(id=>elements[id]=new Element(id));
+function memory(id,name,scope,status,history){return {id,name,project_id:scope,source:'memory',kind:'user',preview:'text',body_chars:4,path:'/private/'+name,validity:{status},history};}
+const records=[memory(1,'old','','superseded',[1,2]),memory(2,'new','','active',[1,2]),memory(3,'foreign','garden','active',[3])];
+elements['workspace-data'].textContent=JSON.stringify({memories:records,states:{superseded:1,active:2}});
+elements['workspace-i18n'].textContent=JSON.stringify({en:{'dash.inspect.all':'All','dash.inspect.unscoped':'Unscoped','dash.inspect.select':'Select a memory'}});
+const langs=[new Element('button')];langs[0].dataset.lang='en';
+const doc={documentElement:new Element('html'),createElement:t=>new Element(t),getElementById:id=>elements[id],querySelectorAll:q=>q==='.langs button'?langs:[],addEventListener:(event,fn)=>{doc.ready=fn;}};doc.documentElement.lang='en';
+const context={document:doc,Option:function(text,value){this.text=text;this.value=value;},window:{matchMedia:()=>({matches:false,addEventListener(){}})},localStorage:{getItem:()=>null,setItem(){}},Map,Set,JSON};
+vm.runInNewContext(CODE,context);doc.ready();
+assert.equal(elements.count.textContent,'1–3 / 3');
+assert.equal(elements.scope.options[0].value,'');
+const unscoped=elements.scope.options.find(o=>o.text==='Unscoped');assert(unscoped&&unscoped.value!=='');
+elements.scope.value=unscoped.value;elements.scope.events.change();assert.equal(elements.count.textContent,'1–2 / 2');
+elements['memory-list'].children[0].events.click();assert.equal(elements.detail.children[0].textContent,'old');
+const history=elements.detail.children.find(n=>n.className==='history-list');history.children[1].events.click();assert.equal(elements.detail.children[0].textContent,'new');
+elements.scope.value=elements.scope.options.find(o=>o.text==='garden').value;elements.scope.events.change();assert.equal(elements.count.textContent,'1–1 / 1');assert.equal(elements.detail.children[0].textContent,'Select a memory');
+elements.search.value='absent';elements.search.events.input();assert.equal(elements.count.textContent,'0–0 / 0');assert(elements.next.disabled&&elements.prev.disabled);
+console.log('PASS actual handlers: all/unscoped separation, version navigation, excluded detail clearing and empty results');
+"""
+    run = subprocess.run(['node', '-e', 'const CODE='+json.dumps(dashview.WORKSPACE_JS)+';\n'+fixture],
+                         capture_output=True, text=True, encoding='utf-8')
+    check('actual workspace controls preserve filters and version navigation',run.returncode==0,run.stdout.strip() or run.stderr[-700:])
+
+
 def verify_workspace():
     import json
     import sqlite3
@@ -256,6 +300,7 @@ def main():
         i18n._lang = saved_lang
         i18n._cache.clear()
 
+    verify_workspace_controls()
     verify_workspace()
     verify_observatory()
     print("=" * 72)
