@@ -60,7 +60,7 @@ def verify_cli_readonly():
         def run():
             return subprocess.run([sys.executable, "-m", "brain.cli", "dashboard", "--no-open",
                                    "--out", str(root / "page.html")], env=env,
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, encoding="utf-8")
         result = run()
         check("CLI missing index is not created", result.returncode == 2 and not home.exists(),
               result.stdout + result.stderr)
