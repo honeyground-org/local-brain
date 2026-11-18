@@ -243,9 +243,11 @@ def scan(transcript: str, rec: dict) -> dict:
 # it says at which rank the needed memory sat, or that brain never showed it at all (a miss nobody saw).
 # ⛔ Recorded, not acted on: `usage.opens` grows, the document's weight does not (`health.feedback("open")`
 #    would move the ranking — unmeasured); the per-request record (§observe "use") holds no name.
-_RECALL_LINE = re.compile(r"^\s*\d+\.\s+(.+)$")
-_HOOK_LINE = re.compile(r"^\s*[·•]\s+(.+)$")
-_RELATED_LINE = re.compile(r"^\s*[·•]\s+(?P<related>.+)$")
+# Renderers add exactly one space after their marker; remaining whitespace belongs
+# to the indexed name. MULTILINE locates markers without normalising file names.
+_RECALL_LINE = re.compile(r"^[ \t]*\d+\.[ \t](.*)", re.MULTILINE)
+_HOOK_LINE = re.compile(r"^[ \t]*[·•][ \t](.*)", re.MULTILINE)
+_RELATED_LINE = re.compile(r"^[ \t]*[·•][ \t](?P<related>.*)", re.MULTILINE)
 SHOWN_KEEP = 8          # bounded diagnostic ranks; independent evidence uses durable session exposure
 _DB: list = []          # one connection for a whole scan, opened only when brain's events appear in it
 
@@ -267,14 +269,14 @@ def _close_db() -> None:
 def _names(db, text: str, pattern) -> list:
     """Names of indexed documents in the order brain listed them (anything else on such a line is dropped)."""
     out = []
-    for line in (text or "").splitlines():
-        m = pattern.match(line)
-        if not m:
-            continue
+    text = text or ""
+    for m in pattern.finditer(text):
         # Display separators are legal inside a document name. Check every boundary
         # against the index rather than truncating at the first one. If the text is
         # ambiguous, conservatively exclude every matching document from learning.
-        content = m.group(1)
+        # A supported file name can itself contain a newline. Test literal prefixes
+        # through the remaining output; the indexed-name lookup rejects body text.
+        content = text[m.start(1):]
         separator = r"\s+←\s+" if pattern is _RELATED_LINE else r"\s+\["
         for boundary in re.finditer("(?=" + separator + ")", content):
             n = content[:boundary.start()]
@@ -429,8 +431,13 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
             _use(ev, rec)
         except EvidenceVetoUnavailable:
             raise
-        except Exception:                                # noqa: BLE001
-            pass                                         # a record must never cost the tail
+        except Exception as exc:                         # noqa: BLE001
+            # Losing exposure or an outstanding recall ID must not turn later reads
+            # into independent labels. Retry this line even when lookup failed
+            # before the durable exposure write was reached.
+            if ev[0] in ("hook", "recall_call") or (ev[0] == "result" and ev[1] in rec.get("use", {}).get("calls", [])):
+                raise EvidenceVetoUnavailable() from exc
+            pass                                         # optional diagnostics may fail quietly
     for name, kind, arg in calls:
         # ★A memory save resets the tail to 0★ — whether via a remember call or a direct file write.
         if name.endswith("remember"):

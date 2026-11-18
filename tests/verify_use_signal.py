@@ -215,6 +215,18 @@ def main() -> int:
         tail.scan(tp,rr)
         check(order+' '+ending+' completed retry is idempotent',db.execute('SELECT COUNT(*) FROM personal_events WHERE session=?',(sid,)).fetchone()[0]==1)
 
+    tp=os.path.join(_TMP,'lookup-retry.jsonl')
+    transcript(tp,[user('lookup retry'),tool_use('recall-lookup','mcp__brain__recall',{'query':'lookup retry'}),
+                   tool_result('recall-lookup','  · ledger_rule ← seed'),tool_use('after-lookup','Read',{'file_path':p('ledger_rule')}),user('next turn')])
+    rr={'session_id':'lookup-retry','offset':0,'tail':tail._blank_tail(),'saves':0}
+    with patch.object(tail,'_names',side_effect=sqlite3.OperationalError('locked')):
+        tail.scan(tp,rr)
+    check('failed exposure lookup stops before subsequent reads',rr['offset']<os.path.getsize(tp) and
+          db.execute("SELECT COUNT(*) FROM personal_events WHERE session='lookup-retry'").fetchone()[0]==0)
+    rr=json.loads(json.dumps(rr));tail.scan(tp,rr)
+    row=db.execute("SELECT exposed,settled FROM personal_events WHERE session='lookup-retry'").fetchone()
+    check('exposure lookup retry excludes the completed read',row is not None and tuple(row)==(1,1))
+
     tp=os.path.join(_TMP,'exposure-retry.jsonl')
     transcript(tp,[user('exposure retry'),tool_use('recall-exposure','mcp__brain__recall',{'query':'exposure retry'}),
                    tool_result('recall-exposure','  · ledger_rule ← seed'),tool_use('after-exposure','Read',{'file_path':p('ledger_rule')}),user('next turn')])

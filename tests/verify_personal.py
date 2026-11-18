@@ -128,7 +128,7 @@ def verify_turn_edit_order():
             assert result['arm']==('baseline' if is_edited else 'fusion'), (order,result)
             if not is_edited:
                 assert personal.certified(db,personal.state(db))
-                db.execute("UPDATE personal_events SET identity='v9:' || substr(identity,4)");db.commit()
+                db.execute("UPDATE personal_events SET identity='v10:' || substr(identity,5)");db.commit()
                 assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
                 assert personal.update(db)['arm']=='baseline'
             else:
@@ -136,7 +136,7 @@ def verify_turn_edit_order():
                 personal.record(db,'another session','/note','unrelated',1)
                 assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
         db.close()
-    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v9 support rejected')
+    print('PASS: actual transcript edit/save/shell read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v10 support rejected')
 
 
 def verify_scoped_meaning():
@@ -554,7 +554,11 @@ def main():
     other.close(); db.close()
     clock.stop()
     cache.stop()
-    for name in ('known note', 'orchid [release]', 'orchid ← release', 'orchid [release] ← next [version]', 'orchid ←', 'orchid ← ←', 'orchid ['):
+    for name in ('known note', 'orchid [release]', 'orchid ← release',
+                 'orchid [release] ← next [version]', 'orchid ←', 'orchid ← ←', 'orchid [',
+                 ' orchid', '  orchid', '\torchid', 'orchid ', 'orchid\t',
+                 '\u3000orchid', 'orchid\u3000', 'orchid\nrelease', '\norchid', 'orchid\n',
+                 '  orchid ←\n[release]  '):
         verify_exposure_parity(name=name)
     verify_unsettled_evidence()
     verify_disputed_support()
