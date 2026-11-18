@@ -560,6 +560,9 @@ def identity_checks(db):
     alias_source=_j(db,name='CaseSource',description='Case source',type='reference',body='Preserve this original.',project_id=scope)
     alias=call('prepare_fact',source_name='CaseSource',source_sha=alias_source['sha'],quotes=['Preserve this original.'],name='casesource',description='Proposed fact',type='user',body='Proposed.',project_id=scope,identity_reference=ref)['save_arguments']
     original_case=_read('CaseSource')
+    alias_path=os.path.join(_MEM,'casesource.md')
+    made_alias=not os.path.exists(alias_path)
+    if made_alias:os.link(os.path.join(_MEM,'CaseSource.md'),alias_path)
     from unittest.mock import patch
     real_samefile=os.path.samefile
     def alias_samefile(a,b):
@@ -568,6 +571,7 @@ def identity_checks(db):
     with patch.object(os.path,'samefile',side_effect=alias_samefile):
         rejected=_j(db,**dict(alias,expected_sha=alias_source['sha']))
     check('case alias cannot overwrite extraction source even with SHA',(rejected.get('error') or {}).get('code')=='source_target_alias' and _read('CaseSource')==original_case)
+    if made_alias:os.remove(alias_path)
     root=_j(db,name='identity_legacy_root',description='Single fact',type='user',body='Water on Friday.',project_id=scope)
     anchor_request=call('prepare_revision',predecessor='identity_legacy_root',name='identity_legacy_anchor',description='Tracked fact',type='user',body='Water on Friday.',project_id=scope,topic='legacy-identity',facet='water',status='proposed',valid_from='2026-01-01',change_reason='Explicit whole-record confirmation',evidence=['Fixture owner confirmed'],replace_whole_record=True)
     legacy_anchor=_j(db,**anchor_request['save_arguments'])
