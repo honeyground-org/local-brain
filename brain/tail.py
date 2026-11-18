@@ -43,6 +43,7 @@ The verdict comes from two things — ① if `SessionEnd` fired, it is certainly
 from __future__ import annotations
 
 import json
+import copy
 import os
 import re
 import tempfile
@@ -204,8 +205,17 @@ def scan(transcript: str, rec: dict) -> dict:
             for line in f:
                 if not line.endswith("\n"):     # the last line has not finished being written yet
                     break
+                before_rec, before_tail = copy.deepcopy(rec), copy.deepcopy(tail)
+                try:
+                    _apply(line, tail, rec)
+                except EvidenceVetoUnavailable:
+                    # Retry this exact line; do not lose its exclusion or replay a
+                    # user message into a different turn after a transient lock.
+                    rec.clear()
+                    rec.update(before_rec)
+                    tail = before_tail
+                    break
                 offset += len(line.encode("utf-8", "replace"))
-                _apply(line, tail, rec)
                 if tail.get("_saved"):
                     tail.pop("_saved")
                     saves += 1
@@ -344,6 +354,18 @@ def _use(ev: tuple, rec: dict) -> None:
                        "ON CONFLICT(path) DO UPDATE SET opens=opens+1", (doc["path"],))
 
 
+class EvidenceVetoUnavailable(RuntimeError):
+    """An edit exclusion must be durable before scanning can pass its line."""
+
+
+def _exclude_turn(rec):
+    from brain import personal
+    try:
+        personal.edited(_db(), rec.get("session_id", ""), rec.get("use", {}).get("turn", 0))
+    except Exception as exc:
+        raise EvidenceVetoUnavailable() from exc
+
+
 def _apply(line: str, tail: dict, rec: dict) -> None:
     # ⛔ ★The host reads its own log★ (§hosts.Host.user_text · tool_calls) — this used to parse Claude
     #    Code's `tool_use` shape and tool names (`Edit`, `Bash`…) itself, and read ★nothing★ from any
@@ -363,35 +385,26 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
     if u and u.get("collector_version") != personal.OBSERVATION_VERSION:
         # A resumed pre-upgrade turn may have edited before the saved offset.
         # Do not treat its later reads as clean merely because the collector changed.
-        try:
-            personal.edited(_db(), rec.get("session_id", ""), u.get("turn", 0))
-        except Exception:
-            return  # no evidence until the veto can be persisted
+        _exclude_turn(rec)
         u["collector_version"] = personal.OBSERVATION_VERSION
+    calls = list(host.tool_calls(line))
+    if any(kind in ("path", "shell") or (name.endswith("remember") and kind != "preview")
+           for name, kind, arg in calls):
+        _exclude_turn(rec)
     for ev in host.brain_events(line):
         try:
             _use(ev, rec)
         except Exception:                                # noqa: BLE001
             pass                                         # a record must never cost the tail
-    for name, kind, arg in host.tool_calls(line):
+    for name, kind, arg in calls:
         # ★A memory save resets the tail to 0★ — whether via a remember call or a direct file write.
         if name.endswith("remember"):
             if kind == 'preview':
                 continue
-            try:
-                from brain import personal
-                personal.edited(_db(), rec.get("session_id", ""), rec.get("use", {}).get("turn", 0))
-            except Exception:
-                pass
             tail.update(_blank_tail())
             tail["_saved"] = True
             continue
         if kind == "path":
-            try:
-                from brain import personal
-                personal.edited(_db(), rec.get("session_id", ""), rec.get("use", {}).get("turn", 0))
-            except Exception:
-                pass
             fp = str(arg or "")
             kind = _classify(fp)
             if kind == "skip":
@@ -409,10 +422,6 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
         if kind == "shell":
             # Arbitrary shell programs can write indirectly. Without a verified
             # read-only boundary, these turns are diagnostic, not positive labels.
-            try:
-                personal.edited(_db(), rec.get("session_id", ""), rec.get("use", {}).get("turn", 0))
-            except Exception:
-                pass
             if _COMMIT_RE.search(str(arg or "")):
                 tail["commits"] += 1
                 tail["since"] = tail["since"] or int(time.time())

@@ -318,3 +318,23 @@ A resumed turn from an older collector is conservatively vetoed: edits before it
 ### Shell uncertainty and translated graph counts
 
 Collector version 4 treats shell-bearing turns as diagnostic only, before or after reads. Arbitrary shell programs can mutate documents indirectly; command-text heuristics cannot establish a read-only boundary. This intentionally reduces eligible evidence, including benign shell turns, rather than certifying contaminated labels. Dedicated Read-only and prepare-only controls remain eligible. Version 3 observations remain diagnostic but cannot certify generation 69. The inspector also interpolates the graph's `data-v` counts during initialisation and every language switch; the actual graph renderer and JavaScript are checked together across all six languages.
+
+
+### Disputed support and retryable exclusion writes (2.7.18)
+
+Current-view retrieval deliberately retains disputed memories so an agent can explain a
+conflict. Policy training and certification now also require lifecycle `current` not to be
+explicitly false; retrieval membership alone is not evidence of validity. Existing support
+is checked again, so a newly conflicting record revokes a prior certificate. Untracked
+legacy records keep their existing eligibility; this does not assert their facts are verified.
+
+The transcript scanner persists edit, shell and memory-save exclusions before processing
+reading signals on the same line. If that write fails, it retains the exact byte position
+and pre-line turn state for the next scan instead of consuming the exclusion. Checks cover
+both shell-before-read and read-before-shell with a temporary SQLite failure, record reload,
+recovery and idempotent replay. Collector version 5 excludes earlier observations from new
+certificates while keeping them for diagnosis. Conflicting memory files are not modified.
+
+The controlled regressions compare the same checks against the previous modules. These
+checks validate evidence eligibility and recovery, not a measured user-level improvement
+over native Claude Code or Codex.
