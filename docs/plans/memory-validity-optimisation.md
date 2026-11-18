@@ -140,3 +140,5 @@ contradictions require host review. Unobserved conversations cannot be reconstru
 - [Standing native-host comparison criterion](../../CONTRIBUTING.md#native-host-comparison-is-a-standing-release-criterion)
 - [Roadmap](../ROADMAP.md)
 - Personal wiki companion (vault-relative): `01 Projects/local-brain/Memory validity optimisation.md`
+
+Save-guard follow-up (2.5.2): legacy evidence-carried references receive the same new-write validation without changing their request hash or stored bytes. Successful old retries remain noop. Candidate review and preparation also compare ancestor file SHAs with indexed versions before reuse; an unindexed ancestor edit makes the candidate unavailable. This adds ancestor file reads only to explicit identity operations, not general recall.

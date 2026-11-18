@@ -513,6 +513,15 @@ def identity_checks(db):
     # Refresh the direct-anchor preparation after adding the descendant to the group.
     legacy_pending=call('prepare_fact',**legacy_args)['save_arguments']
     with open(os.path.join(_MEM,'identity_legacy_root.md'),'a',encoding='utf-8') as f:f.write('\nChanged legacy source.\n')
+    before_index=call('review_identity',names=['identity_legacy_anchor','identity_legacy_descendant'],project_id=scope)
+    check('unindexed ancestor changes prevent identity reuse',all(not x['reusable'] for x in before_index['items']))
+    check('unindexed ancestor changes prevent preparation',not call('prepare_fact',**descendant_args).get('ok'))
+    legacy_wire=dict(descendant_pending)
+    legacy_wire.pop('identity_reference')
+    result=_j(db,**legacy_wire)
+    check('2.5.0 unsaved reference receives the save guard',(result.get('error') or {}).get('code')=='invalid_identity' and not os.path.exists(os.path.join(_MEM,legacy_wire['name']+'.md')))
+    leaked=os.path.join(_MEM,legacy_wire['name']+'.md')
+    if os.path.exists(leaked):os.remove(leaked)
     store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
     check('changed legacy ancestor invalidates the selected identity',call('prepare_fact',**legacy_args)['error']['code']=='invalid_identity')
     result=_j(db,**legacy_pending)
@@ -526,6 +535,9 @@ def identity_checks(db):
     result=_j(db,**descendant_pending)
     check('save rejects invalidated ancestor links through descendants',(result.get('error') or {}).get('code')=='invalid_identity' and not os.path.exists(os.path.join(_MEM,descendant_pending['name']+'.md')),str(result.get('result')))
     check('guard is advertised for consumers',capabilities.tool_flags(server.TOOLS)['remember']['identity_reference_guard'])
+    old_success=prep(name='identity_legacy_success')['save_arguments']
+    old_success.pop('identity_reference')
+    check('valid 2.5.0 reference can still save',_j(db,**old_success).get('result')=='new')
     # A second SQLite connection moves the anchor after its initial validation.
     # The planner must not compute an empty/other group guard from newer index rows.
     real_identity=rc.identity_record
@@ -555,6 +567,7 @@ def identity_checks(db):
     check('stale identity refused during preparation',prep()['error']['code']=='identity_changed')
     check('changed identity between preparation and saving is refused',_j(db,**pending)['error']['code']=='fact_changed' and not os.path.exists(os.path.join(_MEM,pending['name']+'.md')))
     check('old saved proposal still retries after identity changes',_j(db,**payload).get('result')=='noop')
+    check('successful 2.5.0 reference remains noop after changes',_j(db,**old_success).get('result')=='noop')
     flags=capabilities.tool_flags(server.TOOLS)['remember']
     removed=capabilities.tool_flags([t for t in server.TOOLS if t['name']!='review_identity'])['remember']
     check('identity capability follows declaration',flags['review_identity'] and flags['identity_reference'] and not removed['review_identity'])
