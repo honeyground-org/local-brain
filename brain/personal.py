@@ -225,6 +225,7 @@ def candidates(db, query, base, arm, k, terms=()):
 
 def apply(db, query, rows, k, terms=(), baseline_cost=0.0):
     """Read the last measured policy; never train in the request."""
+    t = time.monotonic()
     s = state(db, "terms" if terms else "query")
     arm = s["arm"]
     if serving_mode() != "auto" or arm == "baseline":
@@ -237,7 +238,6 @@ def apply(db, query, rows, k, terms=(), baseline_cost=0.0):
     # A cold lexical-only request is a different route; retain its baseline.
     if vectors._qcache_get(db, query) is None:
         return rows
-    t = time.monotonic()
     try:
         result = candidates(db, query, rows, arm, k, terms=terms)
         elapsed = time.monotonic() - t
@@ -344,7 +344,19 @@ def update(db, mode="query"):
         candidate = alternatives[0]
         if _wins(holdout, candidate, incumbent):
             old = sorted(json.loads(r["costs"])[incumbent] for r in holdout)
-            new = sorted(json.loads(r["costs"])[candidate] for r in holdout)
+            # Recheck the complete prospective support before promotion and measure
+            # the same state/certificate/cache gate that live application pays.
+            prospective = dict(s, arm=candidate, support=[r["id"] for r in rows],
+                               signature=signature(), cost_limit=1.0)
+            new = []
+            for r in holdout:
+                gate_started = time.monotonic()
+                state(db, mode)
+                serving_mode()
+                ready = certified(db, prospective) and vectors._qcache_get(db, r["query"]) is not None
+                gate_cost = time.monotonic() - gate_started
+                new.append(json.loads(r["costs"])[candidate] + gate_cost if ready else float("inf"))
+            new.sort()
             # Relative serving-cost guard is a product budget, never a learned relevance weight.
             at = min(len(old) - 1, math.ceil(0.95 * len(old)) - 1)
             if new[at] <= old[at] * 1.1:

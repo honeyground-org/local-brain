@@ -1,7 +1,8 @@
 """Graph stores — ★where traversal of the links between notes runs★ (§stores for the shape and the rules).
 
 The graph is ★resolved edges between documents★: a link written in a note (`[[name]]`, a path) is
-resolved through `name_map` (names, aliases, declarations) into `(source doc id, target doc id)`.
+resolved through `name_map` for names/aliases/declarations, or directly by exact path, into
+`(source doc id, target doc id)`.
 Resolution stays local — it is about your files and their names. What a graph store holds and answers
 is the resolved structure, through five questions every backend answers identically:
 
@@ -11,7 +12,7 @@ is the resolved structure, through five questions every backend answers identica
   targets(db)          every document something links to       (orphans = memories outside this set)
   edges(db)            every resolved edge                      (the graph view)
 
-  sqlite   the local `links` table joined through `name_map` — the default, and the canonical copy
+  sqlite   named links through `name_map` plus exact `path_links` — the default canonical copy
   others   one file each in `brain/backends/` (§stores "One file per backend"); a Cypher database
            needs only its connection (§backends._cypher.CypherGraph)
 
@@ -32,7 +33,10 @@ from typing import Dict, List, Sequence, Set, Tuple
 
 from brain import stores
 
-_RESOLVED = "FROM links l JOIN name_map m ON m.key=l.dst_name"
+_RESOLVED = ("FROM (SELECT named.src_id,names.doc_id AS dst_id FROM links named "
+             "JOIN name_map names ON names.key=named.dst_name "
+             "UNION SELECT paths.src_id,doc.id FROM path_links paths "
+             "JOIN docs doc ON doc.path=paths.dst_path WHERE doc.id!=paths.src_id) l")
 
 CONTRACT = ("target", "ping", "ensure", "reset", "drop", "upsert_nodes", "delete_nodes", "add_edges",
             "remove_edges", "counts", "neighbors", "incoming", "linked", "targets", "edges")
@@ -55,23 +59,23 @@ class SqliteGraph:
     def neighbors(self, db: sqlite3.Connection, ids: Sequence[int]) -> Dict[int, Set[int]]:
         out: Dict[int, Set[int]] = {}
         for did in ids:
-            s = {r[0] for r in db.execute("SELECT DISTINCT m.doc_id %s WHERE l.src_id=?" % _RESOLVED, (did,))}
-            s |= {r[0] for r in db.execute("SELECT DISTINCT l.src_id %s WHERE m.doc_id=?" % _RESOLVED, (did,))}
+            s = {r[0] for r in db.execute("SELECT DISTINCT l.dst_id %s WHERE l.src_id=?" % _RESOLVED, (did,))}
+            s |= {r[0] for r in db.execute("SELECT DISTINCT l.src_id %s WHERE l.dst_id=?" % _RESOLVED, (did,))}
             out[int(did)] = s
         return out
 
     def incoming(self, db: sqlite3.Connection, did: int) -> Set[int]:
-        return {r[0] for r in db.execute("SELECT DISTINCT l.src_id %s WHERE m.doc_id=?" % _RESOLVED, (did,))}
+        return {r[0] for r in db.execute("SELECT DISTINCT l.src_id %s WHERE l.dst_id=?" % _RESOLVED, (did,))}
 
     def linked(self, db: sqlite3.Connection, a: int, b: int) -> bool:
-        return db.execute("SELECT 1 %s WHERE (l.src_id=? AND m.doc_id=?) OR (l.src_id=? AND m.doc_id=?) LIMIT 1"
+        return db.execute("SELECT 1 %s WHERE (l.src_id=? AND l.dst_id=?) OR (l.src_id=? AND l.dst_id=?) LIMIT 1"
                           % _RESOLVED, (a, b, b, a)).fetchone() is not None
 
     def targets(self, db: sqlite3.Connection) -> Set[int]:
-        return {r[0] for r in db.execute("SELECT DISTINCT m.doc_id %s" % _RESOLVED)}
+        return {r[0] for r in db.execute("SELECT DISTINCT l.dst_id %s" % _RESOLVED)}
 
     def edges(self, db: sqlite3.Connection) -> List[Tuple[int, int]]:
-        return sorted({(r[0], r[1]) for r in db.execute("SELECT DISTINCT l.src_id, m.doc_id %s" % _RESOLVED)})
+        return sorted({(r[0], r[1]) for r in db.execute("SELECT DISTINCT l.src_id, l.dst_id %s" % _RESOLVED)})
 
 
 def make(c: dict):

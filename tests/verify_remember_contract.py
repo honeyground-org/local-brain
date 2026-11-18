@@ -627,7 +627,26 @@ def identity_checks(db):
         db.commit()
         check('legacy graph fixture starts with contaminated edge',graphstore.LOCAL.linked(db,quoted_id,foreign_id))
         store.reindex(db,recalibrate=True,sync=False,heal=False,queue_embedding=False,refresh_history=False)
-        check('normal indexing repairs legacy provenance edges without file edits',store.get_meta(db,'graph_provenance_version')=='5' and not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
+        check('normal indexing repairs legacy provenance edges without file edits',store.get_meta(db,'graph_provenance_version')=='6' and not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
+        path_a=os.path.join(_MEM,'path_same.md')
+        path_b=os.path.join(duplicate,'path_same.md')
+        path_src=os.path.join(_MEM,'exact_path_source.md')
+        for path,text in ((path_a,'---\nname: path_same\nproject_id: a\n---\nA target.\n'),
+                          (path_b,'---\nname: path_same\nproject_id: b\n---\nB target.\n'),
+                          (path_src,'---\nname: exact_path_source\nproject_id: a\n---\n[Chosen](path_same.md)\n')):
+            with open(path,'w',encoding='utf-8') as f:f.write(text)
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+        ids={path:db.execute('SELECT id FROM docs WHERE path=?',(path,)).fetchone()[0] for path in (path_a,path_b,path_src)}
+        db.execute('INSERT OR IGNORE INTO links(src_id,dst_name) VALUES(?,?)',(ids[path_src],'path_same'))
+        store.set_meta(db,'graph_provenance_version','5');db.commit()
+        check('old path-name conversion contaminates the other scope',graphstore.LOCAL.linked(db,ids[path_src],ids[path_b]))
+        originals={path:open(path,'rb').read() for path in ids}
+        store.reindex(db,full=True,recalibrate=False,sync=False,heal=False,queue_embedding=False,refresh_history=False)
+        check('full indexing removes old path-name edges and preserves exact path',
+              store.get_meta(db,'graph_provenance_version')=='6'
+              and graphstore.LOCAL.neighbors(db,[ids[path_src]])=={ids[path_src]:{ids[path_a]}}
+              and all(open(path,'rb').read()==body for path,body in originals.items()))
+
 
 
     finally:

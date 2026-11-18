@@ -1161,13 +1161,12 @@ def _build_basename_aliases(db: sqlite3.Connection) -> None:
 
 
 def _resolve_path_links(db: sqlite3.Connection) -> None:
-    """Turn path links into name links. ★Only after indexing has finished★, so every target exists.
-    If the path is outside the index, do nothing (that is not something we can fix)."""
-    with db:
-        db.execute(
-            "INSERT OR IGNORE INTO links(src_id, dst_name) "
-            "SELECT pl.src_id, d.name FROM path_links pl "
-            "JOIN docs d ON d.path = pl.dst_path WHERE d.id != pl.src_id")
+    """Paths are resolved directly to IDs by graphstore, never through a shared name.
+
+    Keep this indexing seam for callers; no derived name link is written here.
+    The graph provenance rebuild removes earlier path-to-name conversions.
+    """
+    return None
 
 
 def _rebuild_terms(db: sqlite3.Connection) -> None:
@@ -1385,7 +1384,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     #    `brain-session` announces it at the next session start. The first human-run index (`brain index`,
     #    the MCP `reindex`, `install`) rebuilds — once.
     tok_stale = tokenizer_stale(db)
-    graph_stale = get_meta(db, "graph_provenance_version", "0") != "5"
+    graph_stale = get_meta(db, "graph_provenance_version", "0") != "6"
     if (tok_stale or graph_stale) and recalibrate:
         full = True
     # ★Sources carry different weights★ — give a memory a human curated by hand (a ⛔ rule) the
@@ -1506,7 +1505,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # so the next human-run index still rebuilds.
     if full or not existing:
         set_meta(db, "tokenizer", str(textindex.TOKENIZER_VERSION))
-        set_meta(db, "graph_provenance_version", "5")
+        set_meta(db, "graph_provenance_version", "6")
     stats = {"added": added, "updated": updated, "skipped": skipped,
              "removed": len(removed), "duplicates": dups,
              "seconds": round(time.time() - t0, 2)}

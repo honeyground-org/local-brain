@@ -97,22 +97,19 @@ def verify_resolved_vector(real_semantic=False):
         db.commit()
         base=[dict(name='seed',path='/seed',cosine=0.2)]
         clock=[0.0]
-        original_call=server.call_tool
         def monotonic():
             clock[0]+=0.001
             return clock[0]
-        def measured_call(*args, **kwargs):
-            # A common synthetic baseline cost keeps this check about revision binding;
-            # the existing latency controls separately exercise rejection and rollback.
-            if kwargs.get('_measure'):
-                clock[0]+=1.0
-            return original_call(*args, **kwargs)
-        with patch.object(server,'call_tool',side_effect=measured_call), \
-             patch.object(vectors,'_qcache_get',return_value=array.array('f',[1.0,0.0])), \
+        def baseline_recall(*args,**kwargs):
+            # Common synthetic retrieval work keeps this test about revision binding.
+            # Dedicated boundary checks below validate the full serving cost.
+            clock[0]+=1.0
+            return [dict(r) for r in base]
+        with patch.object(vectors,'_qcache_get',return_value=array.array('f',[1.0,0.0])), \
              patch.object(vectors,'model_tag',return_value='fixture'), patch.object(vectors,'DIM',2), \
              (nullcontext() if real_semantic else patch.object(search,'meaning',side_effect=lambda *a,**k:([dict(r) for r in base],''))), \
              patch.object(search,'query_weights',return_value=[('water',1,['water'])]), \
-             patch.object(search,'recall',return_value=base), \
+             patch.object(search,'recall',side_effect=baseline_recall), \
              patch.object(graphstore,'ask',return_value={1:{2}}) as neighbors, \
              patch.object(server,'_words_unsure',return_value=False), \
              patch.object(server,'_note_recall'), patch.object(observe,'write'), \
@@ -196,24 +193,47 @@ def verify_support_and_cost():
         with lifecycle.view('history'):
             assert original[0] in lifecycle.snapshot(db).resolve(original[0])
     db.close()
-    for extra,expected in ((0.0005,'fusion'),(0.005,'baseline')):
+    for extra,gate,cache_cost,expected in ((0.0005,0,0,'fusion'),(0.005,0,0,'baseline'),(0.0005,0.002,0,'baseline'),(0.0005,0,0.002,'baseline')):
         db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db);evidence(db,16,'fusion')
-        clock=[0.0];base=[dict(name='baseline',path='/baseline')];ranked=[dict(name='reranked',path='/reranked')]
+        live=[False];clock=[0.0];base=[dict(name='baseline',path='/baseline')];ranked=[dict(name='reranked',path='/reranked')]
+        real_certified=personal.certified
+        def certify(*args,**kwargs):
+            clock[0]+=gate if live[0] else 0
+            return real_certified(*args,**kwargs)
+        def cached(*args,**kwargs):
+            clock[0]+=cache_cost if live[0] else 0
+            return [1.0]
         def recall(*args,**kwargs):
             clock[0]+=0.010
             return base
         def candidate(*args,**kwargs):
             clock[0]+=extra
             return ranked
-        with patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'), \
+        with patch.object(vectors,'_qcache_get',side_effect=cached), patch.object(personal,'certified',side_effect=certify), patch.object(observe,'write'), \
              patch.object(personal.time,'monotonic',side_effect=lambda:clock[0]), \
              patch.object(search,'recall',side_effect=recall), patch.object(server,'_words_unsure',return_value=False), \
              patch.object(server,'_note_recall'), patch.object(personal,'candidates',side_effect=candidate), \
              patch.object(recalljson,'response',side_effect=lambda db,**kw:{'rows':kw['rows']}):
             assert personal.update(db)['arm']=='fusion'
+            live[0]=True
             served=json.loads(server.call_tool(db,'recall',{'query':'plant'}))['rows']
             assert personal.state(db)['arm']==expected, ('total serving cost not enforced',extra)
             assert served==(ranked if expected=='fusion' else base)
+        db.close()
+
+    # A challenger must pay validation/cache costs when it is certified, too.
+    for gate_cost,cache_cost in ((0.002,0),(0,0.002)):
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db);evidence(db,16,'fusion')
+        clock=[0.0];real_certified=personal.certified
+        def certify(*args,**kwargs):
+            clock[0]+=gate_cost
+            return real_certified(*args,**kwargs)
+        def cached(*args,**kwargs):
+            clock[0]+=cache_cost
+            return [1.0]
+        with patch.object(personal,'certified',side_effect=certify), patch.object(vectors,'_qcache_get',side_effect=cached), \
+             patch.object(personal.time,'monotonic',side_effect=lambda:clock[0]), patch.object(observe,'write'):
+            assert personal.update(db)['arm']=='baseline', 'certification omitted validation/cache cost'
         db.close()
     print('PASS: superseded support revokes training and serving; total baseline plus rerank cost matches certification')
 

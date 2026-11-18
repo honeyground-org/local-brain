@@ -74,6 +74,10 @@ from brain import engines, hook, search, store, vectors
 shape, log, calls, prompt = sys.argv[1:5]
 ids = [int(x) for x in os.environ["IDS"].split(",")]
 hook._timing_path = lambda: log
+# This check owns a fixed index. The post-answer worker would otherwise rewrite it
+# between cases (and can hold a schema lock when the next hook connects). Worker
+# scheduling and concurrent reads are covered by verify_deferred/verify_hook_wall.
+hook._after = lambda: None
 hook._named = lambda p, db=None: []
 search.recall = lambda *a, **k: []                    # words fall silent → the second stage runs
 vectors.search = lambda db, q, k=5: ([] if shape == "nocands" else
@@ -107,13 +111,20 @@ try:
 except SystemExit:
     raise
 except Exception:
-    sys.exit(0)
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
 '''
 
 
 def _run(shape: str, env_extra: dict = None) -> dict:
     log = os.path.join(_TMP, "timing-%s.jsonl" % shape)
     calls = os.path.join(_TMP, "calls-%s.jsonl" % shape)
+    # Two cases deliberately use the same prompt shape with different providers.
+    # A failed second process must never look like the first process's observation.
+    for path in (log, calls):
+        if os.path.exists(path):
+            os.unlink(path)
     drv = os.path.join(_TMP, "driver.py")
     with open(drv, "w", encoding="utf-8") as fh:
         fh.write(DRIVER)
@@ -129,6 +140,8 @@ def _run(shape: str, env_extra: dict = None) -> dict:
     if os.path.exists(calls):
         sent = [json.loads(x) for x in open(calls, encoding="utf-8") if x.strip()]
     last = rec[-1] if rec else {}
+    check("hook process records %s" % shape, p.returncode == 0 and bool(rec),
+          p.stderr[-300:] if p.returncode or not rec else "")
     return {"out": p.stdout, "err": p.stderr[-300:], "rec": rec, "raw": raw, "calls": len(sent),
             "sent": sent, "judge": last.get("judge"), "cut": last.get("cut")}
 
@@ -142,7 +155,8 @@ def _build() -> tuple:
         with open(os.path.join(_MEM, name + ".md"), "w", encoding="utf-8") as fh:
             fh.write("---\nname: %s\ndescription: fixture note %s\n---\n\n%s\n" % (name, name, body))
     db = store.connect()
-    store.reindex(db, full=True, recalibrate=False, refresh_history=False)
+    store.reindex(db, full=True, recalibrate=False, refresh_history=False,
+                  queue_embedding=False, sync=False, heal=False)
     got = db.execute("SELECT id, name FROM docs ORDER BY id").fetchall()
     ids, names = [r["id"] for r in got], [r["name"] for r in got]
     # one vector in the space in use — the hook asks only "is there any", the search itself is intercepted
