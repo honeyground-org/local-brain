@@ -276,7 +276,7 @@ def _names(db, text: str, pattern) -> list:
         # ambiguous, conservatively exclude every matching document from learning.
         content = m.group(1)
         separator = r"\s+←\s+" if pattern is _RELATED_LINE else r"\s+\["
-        for boundary in re.finditer(separator, content):
+        for boundary in re.finditer("(?=" + separator + ")", content):
             n = content[:boundary.start()]
             if n not in out and db.execute("SELECT 1 FROM docs WHERE name=?", (n,)).fetchone():
                 out.append(n)
