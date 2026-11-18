@@ -843,9 +843,13 @@ def search(db: sqlite3.Connection, query: str, k: int = 5,
         return []
     resolved = {}
     for did, cos in order:
-        for target in temporal.resolve(did):
-            resolved[target] = max(cos, resolved.get(target, -1.0))
+        # A predecessor can identify its successor, but its vector describes a different
+        # body. Only the scored revision may contribute similarity or its distribution.
+        if did in temporal.resolve(did):
+            resolved[did] = max(cos, resolved.get(did, -1.0))
     order = sorted(resolved.items(), key=lambda pair: -pair[1])
+    if not order:
+        return []
     head = [c for _, c in order[:TOPN_FOR_MEAN]]
     mean = (sum(head) / len(head)) or 1e-9
     # Keep the raw cosine and its reference distribution honest. Feedback changes

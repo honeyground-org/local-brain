@@ -78,7 +78,8 @@ def verify_semantic_route():
     print('PASS: cold evidence stays pending; warm evidence uses the actual automatic semantic route')
 
 
-def verify_resolved_vector():
+def verify_resolved_vector(real_semantic=False):
+    from contextlib import nullcontext
     import array
     import sqlite3
     from brain import graphstore, observe, search, server, recalljson
@@ -88,9 +89,11 @@ def verify_resolved_vector():
                               (3,'current',dict(topic='plant',facet='water',status='active',supersedes=['old']))):
             db.execute('INSERT INTO docs(id,name,path,source,sha,title,description,body,lifecycle) VALUES(?,?,?,?,?,?,?,?,?)',
                        (did,name,'/'+name,'memory','sha-'+str(did),'','', 'water',json.dumps(meta)))
-        for did in ids:
+        for did in ((1,)+ids if real_semantic else ids):
             db.execute('INSERT INTO vectors(doc_id,chunk_no,sha,model,dim,vec) VALUES(?,?,?,?,?,?)',
-                       (did,0,'sha-'+str(did),'fixture',2,array.array('f',[1.0 if did==2 else -1.0,0.0]).tobytes()))
+                       (did,0,'sha-'+str(did),'fixture',2,array.array('f',[0.2 if did==1 else 1.0 if did==2 else -1.0,0.98 if did==1 else 0.0]).tobytes()))
+        # A same-name document in another scope must never replace the selected seed.
+        db.execute("INSERT INTO docs(id,name,path,project_id,source,sha,body) VALUES(0,'seed','/other/seed','other','memory','other','water')")
         db.commit()
         base=[dict(name='seed',path='/seed',cosine=0.2)]
         clock=[0.0]
@@ -105,17 +108,18 @@ def verify_resolved_vector():
                 clock[0]+=1.0
             return original_call(*args, **kwargs)
         with patch.object(server,'call_tool',side_effect=measured_call), \
-             patch.object(vectors,'_qcache_get',return_value=[1.0,0.0]), \
+             patch.object(vectors,'_qcache_get',return_value=array.array('f',[1.0,0.0])), \
              patch.object(vectors,'model_tag',return_value='fixture'), patch.object(vectors,'DIM',2), \
-             patch.object(search,'meaning',side_effect=lambda *a,**k:([dict(r) for r in base],'')), \
+             (nullcontext() if real_semantic else patch.object(search,'meaning',side_effect=lambda *a,**k:([dict(r) for r in base],''))), \
              patch.object(search,'query_weights',return_value=[('water',1,['water'])]), \
              patch.object(search,'recall',return_value=base), \
-             patch.object(graphstore,'ask',return_value={1:{2}}), \
+             patch.object(graphstore,'ask',return_value={1:{2}}) as neighbors, \
              patch.object(server,'_words_unsure',return_value=False), \
              patch.object(server,'_note_recall'), patch.object(observe,'write'), \
              patch.object(recalljson,'response',side_effect=lambda db,**kw:{'rows':kw['rows']}), \
              patch.object(personal.time,'monotonic',side_effect=monotonic):
             rows=personal.candidates(db,'water',base,'linked',8)
+            assert neighbors.called and 1 in neighbors.call_args.args[2] and 0 not in neighbors.call_args.args[2], 'same-name seed crossed scope'
             current=[v for v in rows if v['name']=='current']
             assert bool(current)==(3 in ids), 'linked candidate version mismatch '+case
             if current:
@@ -123,12 +127,17 @@ def verify_resolved_vector():
             for i in range(12):
                 personal.record(db,'water '+str(i),'/current','revision-'+str(i),1)
             result=personal.update(db)
-            assert result['arm']==('linked' if 3 in ids else 'baseline'), ('measurement version mismatch',case,result,[dict(r) for r in db.execute('SELECT scores,costs FROM personal_events LIMIT 2')])
+            assert result['arm'] in (('fusion','linked') if 3 in ids else ('baseline',)), ('measurement version mismatch',case,result,[dict(r) for r in db.execute('SELECT scores,costs FROM personal_events LIMIT 2')])
             served=json.loads(server.call_tool(db,'recall',{'query':'water live'}))['rows']
             current=[v for v in served if v['name']=='current']
-            assert bool(current)==(3 in ids), 'serving version mismatch '+case
+            assert bool(current)==(3 in ids), ('serving version mismatch',case,real_semantic,personal.state(db),served)
             if current:
                 assert current[0]['cosine']==-1.0, 'serving used the predecessor vector '+case
+            if real_semantic and case=='old_only':
+                db.execute('DELETE FROM vectors WHERE doc_id=1')
+                db.commit()
+                assert vectors.search(db,'retired only',k=8)==[], 'all-retired candidates must be empty'
+                assert search.meaning(db,'retired only',8)==([],''), 'empty current pool is not a backend failure'
         db.close()
     print('PASS: old-only/current-only/both vectors bind to the resolved revision in measurement and serving')
 
@@ -209,6 +218,7 @@ def main():
     cache.stop()
     verify_semantic_route()
     verify_resolved_vector()
+    verify_resolved_vector(real_semantic=True)
     print('PASS: weak evidence retained, independent holdout promoted, drift rolled back, users isolated')
 
 if __name__ == '__main__':

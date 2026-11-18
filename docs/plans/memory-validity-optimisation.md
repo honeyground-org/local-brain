@@ -266,3 +266,8 @@ A shared SHA-pinned legacy source does not make different topic/facet identities
 ### Resolved revision vectors in linked ranking
 
 Graph neighbors can name an earlier revision. Linked candidates now use the hydrated current document ID for vector lookup, matching their body and its SHA/model/dimension checks. Old-only, current-only and both-vector cases are checked through candidate measurement and certified serving. No old vector is attributed to a new body; absence of the current vector leaves that expansion out. No operational use of the faulty candidate or user-level quality advantage was observed.
+
+
+### Semantic scores and exact graph seeds
+
+The native vector search now filters superseded revisions rather than assigning their cosine to a successor. Current memories need their own current-SHA vector; a predecessor cannot contribute a score or reference-distribution value. Actual SQLite vector search is exercised through policy measurement, certification and MCP serving for old-only, current-only and conflicting vectors. Graph expansion identifies a selected semantic seed by its unique path, not a potentially shared name across scopes. These are correctness checks on synthetic fixtures, not a measured user-quality gain.

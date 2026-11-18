@@ -162,7 +162,7 @@ def candidates(db, query, base, arm, k, terms=()):
     if arm == "linked" and semantic:
         seeds = []
         for r in semantic[:k]:
-            found = search.resolve(db, r["name"])
+            found = db.execute("SELECT id FROM docs WHERE path=?", (r["path"],)).fetchone()
             if found:
                 seeds.append(found["id"])
         links = graphstore.ask(db, "neighbors", seeds)
