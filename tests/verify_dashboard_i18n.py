@@ -44,6 +44,53 @@ def visible(html: str) -> str:
     return re.sub(r"<[^>]+>", "\n", body)
 
 
+def verify_cli_readonly():
+    import hashlib
+    import sqlite3
+    import subprocess
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import call, patch
+    from brain import cli
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        home = root / "missing"
+        env = dict(os.environ, BRAIN_HOME=str(home), BRAIN_CONFIG=str(root / "config.json"),
+                   BRAIN_LANG="en")
+        def run():
+            return subprocess.run([sys.executable, "-m", "brain.cli", "dashboard", "--no-open",
+                                   "--out", str(root / "page.html")], env=env,
+                                  capture_output=True, text=True, encoding="utf-8")
+        result = run()
+        check("CLI missing index is not created", result.returncode == 2 and not home.exists(),
+              result.stdout + result.stderr)
+        with patch.dict(os.environ, env):
+            db = store.connect()
+            path = Path(store.db_path())
+            store.set_meta(db, "schema_version", "5")
+            db.commit()
+            db.close()
+        before = hashlib.sha256(path.read_bytes()).hexdigest()
+        result = run()
+        check("CLI incompatible schema is not migrated", result.returncode == 2
+              and hashlib.sha256(path.read_bytes()).hexdigest() == before
+              and not (root / "page.html").exists(), result.stdout + result.stderr)
+        db = sqlite3.connect(str(path))
+        db.execute("UPDATE meta SET v=? WHERE k='schema_version'", (store.SCHEMA_VERSION,))
+        db.commit()
+        db.close()
+        before = hashlib.sha256(path.read_bytes()).hexdigest()
+        result = run()
+        check("CLI current index renders without changing bytes", result.returncode == 0
+              and (root / "page.html").exists()
+              and hashlib.sha256(path.read_bytes()).hexdigest() == before,
+              result.stdout + result.stderr)
+        with patch.dict(os.environ, env), patch.object(store, "connect", wraps=store.connect) as connect:
+            check("CLI explicitly requests read-only connection",
+                  cli.main(["dashboard", "--no-open", "--out", str(root / "page.html")]) == 0
+                  and connect.call_args_list == [call(readonly=True)])
+
+
 def verify_observatory():
     import datetime
     import json
@@ -300,6 +347,7 @@ def main():
         i18n._lang = saved_lang
         i18n._cache.clear()
 
+    verify_cli_readonly()
     verify_workspace_controls()
     verify_workspace()
     verify_observatory()

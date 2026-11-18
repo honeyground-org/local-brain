@@ -863,5 +863,6 @@
  "dash.inspect.topic": "主題",
  "dash.inspect.facet": "観点",
  "dash.inspect.no_history": "関連する版の記録がありません。",
- "dash.inspect.unscoped": "範囲未指定"
+ "dash.inspect.unscoped": "範囲未指定",
+ "cli.dashboard.index_unavailable": "インデックスがないか、使用できないか、互換性がありません。作成や移行は行っていません。brain index を明示的に実行してから再試行してください。"
 }

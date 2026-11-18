@@ -863,5 +863,6 @@
  "dash.inspect.topic": "주제",
  "dash.inspect.facet": "관점",
  "dash.inspect.no_history": "연결된 버전 기록이 없습니다.",
- "dash.inspect.unscoped": "범위 미지정"
+ "dash.inspect.unscoped": "범위 미지정",
+ "cli.dashboard.index_unavailable": "인덱스가 없거나 사용할 수 없거나 호환되지 않습니다. 인덱스를 생성하거나 마이그레이션하지 않았습니다. brain index를 직접 실행한 뒤 다시 시도하세요."
 }
