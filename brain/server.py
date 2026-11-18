@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.5.3"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.5.4"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -461,7 +461,7 @@ def _do_remember(db, args: dict) -> str:
                     return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
                 if rc.requires_local_only(db, args) and args.get("embed") is not False:
                     return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
-                bad = rc.check_extraction(db, args) or rc.check_identity(db, args)
+                bad = rc.check_extraction(db, args, path) or rc.check_identity(db, args)
                 if bad:
                     return json.dumps(bad, ensure_ascii=False)
                 preview = lifecycle.prepare(db, name, args)
@@ -501,7 +501,7 @@ def _do_remember(db, args: dict) -> str:
             if result in ("new", "updated"):
                 if rc.requires_local_only(db, args) and args.get("embed") is not False:
                     return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
-                bad = rc.check_extraction(db, args) or rc.check_identity(db, args)
+                bad = rc.check_extraction(db, args, path) or rc.check_identity(db, args)
                 if bad:
                     return json.dumps(bad, ensure_ascii=False)
                 try:

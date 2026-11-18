@@ -144,3 +144,5 @@ contradictions require host review. Unobserved conversations cannot be reconstru
 Save-guard follow-up (2.5.2): legacy evidence-carried references receive the same new-write validation without changing their request hash or stored bytes. Successful old retries remain noop. Candidate review and preparation also compare ancestor file SHAs with indexed versions before reuse; an unindexed ancestor edit makes the candidate unavailable. This adds ancestor file reads only to explicit identity operations, not general recall.
 
 Entry-point follow-up (2.5.3): read-only MCP identity review and discovery never initialise the index. Legacy reference recognition excludes exact source-span evidence, and both reference formats require the group snapshot for new writes. Existing successful retries remain compatible.
+
+Target-name follow-up (2.5.4): source-bound fact writes recheck the target name in the refreshed exact scope, preventing a competing source from making history ambiguous after preparation. Other scopes and successful retries remain compatible.
