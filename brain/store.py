@@ -445,24 +445,63 @@ def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
             reference = json.loads(meta.get("identity_reference") or "null")
             life = json.loads(meta.get("lifecycle") or "null")
             if isinstance(extracted, dict) and isinstance(extracted.get("name"), str):
-                generated = {extracted["name"]}
-                if isinstance(reference, dict) and isinstance(reference.get("name"), str):
-                    generated.add(reference["name"])
-                if isinstance(life, dict):
-                    for evidence in life.get("evidence", []):
-                        if isinstance(evidence, str) and evidence.startswith("Identity selected: "):
-                            try:
-                                selected = json.loads(evidence[len("Identity selected: "):])
-                                if isinstance(selected, dict) and isinstance(selected.get("name"), str):
-                                    generated.add(selected["name"])
-                            except (ValueError, TypeError):
-                                pass
-                footer = re.search(r"\n\nrelated: (\[\[[^\r\n]+)\s*$", graph_body)
-                if footer:
-                    entries = footer.group(1).strip().split(" · ")
-                    if all(re.fullmatch(r"\[\[[^\[\]\r\n]+\]\]", entry) for entry in entries):
-                        kept = [entry for entry in entries if entry[2:-2] not in generated]
-                        graph_body = graph_body[:footer.start()] + ("\n\nrelated: " + " · ".join(kept) if kept else "")
+                explicit = extracted.get("graph_policy") == "explicit"
+                # The payload receipt can also prove an older footer was authored
+                # body text, rather than generated links. Never guess from syntax.
+                if not explicit and meta.get("payload_sha"):
+                    from brain import remembercontract
+                    candidate = dict(description=meta.get("description"), type=meta.get("type"),
+                                     body=body.strip(), links=[], search_aliases=json.loads(meta.get("search_aliases") or "[]"),
+                                     project_id=meta.get("project_id"), source=meta.get("source"),
+                                     lifecycle=life, extracted_from=extracted)
+                    if reference is not None:
+                        candidate["identity_reference"] = reference
+                    for observed in (None, meta.get("verified_at") or None):
+                        candidate["observed_at"] = observed
+                        for embedded in (None, False):
+                            candidate.pop("embed", None)
+                            if embedded is not None:
+                                candidate["embed"] = embedded
+                            if remembercontract.payload_sha(candidate) == meta["payload_sha"]:
+                                explicit = True
+                if not explicit:
+                    generated = {extracted["name"]}
+                    if isinstance(reference, dict) and isinstance(reference.get("name"), str):
+                        generated.add(reference["name"])
+                    if isinstance(life, dict):
+                        for evidence in life.get("evidence", []):
+                            if isinstance(evidence, str) and evidence.startswith("Identity selected: "):
+                                try:
+                                    selected = json.loads(evidence[len("Identity selected: "):])
+                                    if isinstance(selected, dict) and isinstance(selected.get("name"), str):
+                                        generated.add(selected["name"])
+                                except (ValueError, TypeError):
+                                    pass
+                    marker = "\n\nrelated: "
+                    ordered = [extracted["name"]] + sorted(generated - {extracted["name"]})
+                    removed_footer = False
+                    for names in (ordered, ordered[:1]):
+                        suffix = marker + " · ".join("[[%s]]" % n for n in names)
+                        if graph_body.rstrip().endswith(suffix):
+                            graph_body = graph_body.rstrip()[:-len(suffix)]
+                            removed_footer = True
+                            break
+                    at = graph_body.rfind(marker)
+                    if at >= 0 and not removed_footer:
+                        tail = graph_body[at + len(marker):].rstrip()
+                        # Match the serializer's exact strings, not wiki syntax:
+                        # source filenames can contain brackets or the separator.
+                        for provenance_name in sorted(generated, key=len, reverse=True):
+                            token = "[[%s]]" % provenance_name
+                            if tail == token:
+                                tail = ""
+                            elif tail.startswith(token + " · "):
+                                tail = tail[len(token) + 3:]
+                            elif tail.endswith(" · " + token):
+                                tail = tail[:-len(token) - 3]
+                            else:
+                                tail = tail.replace(" · " + token + " · ", " · ")
+                        graph_body = graph_body[:at] + (marker + tail if tail else "")
         except (ValueError, TypeError):
             pass
         graph_text = header + graph_body
@@ -1347,7 +1386,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     #    `brain-session` announces it at the next session start. The first human-run index (`brain index`,
     #    the MCP `reindex`, `install`) rebuilds — once.
     tok_stale = tokenizer_stale(db)
-    graph_stale = get_meta(db, "graph_provenance_version", "0") != "2"
+    graph_stale = get_meta(db, "graph_provenance_version", "0") != "3"
     if (tok_stale or graph_stale) and recalibrate:
         full = True
     # ★Sources carry different weights★ — give a memory a human curated by hand (a ⛔ rule) the
@@ -1468,7 +1507,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # so the next human-run index still rebuilds.
     if full or not existing:
         set_meta(db, "tokenizer", str(textindex.TOKENIZER_VERSION))
-        set_meta(db, "graph_provenance_version", "2")
+        set_meta(db, "graph_provenance_version", "3")
     stats = {"added": added, "updated": updated, "skipped": skipped,
              "removed": len(removed), "duplicates": dups,
              "seconds": round(time.time() - t0, 2)}

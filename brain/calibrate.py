@@ -524,7 +524,7 @@ def measure(db: sqlite3.Connection) -> dict:
 #   47 (2026-11-11)  `stores.serve(heal=)` / `stores.resync`: a database whose push failed while it was down is
 #                    pushed to again once it answers, instead of staying unused until the next local change.
 #                    The answer is the local copy's either way; bumped because `stores` is a ruler module.
-CODE_GENERATION = 52
+CODE_GENERATION = 53
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·
@@ -532,7 +532,7 @@ CODE_GENERATION = 52
 # ⚠️ Known gap, on purpose: the noise-control sentences live in the message catalogs (`calib.noise.*`),
 #    so editing those moves the floor without moving this fingerprint. They are frozen control
 #    text that nobody edits casually, and `_bench` still guards the deployment.
-RULER_MODULES = ("personal", "tail", "hosts", "adaptive", "calibrate", "evalinit", "graphstore", "hook", "langdata", "lexicon", "search",
+RULER_MODULES = ("remembercontract", "personal", "tail", "hosts", "adaptive", "calibrate", "evalinit", "graphstore", "hook", "langdata", "lexicon", "search",
                  "store", "stores", "textindex", "translit", "vectors", "embedplan", "localembed", "lifecycle")
 
 

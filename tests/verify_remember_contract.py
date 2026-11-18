@@ -527,6 +527,8 @@ def identity_checks(db):
         check('source quotation metadata is not a graph edge',not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
         legacy_args=dict(old_request,name='identity_legacy_footer',body='Keep [[body_authored]] explicit.')
         legacy_args.pop('identity_reference',None)
+        legacy_args['extracted_from']=dict(legacy_args['extracted_from'])
+        legacy_args['extracted_from'].pop('graph_policy',None)
         legacy_text=rc.render(legacy_args['name'],rc.prepared(legacy_args),'')
         legacy_path=os.path.join(_MEM,legacy_args['name']+'.md')
         with open(legacy_path,'w',encoding='utf-8') as f:f.write(legacy_text)
@@ -535,12 +537,42 @@ def identity_checks(db):
         store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
         legacy_id=db.execute('SELECT id FROM docs WHERE path=?',(legacy_path,)).fetchone()[0]
         check('legacy saved proposal no longer links a foreign homonym',not graphstore.LOCAL.linked(db,legacy_id,foreign_id) and _read(legacy_args['name'])==legacy_text)
+        authored=call('prepare_fact',source_name='identity_quoted_source',source_sha=quoted_source['sha'],quotes=[quote],name='identity_authored_footer',description='Explicit relationship',type='user',body='Author-written.\n\nrelated: [[identity_quoted_source]]',project_id=scope,identity_reference=scoped_ref)['save_arguments']
+        check('new extraction marks authored graph policy',authored['extracted_from']['graph_policy']=='explicit')
+        _j(db,**authored)
+        authored_path=os.path.join(_MEM,authored['name']+'.md')
+        check('new authored related footer survives graph parsing','identity_quoted_source' in store.read_doc(authored_path,'memory')['links'])
+        unmarked=dict(authored,name='identity_unmarked_authored',extracted_from=dict(authored['extracted_from']))
+        unmarked['extracted_from'].pop('graph_policy')
+        unmarked_path=os.path.join(_MEM,unmarked['name']+'.md')
+        with open(unmarked_path,'w',encoding='utf-8') as f:f.write(rc.render(unmarked['name'],rc.prepared(unmarked),''))
+        check('older authored footer is retained when its payload receipt proves it','identity_quoted_source' in store.read_doc(unmarked_path,'memory')['links'])
+        bracket_path=os.path.join(_MEM,'plant[old].md')
+        with open(bracket_path,'w',encoding='utf-8') as f:f.write('---\nname: plant[old]\nproject_id: '+scope+'\n---\nBracket source evidence.\n')
+        bracket_foreign=os.path.join(duplicate,'bracket-foreign.md')
+        with open(bracket_foreign,'w',encoding='utf-8') as f:f.write('---\nname: plant[old\nproject_id: other-bracket-scope\n---\nForeign record.\n')
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+        bracket_sha=rc.file_sha(bracket_path)
+        bracket=call('prepare_fact',source_name='plant[old]',source_sha=bracket_sha,quotes=['Bracket source evidence.'],name='bracket_legacy_proposal',description='Legacy source link',type='user',body='Proposed fact.',project_id=scope,topic='plant',facet='water')['save_arguments']
+        bracket['extracted_from']=dict(bracket['extracted_from']);bracket['extracted_from'].pop('graph_policy')
+        bracket['links']=['plant[old]']
+        rejected=_j(db,**bracket)
+        check('unsaved unreferenced legacy extraction requires preparation again',(rejected.get('error') or {}).get('code')=='identity_reprepare_required')
+        bracket=rc.prepared(bracket)
+        legacy_bracket_path=os.path.join(_MEM,bracket['name']+'.md')
+        legacy_bracket_text=rc.render(bracket['name'],bracket,'')
+        with open(legacy_bracket_path,'w',encoding='utf-8') as f:f.write(legacy_bracket_text)
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+        bid=db.execute('SELECT id FROM docs WHERE path=?',(legacy_bracket_path,)).fetchone()[0]
+        fid=db.execute('SELECT id FROM docs WHERE path=?',(bracket_foreign,)).fetchone()[0]
+        check('legacy bracket provenance creates no foreign graph edge',not graphstore.LOCAL.linked(db,bid,fid))
+        check('successful legacy extraction retry remains noop',_j(db,**bracket).get('result')=='noop' and _read(bracket['name'])==legacy_bracket_text)
         db.execute('INSERT OR IGNORE INTO links(src_id,dst_name) VALUES(?,?)',(quoted_id,ref['name']))
         store.set_meta(db,'graph_provenance_version','0')
         db.commit()
         check('legacy graph fixture starts with contaminated edge',graphstore.LOCAL.linked(db,quoted_id,foreign_id))
         store.reindex(db,recalibrate=True,sync=False,heal=False,queue_embedding=False,refresh_history=False)
-        check('normal indexing repairs legacy provenance edges without file edits',store.get_meta(db,'graph_provenance_version')=='2' and not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
+        check('normal indexing repairs legacy provenance edges without file edits',store.get_meta(db,'graph_provenance_version')=='3' and not graphstore.LOCAL.linked(db,quoted_id,foreign_id))
 
 
     finally:

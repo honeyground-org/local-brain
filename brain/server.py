@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.0"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.1"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -321,7 +321,7 @@ TOOLS.append({"name": "review_identity",
                                    "project_id": {"type": "string", "description": "Exact scope; omitted or empty means unscoped only"}},
                     "required": ["names"]}})
 next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"]["extracted_from"] = {
-    "type": "object", "description": "Provenance returned by prepare_fact: name, sha and spans with Unicode code-point start/end/text. Source and quotes are checked on new saves. Only proposed, non-replacing facts may use this field."}
+    "type": "object", "description": "Provenance returned by prepare_fact: name, sha, spans with Unicode code-point start/end/text, and graph_policy:explicit. Source and quotes are checked on new saves. Only proposed, non-replacing facts may use this field."}
 
 next(t for t in TOOLS if t["name"] == "remember")["inputSchema"]["properties"]["embed"] = {
     "type": "boolean", "description": "Explicit document embedding permission. Extracted proposals and revisions of embed:false predecessors must retain false."}
