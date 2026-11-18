@@ -694,13 +694,13 @@ def _prepare_fact(db, args):
             return error("ambiguous_quote", "Include enough surrounding source text to identify one passage")
         spans.append(dict(start=start, end=start+len(quote), text=quote))
     save["extracted_from"] = dict(name=name, sha=sha, spans=spans)
-    save["links"] = [name]
+    save["links"] = [] if selected else [name]
     save["embed"] = False
     save["lifecycle"]["evidence"] = ["%s@%s [%s:%s]: %s" % (name, sha, s["start"], s["end"], s["text"]) for s in spans]
     if selected:
         save["lifecycle"]["evidence"].append("Identity selected: " + json.dumps(reference, ensure_ascii=False, sort_keys=True))
-        if reference["name"] not in save["links"]:
-            save["links"].append(reference["name"])
+        # Keep the scope/SHA-qualified reference as provenance. A bare name graph
+        # edge can resolve to homonyms in other projects and is not equivalent.
     bad = validate(save)
     if bad:
         return bad
