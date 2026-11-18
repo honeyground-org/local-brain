@@ -448,8 +448,10 @@ def extraction_shape(args):
     value = args.get("extracted_from")
     if args.get("embed") is True:
         return "Extracted proposals must keep embed:false"
-    if not isinstance(value, dict) or set(value) != {"name", "sha", "spans"}:
-        return "extracted_from requires name, sha and spans"
+    if not isinstance(value, dict) or set(value) not in ({"name", "sha", "spans"}, {"name", "sha", "spans", "graph_policy"}):
+        return "extracted_from requires name, sha, spans and optional graph_policy"
+    if "graph_policy" in value and value["graph_policy"] != "explicit":
+        return "graph_policy must be explicit"
     if not isinstance(value["name"], str) or not 1 <= len(value["name"]) <= 200 or value["name"] == args.get("name"):
         return "Use a distinct source name of at most 200 characters"
     if not isinstance(value["sha"], str) or not _SHA.fullmatch(value["sha"]):
@@ -491,6 +493,10 @@ def check_extraction(db, args, target_path=None):
     value = args.get("extracted_from")
     if value is None:
         return None
+    if value["name"] in (args.get("links") or []):
+        return error("identity_reprepare_required", "Prepare this extraction again without unqualified source links")
+    if value.get("graph_policy") != "explicit":
+        return error("extraction_reprepare_required", "Prepare this unsaved legacy extraction again with explicit graph provenance")
     if target_path is not None:
         origins = db.execute("SELECT path FROM docs WHERE name=? AND COALESCE(project_id, '')=?",
                              (value["name"], args.get("project_id") or "")).fetchall()
@@ -714,7 +720,7 @@ def _prepare_fact(db, args):
         if source["body"].find(quote, start+1) >= 0:
             return error("ambiguous_quote", "Include enough surrounding source text to identify one passage")
         spans.append(dict(start=start, end=start+len(quote), text=quote))
-    save["extracted_from"] = dict(name=name, sha=sha, spans=spans)
+    save["extracted_from"] = dict(name=name, sha=sha, spans=spans, graph_policy="explicit")
     save["links"] = []
     save["embed"] = False
     save["lifecycle"]["evidence"] = ["%s@%s [%s:%s]: %s" % (name, sha, s["start"], s["end"], s["text"]) for s in spans]

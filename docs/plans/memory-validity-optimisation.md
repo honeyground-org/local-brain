@@ -201,3 +201,16 @@ Source aliases are rejected in both phases. Successful identical retries still r
 and names in other scopes remain valid when their actual paths differ. Graph provenance
 version 2 triggers one normal full index refresh to remove legacy generated footer edges;
 no source bytes or historical evidence are changed.
+
+2.7.1 makes extraction graph provenance explicit (`extracted_from.graph_policy=explicit`).
+New preparation emits the marker and no automatic source links. Unsaved legacy requests must
+be prepared again; successful legacy retries keep their original payload hash and return noop.
+Authored body relationships, including a terminal `related:` line, remain relationships.
+For unmarked historical records, a matching payload receipt can prove that the footer was
+part of the authored body. Otherwise matching provenance tokens are conservatively excluded
+from the derived graph, using the serializer's literal strings even for bracketed filenames.
+Historical metadata cannot always reconstruct original request whitespace, so ambiguous legacy
+footers cannot be classified perfectly; source bytes and evidence remain available for review.
+Graph provenance version 3 rebuilds only derived links during normal indexing. Generation 53
+includes the receipt helper in the measurement fingerprint. This is a correctness repair,
+not evidence of improved retrieval scores or native-host work efficiency.
