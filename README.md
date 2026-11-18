@@ -1196,7 +1196,7 @@ normalisation. At most ten quotes of 1,000 characters each are accepted.
 
 Preparation writes nothing, performs no indexing or model calls, and returns `save_arguments` for
 `remember`. Review the claim and quotations before saving. The request records a `proposed` lifecycle,
-links the source without superseding it, and includes `extracted_from: {name,sha,spans}`; span offsets
+preserves the source without superseding it, and records `extracted_from: {name,sha,spans}`; span offsets
 count Unicode code points in that trimmed body. Provenance is retained in frontmatter and quoted
 lifecycle evidence. Source scope, SHA and quote spans are checked again before a new save. A changed
 source returns `source_changed`; a changed related fact snapshot returns `fact_changed`. Reread and
