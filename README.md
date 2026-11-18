@@ -1196,7 +1196,7 @@ normalisation. At most ten quotes of 1,000 characters each are accepted.
 
 Preparation writes nothing, performs no indexing or model calls, and returns `save_arguments` for
 `remember`. Review the claim and quotations before saving. The request records a `proposed` lifecycle,
-preserves the source without superseding it, and records `extracted_from: {name,sha,spans}`; span offsets
+preserves the source without superseding it, and records `extracted_from: {name,sha,spans,graph_policy:"explicit"}`; span offsets
 count Unicode code points in that trimmed body. Provenance is retained in frontmatter and quoted
 lifecycle evidence. Source scope, SHA and quote spans are checked again before a new save. A changed
 source returns `source_changed`; a changed related fact snapshot returns `fact_changed`. Reread and
@@ -1391,4 +1391,12 @@ Extraction proposals require a new physical destination: preparation and save re
 files, including cross-project occupants and source aliases, even with an expected SHA.
 Identical completed retries remain noops. Indexing also excludes legacy automatically appended
 source/identity entries in extraction `related:` footers from the derived graph. Source files,
-evidence and history remain byte-preserved; separately authored body links remain relationships.
+evidence and history remain byte-preserved. New extraction metadata explicitly marks authored
+body relationships, including a terminal `related:` line, so they remain relationships. Unsaved
+legacy extractions must be prepared again even without an identity reference. Successful legacy
+retries remain noops. For old unmarked records, a matching payload receipt can prove that a footer
+was authored body text; otherwise matching provenance tokens are conservatively excluded using
+literal serializer strings, including bracketed source names. Lossy historical metadata may prevent
+proof, so ambiguous legacy footers are not claimed to be perfectly classified. Their original text
+and evidence remain available for inspection. Graph provenance version 3 rebuilds derived links
+once during normal indexing.
