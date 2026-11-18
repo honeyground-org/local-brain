@@ -297,7 +297,8 @@ def verify_support_and_cost():
     evidence(db,16,'fusion')
     db.execute('UPDATE docs SET lifecycle=? WHERE path=?',
                (json.dumps(dict(topic='plant',facet='water',status='active')),'fixture'));db.commit()
-    with patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
+    # Support revocation is a state check; the following cases measure cost explicitly.
+    with patch.object(personal.time,'perf_counter',return_value=0.0), patch.object(vectors,'_qcache_get',return_value=[1.0]), patch.object(observe,'write'):
         assert personal.update(db)['arm']=='fusion'
         original=tuple(db.execute("SELECT id,sha,body,lifecycle FROM docs WHERE path='fixture'").fetchone())
         db.execute('INSERT INTO docs(path,name,source,sha,lifecycle) VALUES(?,?,?,?,?)',
