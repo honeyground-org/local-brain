@@ -304,3 +304,12 @@ MCP recall removes duplicates by exact document path, both before and after auto
 The existing five-second hook wall also reserves one second for process startup and output: macOS CI observed 4.566s inside main but 5.03s end to end with the previous half-second reserve. The busy-lock check now injects half a second before main and still requires end-to-end completion below five seconds. Synthetic policy/support fixtures use a synthetic clock; dedicated cost-boundary checks continue to test acceptance and rollback.
 
 Concurrent session-start CI also exposed a worker lease handover gap: acquiring the lease guard after spawning could fail and leave the short-lived parent's PID published. Spawn and child-PID publication now share one guard. A separate-process contender verifies that the guard cannot be acquired in between, alongside the existing ten-session and liveness checks.
+
+
+### Order-independent edited-turn exclusion
+
+Collector version 3 persists a session/turn edit veto independently of read rows. Each read inserts its edited flag with a SQL lookup in the same write transaction; an edit updates existing rows and marks future reads in that turn. Both transcript orders remain diagnostic only, including after reopening the database. Other turns/sessions remain independent. Version 2 observations stay available for diagnostics but cannot train or certify a current policy. Generation 68 also revokes prior policy signatures. The real Claude Code transcript parser is exercised with twelve independent sessions per order, plus a read-only promotion control; this is policy correctness evidence, not a user-quality claim.
+
+The veto covers explicit memory saves as well as file edits, in either order. A prepare-only memory preview does not mark the turn edited; both preview/read and ordinary read controls can still certify.
+
+A resumed turn from an older collector is conservatively vetoed: edits before its saved transcript offset cannot be reconstructed from later reads alone. A new user turn starts under the current collector and is eligible normally. The seventh parser scenario covers this upgrade boundary.

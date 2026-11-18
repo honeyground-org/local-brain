@@ -17,7 +17,7 @@ import time
 
 ARMS = ("baseline", "fusion", "linked")
 KEY = "personal_policy_v2"
-OBSERVATION_VERSION = 2
+OBSERVATION_VERSION = 3
 ALPHA = 0.05
 
 
@@ -32,6 +32,8 @@ def ensure(db):
                "scores TEXT, costs TEXT, terms TEXT DEFAULT '[]')")
     if "terms" not in {r[1] for r in db.execute("PRAGMA table_info(personal_events)")}:
         db.execute("ALTER TABLE personal_events ADD COLUMN terms TEXT DEFAULT '[]'")
+    db.execute("CREATE TABLE IF NOT EXISTS personal_edited_turns("
+               "session TEXT NOT NULL, turn INTEGER NOT NULL, PRIMARY KEY(session,turn))")
 
 
 def eligible(args):
@@ -47,7 +49,7 @@ def signature():
 
 
 def evidence_prefix():
-    return "v2:" + hashlib.sha256(json.dumps(signature()).encode()).hexdigest() + ":"
+    return "v%d:" % OBSERVATION_VERSION + hashlib.sha256(json.dumps(signature()).encode()).hexdigest() + ":"
 
 
 def serving_mode():
@@ -73,8 +75,8 @@ def certified(db, s):
         ids = support[start:start + 500]
         found = db.execute("SELECT d.id FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
                            "WHERE e.id IN (" + ",".join("?" for _ in ids) + ") "
-                           "AND e.measured=1 AND e.edited=0 AND e.exposed=0 AND e.identity LIKE 'v2:%'",
-                           ids).fetchall()
+                           "AND e.measured=1 AND e.edited=0 AND e.exposed=0 AND e.identity LIKE ?",
+                           list(ids) + [evidence_prefix() + "%"]).fetchall()
         current = _current_ids(db, {r[0] for r in found})
         if len(found) != len(ids) or any(r[0] not in current for r in found):
             return False
@@ -130,13 +132,17 @@ def record(db, query, path, session, turn, exposed=False, terms=()):
     terms = sorted(set(t for t in terms if isinstance(t, str)))
     identity = evidence_prefix() + hashlib.sha256((query.strip() + json.dumps(terms) + "\0" + path + "\0" + doc[0]).encode()).hexdigest()
     with db:
-        db.execute("INSERT OR IGNORE INTO personal_events(identity,session,turn,query,path,sha,exposed,terms) "
-                   "VALUES(?,?,?,?,?,?,?,?)", (identity, session, turn, query, path, doc[0], int(exposed), json.dumps(terms)))
+        # The lookup is part of the insert, so a concurrent edit either precedes
+        # this write or marks its row afterwards; neither order loses the veto.
+        db.execute("INSERT OR IGNORE INTO personal_events(identity,session,turn,query,path,sha,exposed,terms,edited) "
+                   "VALUES(?,?,?,?,?,?,?,?,EXISTS(SELECT 1 FROM personal_edited_turns WHERE session=? AND turn=?))",
+                   (identity, session, turn, query, path, doc[0], int(exposed), json.dumps(terms), session, turn))
 
 
 def edited(db, session, turn):
     ensure(db)
     with db:
+        db.execute("INSERT OR IGNORE INTO personal_edited_turns(session,turn) VALUES(?,?)", (session, turn))
         db.execute("UPDATE personal_events SET edited=1 WHERE session=? AND turn=?", (session, turn))
 
 
@@ -322,9 +328,9 @@ def update(db, mode="query"):
     # Evidence for a removed/edited document cannot promote a policy for its replacement.
     # Independent sessions, not many reads in one conversation, are the sampling units.
     rows = db.execute("SELECT e.*,d.id AS current_doc_id FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
-                      "WHERE measured=1 AND edited=0 AND exposed=0 AND e.identity LIKE 'v2:%' AND e.id>? "
+                      "WHERE measured=1 AND edited=0 AND exposed=0 AND e.identity LIKE ? AND e.id>? "
                       "AND NOT EXISTS(SELECT 1 FROM personal_events old WHERE old.session=e.session AND old.id<=?) "
-                      "ORDER BY e.id", (s.get("after", 0), s.get("after", 0))).fetchall()
+                      "ORDER BY e.id", (evidence_prefix() + "%", s.get("after", 0), s.get("after", 0))).fetchall()
     current = _current_ids(db, {r["current_doc_id"] for r in rows})
     rows = [r for r in rows if r["current_doc_id"] in current and r["identity"].startswith(evidence_prefix()) and bool(json.loads(r["terms"] or "[]")) == (mode == "terms")]
     through = max((r["id"] for r in rows), default=s.get("after", 0))

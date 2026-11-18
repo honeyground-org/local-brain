@@ -348,7 +348,7 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
     # ⛔ ★The host reads its own log★ (§hosts.Host.user_text · tool_calls) — this used to parse Claude
     #    Code's `tool_use` shape and tool names (`Edit`, `Bash`…) itself, and read ★nothing★ from any
     #    other host's log without saying so.
-    from brain import hosts
+    from brain import hosts, personal
     host = hosts.active()
     text = host.user_text(line)
     if text:
@@ -356,8 +356,18 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
         u = rec.setdefault("use", {"turn": 0, "shown": [], "calls": [], "opened": []})
         u["turn"] += 1
         u["query"] = text[:USER_SAY_CHARS]
+        u["collector_version"] = personal.OBSERVATION_VERSION
         u.pop("recall_args", None)
         return
+    u = rec.get("use")
+    if u and u.get("collector_version") != personal.OBSERVATION_VERSION:
+        # A resumed pre-upgrade turn may have edited before the saved offset.
+        # Do not treat its later reads as clean merely because the collector changed.
+        try:
+            personal.edited(_db(), rec.get("session_id", ""), u.get("turn", 0))
+        except Exception:
+            return  # no evidence until the veto can be persisted
+        u["collector_version"] = personal.OBSERVATION_VERSION
     for ev in host.brain_events(line):
         try:
             _use(ev, rec)
@@ -368,6 +378,11 @@ def _apply(line: str, tail: dict, rec: dict) -> None:
         if name.endswith("remember"):
             if kind == 'preview':
                 continue
+            try:
+                from brain import personal
+                personal.edited(_db(), rec.get("session_id", ""), rec.get("use", {}).get("turn", 0))
+            except Exception:
+                pass
             tail.update(_blank_tail())
             tail["_saved"] = True
             continue

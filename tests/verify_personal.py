@@ -78,6 +78,59 @@ def verify_semantic_route():
     print('PASS: cold evidence stays pending; warm evidence uses the actual automatic semantic route')
 
 
+def verify_turn_edit_order():
+    import sqlite3
+    from brain import hosts, observe, server, tail
+    hosts.pin('claude-code')
+    def tool(tid,name,args):
+        return {'type':'assistant','message':{'content':[{'type':'tool_use','id':tid,'name':name,'input':args}]}}
+    for order in ('edit_read','read_edit','remember_read','read_remember','legacy_read','preview_read','read_only'):
+        is_edited = order not in ('read_only','preview_read')
+        path=Path(tmp.name)/(order+'.db')
+        db=sqlite3.connect(str(path));db.row_factory=sqlite3.Row;store._init(db)
+        db.execute("INSERT INTO docs(path,name,source,sha,body) VALUES('/note','note','memory','sha','orchid')");db.commit()
+        def baseline(db,name,args,**kwargs):
+            kwargs['_retrieval']['baseline_seconds']=0.01
+            return '{}'
+        with patch.object(tail,'_db',side_effect=lambda:db), patch.object(observe,'write'), \
+             patch.object(vectors,'_qcache_get',return_value=[1.0]), \
+             patch.object(server,'call_tool',side_effect=baseline), \
+             patch.object(personal,'candidates',side_effect=lambda db,q,base,arm,*a,**k:[] if arm=='baseline' else [dict(path='/note')]), \
+             patch.object(personal.time,'monotonic',return_value=0):
+            for i in range(12):
+                rec={'session_id':order+str(i)}; trace=tail._blank_tail()
+                def feed(value):tail._apply(json.dumps(value),trace,rec)
+                feed({'type':'user','message':{'role':'user','content':'orchid '+order+str(i)}})
+                if order=='legacy_read':
+                    rec['use'].pop('collector_version')  # old saved offset, earlier edits unknown
+                edit=tool('edit','Edit',{'file_path':'/code.py','old_string':'old','new_string':'new'})
+                if 'remember' in order or order=='preview_read':
+                    edit=tool('save','mcp__brain__remember',{'name':'note','body':'new','prepare_only':order=='preview_read'})
+                if order in ('edit_read','remember_read','preview_read'):
+                    feed(edit)
+                    # Persisted turn state survives a new connection and resumed transcript.
+                    db.close();db=sqlite3.connect(str(path));db.row_factory=sqlite3.Row
+                    rec=json.loads(json.dumps(rec))
+                feed(tool('read','Read',{'file_path':'/note'}))
+                feed({'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'read','content':'orchid'}]}})
+                if order in ('read_edit','read_remember'):feed(edit)
+            rows=db.execute('SELECT edited FROM personal_events').fetchall()
+            assert len(rows)==12 and all(bool(r[0])==is_edited for r in rows), (order,[tuple(r) for r in rows])
+            result=personal.update(db)
+            assert result['arm']==('baseline' if is_edited else 'fusion'), (order,result)
+            if not is_edited:
+                assert personal.certified(db,personal.state(db))
+                db.execute("UPDATE personal_events SET identity='v2:' || substr(identity,4)");db.commit()
+                assert not personal.certified(db,personal.state(db)), 'previous collector remained certified'
+                assert personal.update(db)['arm']=='baseline'
+            else:
+                personal.record(db,'next turn','/note',order+'0',2)
+                personal.record(db,'another session','/note','unrelated',1)
+                assert all(not r[0] for r in db.execute('SELECT edited FROM personal_events WHERE query IN (?,?)',('next turn','another session')))
+        db.close()
+    print('PASS: actual transcript edit/read orders are excluded; clean reads promote; turn veto survives restart and stays isolated; v2 support rejected')
+
+
 def verify_scoped_meaning():
     import sqlite3
     from brain import search, server
@@ -354,6 +407,7 @@ def main():
     verify_support_and_cost()
     verify_retired_budget()
     verify_semantic_route()
+    verify_turn_edit_order()
     verify_scoped_meaning()
     verify_resolved_vector()
     verify_resolved_vector(real_semantic=True)
