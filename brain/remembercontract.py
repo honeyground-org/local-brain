@@ -528,9 +528,17 @@ def identity_record(db, name, sha, scope, snap=None, cyclic=None):
     if len(ids) != 1:
         return None, error("identity_unavailable", "Select one indexed identity in the exact project_id scope")
     record = snap.docs[ids[0]]
-    if (not record["meta"] or lifecycle.validate(record["meta"]) or ids[0] in snap.issues
-            or ids[0] in cyclic):
+    if not record["meta"] or lifecycle.validate(record["meta"]):
         return None, error("invalid_identity", "Use a tracked identity with valid metadata and revision links")
+    pending, seen = [ids[0]], set()
+    while pending:
+        did = pending.pop()
+        if did in seen:
+            continue
+        seen.add(did)
+        if did in snap.issues or did in cyclic:
+            return None, error("invalid_identity", "The selected identity and its ancestors need valid revision links")
+        pending.extend(snap.prev.get(did, ()))
     try:
         actual_sha = file_sha(record["path"])
     except (OSError, UnicodeError):

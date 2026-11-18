@@ -496,7 +496,7 @@ def identity_checks(db):
         store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
         check('new same-name different-identity candidate is ambiguous',prep()['error']['code']=='identity_unavailable')
         result=_j(db,**collision)
-        check('save rejects identity name collision outside the fact group',(result.get('error') or {}).get('code')=='identity_unavailable' and not os.path.exists(os.path.join(_MEM,collision['name']+'.md')))
+        check('save rejects identity name collision outside the fact group',(result.get('error') or {}).get('code')=='identity_unavailable' and not os.path.exists(os.path.join(_MEM,collision['name']+'.md')),str(result.get('result')))
         check('successful prior request remains noop after name collision',_j(db,**payload).get('result')=='noop')
     finally:
         with open(os.environ['BRAIN_CONFIG'],'w',encoding='utf-8') as f:json.dump(config,f)
@@ -506,11 +506,25 @@ def identity_checks(db):
     legacy_anchor=_j(db,**anchor_request['save_arguments'])
     legacy_args=dict(args,name='identity_legacy_pending',identity_reference=dict(name='identity_legacy_anchor',sha=legacy_anchor['sha'],reason='Reviewed as the same independently changing fact'))
     legacy_pending=call('prepare_fact',**legacy_args)['save_arguments']
+    descendant_request=call('prepare_revision',predecessor='identity_legacy_anchor',name='identity_legacy_descendant',description='Later tracked fact',type='user',body='Water on Friday.',project_id=scope,status='proposed',valid_from='2026-02-01',change_reason='Reviewed continuation',evidence=['Fixture owner confirmed'])
+    descendant=_j(db,**descendant_request['save_arguments'])
+    descendant_args=dict(legacy_args,name='identity_descendant_pending',identity_reference=dict(name='identity_legacy_descendant',sha=descendant['sha'],reason='Reviewed continuation of the same fact'))
+    descendant_pending=call('prepare_fact',**descendant_args)['save_arguments']
+    # Refresh the direct-anchor preparation after adding the descendant to the group.
+    legacy_pending=call('prepare_fact',**legacy_args)['save_arguments']
     with open(os.path.join(_MEM,'identity_legacy_root.md'),'a',encoding='utf-8') as f:f.write('\nChanged legacy source.\n')
     store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
     check('changed legacy ancestor invalidates the selected identity',call('prepare_fact',**legacy_args)['error']['code']=='invalid_identity')
     result=_j(db,**legacy_pending)
-    check('save rejects invalidated legacy identity links',(result.get('error') or {}).get('code')=='invalid_identity' and not os.path.exists(os.path.join(_MEM,legacy_pending['name']+'.md')))
+    check('save rejects invalidated legacy identity links',(result.get('error') or {}).get('code')=='invalid_identity' and not os.path.exists(os.path.join(_MEM,legacy_pending['name']+'.md')),str(result.get('result')))
+    # Keep the two legacy controls independent even when testing a defective writer.
+    leaked=os.path.join(_MEM,legacy_pending['name']+'.md')
+    if os.path.exists(leaked):
+        os.remove(leaked)
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+    check('broken ancestor invalidates descendant selection',call('prepare_fact',**descendant_args)['error']['code']=='invalid_identity')
+    result=_j(db,**descendant_pending)
+    check('save rejects invalidated ancestor links through descendants',(result.get('error') or {}).get('code')=='invalid_identity' and not os.path.exists(os.path.join(_MEM,descendant_pending['name']+'.md')),str(result.get('result')))
     check('guard is advertised for consumers',capabilities.tool_flags(server.TOOLS)['remember']['identity_reference_guard'])
     # A second SQLite connection moves the anchor after its initial validation.
     # The planner must not compute an empty/other group guard from newer index rows.
