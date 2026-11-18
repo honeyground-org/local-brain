@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.12"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.13"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -567,6 +567,7 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             db, int(args.get("days") or 7), int(args.get("limit") or 25)))
     if name == "recall":
         t0 = time.time()
+        baseline_started = time.monotonic()
         semantic_errors = []
         from brain import recalljson
         bad = recalljson.validate(args)
@@ -632,10 +633,13 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
             #    engine chosen would read "unavailable" under every unsure answer.
             if mrows or not auto:
                 more = "\n\n" + _fmt_meaning(mrows, why, cost, start, auto=auto)
+        baseline_seconds = time.monotonic() - baseline_started
+        if _retrieval is not None:
+            _retrieval["baseline_seconds"] = baseline_seconds
         if not _measure:
             from brain import personal
             if personal.eligible(args) and not semantic_errors:
-                rows = personal.apply(db, q, rows, k, terms=terms)
+                rows = personal.apply(db, q, rows, k, terms=terms, baseline_cost=baseline_seconds)
                 if mrows is not None:
                     shown = {r["name"] for r in rows}
                     mrows = [r for r in mrows if r["name"] not in shown]

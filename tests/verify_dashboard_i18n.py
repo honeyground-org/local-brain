@@ -91,6 +91,26 @@ def verify_cli_readonly():
                   and connect.call_args_list == [call(readonly=True)])
 
 
+def verify_graph_scopes():
+    import sqlite3
+    from brain import graphview
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    for did,name,scope in ((1,'same','a'),(2,'same','b'),(3,'target_a','a'),(4,'target_b','b'),(5,'same','c')):
+        db.execute('INSERT INTO docs(id,name,path,project_id,source,kind,description) VALUES(?,?,?,?,?,?,?)',
+                   (did,name,'/'+scope+'/'+name,scope,'memory','user','description-'+scope))
+    db.executemany('INSERT INTO links(src_id,dst_name) VALUES(?,?)',[(1,'target_a'),(2,'target_b')]);db.commit()
+    before='\n'.join(db.iterdump())
+    nodes,edges,isolates=graphview.fetch(db)
+    check('graph keeps same-name scoped nodes', len(nodes)==4 and {r.get('id') for r in nodes}=={1,2,3,4}
+          and {r.get('id') for r in isolates}=={5})
+    check('graph preserves exact stored edges', {frozenset((nodes[a].get('id'),nodes[b].get('id'))) for a,b in edges}
+          =={frozenset((1,3)),frozenset((2,4))})
+    page=graphview.render(db)
+    check('graph labels disambiguate scoped names', all('same ['+scope+']' in page for scope in ('a','b','c')))
+    check('graph inspection preserves the database', before=='\n'.join(db.iterdump()))
+    db.close()
+
+
 def verify_observatory():
     import datetime
     import json
@@ -397,6 +417,7 @@ def main():
         i18n._cache.clear()
 
     verify_cli_readonly()
+    verify_graph_scopes()
     verify_workspace_controls()
     verify_workspace()
     verify_observatory()

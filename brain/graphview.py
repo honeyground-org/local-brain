@@ -85,26 +85,33 @@ ISOLATE_BAND = 92         # height of the bottom band holding orphans
 def fetch(db: sqlite3.Connection) -> Tuple[List[dict], List[Tuple[int, int]], List[dict]]:
     """(connected nodes, edges, orphan nodes). Resolves a link through either a name or an alias."""
     from brain import graphstore
-    mem = {r["id"]: r["name"] for r in db.execute("SELECT id, name FROM docs WHERE source='memory'")}
-    pairs = sorted({tuple(sorted((mem[a], mem[b]))) for a, b in graphstore.ask(db, "edges")
+    from collections import Counter
+    mem = {r["id"]: dict(r) for r in db.execute(
+        "SELECT id,name,path,project_id,kind,description,title FROM docs WHERE source='memory'")}
+    # Names are labels, not identities: different scopes may use the same name.
+    pairs = sorted({tuple(sorted((a,b))) for a,b in graphstore.ask(db,"edges")
                     if a in mem and b in mem and a != b})
-
-    kinds = {r["name"]: (r["kind"] or "", r["description"] or r["title"] or "")
-             for r in db.execute(
-                 "SELECT name, kind, description, title FROM docs WHERE source='memory'")}
-
-    connected = sorted({n for p in pairs for n in p})
-    idx = {n: i for i, n in enumerate(connected)}
-    deg: Dict[str, int] = {n: 0 for n in connected}
-    for a, b in pairs:
-        deg[a] += 1
-        deg[b] += 1
-
-    nodes = [{"name": n, "kind": kinds.get(n, ("", ""))[0],
-              "desc": kinds.get(n, ("", ""))[1], "deg": deg[n]} for n in connected]
-    edges = [(idx[a], idx[b]) for a, b in pairs]
-    isolates = [{"name": n, "kind": k, "desc": d}
-                for n, (k, d) in sorted(kinds.items()) if n not in idx]
+    names = Counter(r["name"] for r in mem.values())
+    def order(did):
+        r=mem[did]
+        return (r["name"],r["project_id"] or "",r["path"],did)
+    connected = sorted({did for pair in pairs for did in pair}, key=order)
+    idx = {did:i for i,did in enumerate(connected)}
+    deg = {did:0 for did in connected}
+    for a,b in pairs:
+        deg[a]+=1
+        deg[b]+=1
+    def node(did):
+        r=mem[did]
+        label=r["name"]
+        if names[label]>1:
+            label += " [" + (r["project_id"] or r["path"]) + "]"
+        return {"id":did,"name":r["name"],"label":label,"path":r["path"],
+                "scope":r["project_id"] or "","kind":r["kind"] or "",
+                "desc":r["description"] or r["title"] or "","deg":deg.get(did,0)}
+    nodes = [node(did) for did in connected]
+    edges = [(idx[a],idx[b]) for a,b in pairs]
+    isolates = [node(did) for did in sorted(mem,key=order) if did not in idx]
     return nodes, edges, isolates
 
 
@@ -268,9 +275,9 @@ def render(db: sqlite3.Connection) -> str:
             # ⛔ ★the tooltip must follow the language too★ — ship only a finished sentence from the
             #    server and switching language on screen leaves 676 tooltips in the old one. Ship the
             #    raw materials (name · kind · degree) instead and let JS reassemble it.
-            % (cls, _esc("%s|%s|%d" % (nd["name"], nd["kind"] or "other", nd["deg"])),
+            % (cls, _esc("%s|%s|%d" % (nd.get("label", nd["name"]), nd["kind"] or "other", nd["deg"])),
                P[i][0], P[i][1], r,
-               _esc(nd["name"]), _esc(_L("kind." + (nd["kind"] or "other"),
+               _esc(nd.get("label", nd["name"])), _esc(_L("kind." + (nd["kind"] or "other"),
                                             nd["kind"] or "-")),
                _esc(_L("dash.links", "links")), nd["deg"]))
 
@@ -280,7 +287,7 @@ def render(db: sqlite3.Connection) -> str:
         '<text class="lbl" x="%.1f" y="%.1f" text-anchor="%s">%s</text>'
         % (P[i][0] + (10 if P[i][0] < W * 0.72 else -10), P[i][1] + 3.5,
            "start" if P[i][0] < W * 0.72 else "end",
-           _esc(_short(nodes[i]["name"])))
+           _esc(_short(nodes[i].get("label", nodes[i]["name"]))))
         for i in _pick_labels(order, P, LABEL_TOP))
 
     # the bottom band — ★keeps unlinked items and small clusters separate★.
@@ -301,7 +308,7 @@ def render(db: sqlite3.Connection) -> str:
         iso_rows.append(
             '<g class="nd iso %s"><circle cx="%.1f" cy="%.1f" r="2.6"/>'
             '<title>%s&#10;%s · %s</title></g>'
-            % (cls, cx, cy, _esc(it["name"]), _esc(it["kind"] or "-"), note))
+            % (cls, cx, cy, _esc(it.get("label", it["name"])), _esc(it["kind"] or "-"), note))
 
     legend = "".join(
         '<span class="lg"><i class="k%d"></i>%s</span>' % (i, _kind_label(kind))

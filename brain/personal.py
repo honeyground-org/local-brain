@@ -57,6 +57,13 @@ def serving_mode():
     return mode if mode in ("auto", "observe", "off") else "off"
 
 
+def _current_ids(db, ids):
+    from brain import lifecycle
+    with lifecycle.view("current"):
+        snap = lifecycle.snapshot(db)
+        return {did for did in ids if did in snap.resolve(did)}
+
+
 def certified(db, s):
     if s.get("signature") != signature() or not s.get("support") or not s.get("cost_limit"):
         return False
@@ -64,11 +71,12 @@ def certified(db, s):
     # Chunk for SQLite's portable bind limit; one query per batch, not one per observation.
     for start in range(0, len(support), 500):
         ids = support[start:start + 500]
-        found = db.execute("SELECT COUNT(*) FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
+        found = db.execute("SELECT d.id FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
                            "WHERE e.id IN (" + ",".join("?" for _ in ids) + ") "
                            "AND e.measured=1 AND e.edited=0 AND e.exposed=0 AND e.identity LIKE 'v2:%'",
-                           ids).fetchone()[0]
-        if found != len(ids):
+                           ids).fetchall()
+        current = _current_ids(db, {r[0] for r in found})
+        if len(found) != len(ids) or any(r[0] not in current for r in found):
             return False
     return True
 
@@ -215,7 +223,7 @@ def candidates(db, query, base, arm, k, terms=()):
     return [pool[p] for p in ranked[:k]]
 
 
-def apply(db, query, rows, k, terms=()):
+def apply(db, query, rows, k, terms=(), baseline_cost=0.0):
     """Read the last measured policy; never train in the request."""
     s = state(db, "terms" if terms else "query")
     arm = s["arm"]
@@ -234,7 +242,7 @@ def apply(db, query, rows, k, terms=()):
         result = candidates(db, query, rows, arm, k, terms=terms)
         elapsed = time.monotonic() - t
         # A regression in actual serving cost rolls back the next call as well.
-        if elapsed > float(s.get("cost_limit", float("inf"))):
+        if baseline_cost + elapsed > float(s.get("cost_limit", float("inf"))):
             _save(db, s, "baseline", "serving_cost", _latest(db))
             return rows
         return result
@@ -280,8 +288,8 @@ def update(db, mode="query"):
         s = _save(db, s, "baseline", "support_invalidated", _latest(db))
     events = db.execute("SELECT * FROM personal_events WHERE measured=0 ORDER BY id").fetchall()
     for ev in events:
-        doc = db.execute("SELECT sha FROM docs WHERE path=?", (ev["path"],)).fetchone()
-        if not ev["identity"].startswith(evidence_prefix()) or ev["edited"] or ev["exposed"] or doc is None or doc[0] != ev["sha"]:
+        doc = db.execute("SELECT sha,id FROM docs WHERE path=?", (ev["path"],)).fetchone()
+        if not ev["identity"].startswith(evidence_prefix()) or ev["edited"] or ev["exposed"] or doc is None or doc[0] != ev["sha"] or doc[1] not in _current_ids(db, [doc[1]]):
             with db:
                 db.execute("UPDATE personal_events SET measured=-1 WHERE id=?", (ev["id"],))
             continue
@@ -298,7 +306,7 @@ def update(db, mode="query"):
         server.call_tool(db, "recall", args, _measure=True, _capture=base, _retrieval=retrieval)
         if retrieval.get("semantic_errors"):
             continue
-        baseline_cost = time.monotonic() - t
+        baseline_cost = retrieval["baseline_seconds"]
         scores, costs = {}, {}
         try:
             for arm in ARMS:
@@ -313,11 +321,12 @@ def update(db, mode="query"):
                        (json.dumps(scores), json.dumps(costs), ev["id"]))
     # Evidence for a removed/edited document cannot promote a policy for its replacement.
     # Independent sessions, not many reads in one conversation, are the sampling units.
-    rows = db.execute("SELECT e.* FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
+    rows = db.execute("SELECT e.*,d.id AS current_doc_id FROM personal_events e JOIN docs d ON d.path=e.path AND d.sha=e.sha "
                       "WHERE measured=1 AND edited=0 AND exposed=0 AND e.identity LIKE 'v2:%' AND e.id>? "
                       "AND NOT EXISTS(SELECT 1 FROM personal_events old WHERE old.session=e.session AND old.id<=?) "
                       "ORDER BY e.id", (s.get("after", 0), s.get("after", 0))).fetchall()
-    rows = [r for r in rows if r["identity"].startswith(evidence_prefix()) and bool(json.loads(r["terms"] or "[]")) == (mode == "terms")]
+    current = _current_ids(db, {r["current_doc_id"] for r in rows})
+    rows = [r for r in rows if r["current_doc_id"] in current and r["identity"].startswith(evidence_prefix()) and bool(json.loads(r["terms"] or "[]")) == (mode == "terms")]
     through = max((r["id"] for r in rows), default=s.get("after", 0))
     unique = {}
     for r in rows:
