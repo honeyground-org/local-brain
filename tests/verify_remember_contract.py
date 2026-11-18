@@ -365,9 +365,9 @@ def extraction_checks(db):
         check("scope cannot be borrowed "+str(i),prepare(dict(args,name=target+'_other',project_id='unrelated'))['error']['code']=='source_unavailable')
         direct=copy.deepcopy(payload);direct['name']=target+'_active';direct['lifecycle']['status']='active'
         check("direct extraction cannot bypass proposal status "+str(i),_j(db,**direct)['error']['code']=='invalid_argument')
-        direct=prepare(dict(args,name=target+'_tampered'))['save_arguments'];direct['extracted_from']['spans'][0]['start']+=1;direct['extracted_from']['spans'][0]['end']+=1
+        direct=prepare(dict(args,name=target+'_tampered',identity_reference=dict(name=target,sha=first['sha'],reason='Reviewed continuation of the same fact')))['save_arguments'];direct['extracted_from']['spans'][0]['start']+=1;direct['extracted_from']['spans'][0]['end']+=1
         check("save validates the span again "+str(i),_j(db,**direct)['error']['code']=='quote_mismatch')
-        waiting=prepare(dict(args,name=target+'_waiting'))['save_arguments']
+        waiting=prepare(dict(args,name=target+'_waiting',identity_reference=dict(name=target,sha=first['sha'],reason='Reviewed continuation of the same fact')))['save_arguments']
         with open(os.path.join(_MEM,source+'.md'),'a',encoding='utf-8') as f:f.write('\nNew source information.\n')
         check("stale source rejected on preparation "+str(i),prepare(dict(args,name=target+'_stale'))['error']['code']=='source_changed')
         check("stale source rejected on save "+str(i),_j(db,**waiting)['error']['code']=='source_changed' and not os.path.exists(os.path.join(_MEM,target+'_waiting.md')))
@@ -384,7 +384,7 @@ def extraction_checks(db):
     for cp in (10,13,11,12,28,29,30,133,8232,8233):
         for field in ('source','description','type'):
             target='scalar_'+field+'_'+str(cp)
-            args=dict(source_name='scalar_source',source_sha=saved['sha'],quotes=['Water on Friday.'],name=target,description='Proposal',type='user',body='Water on Friday.',topic='scalar',facet='water')
+            args=dict(source_name='scalar_source',source_sha=saved['sha'],quotes=['Water on Friday.'],name=target,description='Proposal',type='user',body='Water on Friday.',topic='scalar-'+target,facet='water')
             payload=prepare(args)['save_arguments']
             br=chr(cp)
             payload[field]='note'+br+'lifecycle: {"topic":"evil","facet":"water","status":"active"}'+br+'embed: true'+br+'project_id: foreign'
@@ -450,6 +450,25 @@ def identity_checks(db):
         saved=_j(db,name=source,description='Mixed source',type='reference',body=text+'\nOther unchanged facts.',project_id=scope)
         original=_read(source)
         args=dict(source_name=source,source_sha=saved['sha'],quotes=[text],name='identity_proposal_'+str(i),description='Translated proposal',type='user',body=text,project_id=scope)
+        if i==0:
+            denied=call('prepare_fact',**dict(args,name='identity_collision_prepare',topic=unicodedata.normalize('NFD','caf\u00e9'),facet='water'))
+            check('NFC-equivalent existing identity requires a reviewed reference during preparation',(denied.get('error') or {}).get('code')=='identity_reference_required')
+            fresh=call('prepare_fact',**dict(args,name='identity_fresh_retry',topic='fresh-extraction-identity',facet='value'))
+            check('a distinct new identity needs no reference',fresh.get('ok') and fresh['total']==0)
+            bypass=dict(fresh['save_arguments'],name='identity_collision_write')
+            bypass['lifecycle']=dict(bypass['lifecycle'],topic=unicodedata.normalize('NFD','caf\u00e9'),facet='water')
+            bypass['expected_fact_sha']=lifecycle.prepare(db,bypass['name'],bypass)['expected_fact_sha']
+            refused=_j(db,**bypass)
+            check('direct new extraction cannot bypass the reviewed-reference guard',(refused.get('error') or {}).get('code')=='identity_reference_required' and not os.path.exists(os.path.join(_MEM,bypass['name']+'.md')))
+            saved_fresh=_j(db,**fresh['save_arguments']);saved_text=_read(fresh['save_arguments']['name'])
+            seed('identity_later_collision','fresh-extraction-identity',facet='value')
+            check('saved extraction noop survives a later identity collision',saved_fresh.get('result')=='new' and _j(db,**fresh['save_arguments']).get('result')=='noop' and _read(fresh['save_arguments']['name'])==saved_text)
+            seed('identity_foreign_only','foreign-only',project='identity-other')
+            foreign=call('prepare_fact',**dict(args,name='identity_foreign_control',topic='foreign-only',facet='water'))
+            check('foreign scope does not require a reference',foreign.get('ok') and foreign['total']==0)
+            seed('identity_unicode_facet','facet-topic',facet='caf\u00e9')
+            facet=call('prepare_fact',**dict(args,name='identity_facet_collision',topic='facet-topic',facet=unicodedata.normalize('NFD','caf\u00e9')))
+            check('NFC-equivalent facets also require a reference',(facet.get('error') or {}).get('code')=='identity_reference_required')
         control=call('prepare_fact',**dict(args,name='identity_control_'+str(i),topic=text,facet='water'))
         baseline.add(lifecycle.identity(control['save_arguments']['lifecycle']))
         _j(db,**control['save_arguments'])
@@ -747,7 +766,7 @@ def identity_checks(db):
     src=quoted['extracted_from']
     quoted['lifecycle']=dict(old_success['lifecycle'],evidence=["%s@%s [%s:%s]: %s" %
         (src['name'],src['sha'],span['start'],span['end'],span['text']) for span in src['spans']])
-    check('ordinary source quotation is not a legacy identity',rc.check_identity(db,quoted) is None)
+    check('ordinary source quotation cannot authorise an existing identity',(rc.check_identity(db,quoted).get('error') or {}).get('code')=='identity_reference_required')
     check('valid 2.5.0 reference can still save',_j(db,**old_success).get('result')=='new')
     # A second SQLite connection moves the anchor after its initial validation.
     # The planner must not compute an empty/other group guard from newer index rows.

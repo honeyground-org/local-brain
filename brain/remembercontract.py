@@ -544,6 +544,16 @@ def identity_reference_shape(value):
     return None
 
 
+def identity_collision(db, args, snap=None):
+    """Exact scope and NFC identity only; never infer semantic equivalence."""
+    from brain import lifecycle
+    snap = lifecycle.snapshot(db) if snap is None else snap
+    wanted = lifecycle.identity(args.get("lifecycle") or {})
+    scope = args.get("project_id") or ""
+    return any(record["project_id"] == scope and record["meta"]
+               and lifecycle.identity(record["meta"]) == wanted for record in snap.docs.values())
+
+
 def check_identity(db, args):
     """New writes must still have the uniquely selected, valid, pinned identity."""
     value = args.get("identity_reference")
@@ -564,6 +574,8 @@ def check_identity(db, args):
             if identity_reference_shape(value):
                 return error("identity_reprepare_required", "Prepare this legacy identity request again")
     if value is None:
+        if args.get("extracted_from") and identity_collision(db, args):
+            return error("identity_reference_required", "Review the existing same-scope identity and provide identity_reference, or choose a distinct fact identity")
         return None
     if not args.get("expected_fact_sha"):
         return error("invalid_argument", "Keep expected_fact_sha from the prepared identity request")
@@ -731,6 +743,8 @@ def _prepare_fact(db, args):
         if source["body"].find(quote, start+1) >= 0:
             return error("ambiguous_quote", "Include enough surrounding source text to identify one passage")
         spans.append(dict(start=start, end=start+len(quote), text=quote))
+    if selected is None and identity_collision(db, save, snap):
+        return error("identity_reference_required", "Review the existing same-scope identity and provide identity_reference, or choose a distinct fact identity")
     save["extracted_from"] = dict(name=name, sha=sha, spans=spans, graph_policy="explicit")
     save["links"] = []
     save["embed"] = False
