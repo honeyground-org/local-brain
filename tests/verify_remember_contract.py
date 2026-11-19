@@ -858,11 +858,11 @@ def unreadable_fact_checks(db):
             if case=='permission' and os.fspath(path)==str(sibling):raise PermissionError('fixture unreadable source')
             return original_open(path,*a,**kw)
         try:
-            with patch('builtins.open',side_effect=guarded_open),patch.object(store,'reindex',return_value={}),patch.object(rc,'atomic_write',side_effect=AssertionError('refusal must not publish a file')) as publish:
+            with patch('builtins.open',side_effect=guarded_open),patch.object(rc,'atomic_write',side_effect=AssertionError('refusal must not publish a file')) as publish:
                 refused=json.loads(server.call_tool(db,'prepare_fact',request))
                 assert refused.get('error',{}).get('code')=='index_pending',(case,refused)
                 saved=_j(db,**payload)
-                assert saved.get('error',{}).get('code')=='fact_changed',(case,saved)
+                assert saved.get('error',{}).get('code')==('fact_changed' if case=='missing' else 'index_pending'),(case,saved)
                 assert not publish.called
             assert '\n'.join(db.iterdump())==dump
             assert {p.name:p.read_bytes() for p in Path(_MEM).glob('*.md')}==before
