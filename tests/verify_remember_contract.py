@@ -1722,6 +1722,66 @@ def publication_index_checks(db):
     print('PASS: saved index and history reflect the content-verified predecessor even with unchanged size/mtime')
 
 
+def revision_name_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import revisions
+    for timing in ('before','during'):
+        for same_scope in (True,False):
+            suffix=timing+('_same' if same_scope else '_other')
+            scope='name-guard-'+suffix
+            predecessor='name_prior_'+suffix;name='name_next_'+suffix
+            prior=_j(db,name=predecessor,description='Prior',type='user',body='Monday schedule.',project_id=scope,
+                     lifecycle=dict(topic='review',facet='day',valid_from='2026-11-01',evidence=['User confirmation']))
+            original=Path(prior['path']).read_bytes()
+            with db:db.execute('INSERT INTO usage(path,hits) VALUES(?,7)',(prior['path'],))
+            prepared=json.loads(server.call_tool(db,'prepare_revision',dict(predecessor=predecessor,name=name,
+                description='Revision',type='user',body='Friday schedule.',project_id=scope,status='active',
+                valid_from='2026-11-02',change_reason='User correction',evidence=['User confirmation'])))
+            assert prepared.get('ok'),prepared
+            foreign=Path(_MEM)/('name_foreign_'+suffix)/(name+'.md');target=Path(_MEM)/(name+'.md')
+            foreign.parent.mkdir()
+            foreign_text=rc.render(name,dict(name=name,description='Unrelated',type='user',body='Keep the unrelated record.',
+                project_id=scope if same_scope else scope+'-other',lifecycle=dict(topic='unrelated',facet='other',status='proposed')),'')
+            if timing=='before':foreign.write_text(foreign_text,encoding='utf-8')
+            dump='\n'.join(db.iterdump());changes=db.total_changes
+            history={p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}
+            original_write,original_link=rc.atomic_write,os.link
+            inserted=[];published=[]
+            def write(path,*args,**kwargs):
+                if str(path)!=str(target) or timing!='during':return original_write(path,*args,**kwargs)
+                real_sync=os.fsync
+                def sync(fd):
+                    if not inserted:
+                        foreign.write_text(foreign_text,encoding='utf-8');inserted.append(True)
+                    return real_sync(fd)
+                with patch('os.fsync',side_effect=sync):return original_write(path,*args,**kwargs)
+            def link(src,dest,*args,**kwargs):
+                if str(dest)==str(target):published.append(dest)
+                return original_link(src,dest,*args,**kwargs)
+            with patch.object(rc,'atomic_write',side_effect=write),patch('os.link',side_effect=link):
+                saved=_j(db,**prepared['save_arguments'])
+            if timing=='during':assert inserted
+            assert foreign.read_text(encoding='utf-8')==foreign_text
+            assert Path(prior['path']).read_bytes()==original
+            assert db.execute('SELECT hits FROM usage WHERE path=?',(prior['path'],)).fetchone()[0]==7
+            if same_scope:
+                assert (saved.get('error') or {}).get('code')=='name_taken','same-scope revision collision was published: '+str(saved)
+                assert not published and not target.exists()
+                assert db.total_changes==changes and '\n'.join(db.iterdump())==dump
+                assert {p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}==history
+                assert not list(Path(_MEM).glob('.brain-write-*'))
+                foreign.unlink()
+                saved=_j(db,**prepared['save_arguments'])
+            assert saved.get('result')=='new' and saved.get('indexed_words'),saved
+            before=target.read_bytes()
+            assert _j(db,**prepared['save_arguments']).get('result')=='noop' and target.read_bytes()==before
+            public=json.loads(server.call_tool(db,'memory_history',dict(name=name,scope=scope)))
+            assert public.get('ok') and {r['name'] for r in public['revisions']}=={predecessor,name},public
+            if not same_scope:assert foreign.read_text(encoding='utf-8')==foreign_text
+    print('PASS: same-scope revision-name collisions before save and during staging refuse with zero publication/SQL/history changes; other-scope names and new/noop remain valid; public scoped history returns both revisions and usage7 survives')
+
+
 def exclusive_create_checks(db):
     from pathlib import Path
     from brain import revisions
@@ -1926,6 +1986,7 @@ def main() -> int:
     exclusive_create_checks(db)
     publication_source_checks(db)
     publication_index_checks(db)
+    revision_name_checks(db)
     unindexed_preparation_checks(db)
     cold_preparation_checks(db)
     print("\n" + "=" * 72)

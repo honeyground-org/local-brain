@@ -22,7 +22,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.56"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.57"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -460,7 +460,8 @@ def _do_remember(db, args: dict) -> str:
                 def prepare_candidate(candidate):
                     if rc.requires_local_only(candidate, args) and args.get("embed") is not False:
                         return rc.error("privacy_required", "Preserve embed:false from the predecessor")
-                    bad = rc.check_extraction(candidate, args, path) or rc.check_identity(candidate, args)
+                    bad = (rc.check_destination_name(candidate, args, path) or
+                           rc.check_extraction(candidate, args, path) or rc.check_identity(candidate, args))
                     if bad:
                         return bad
                     preview = lifecycle.prepare(candidate, name, args)
@@ -495,7 +496,8 @@ def _do_remember(db, args: dict) -> str:
                         raise Rejected(rc.error(code, 'Review the current fact before saving; no memory was written', review))
                     if rc.requires_local_only(candidate, args) and args.get("embed") is not False:
                         raise Rejected(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
-                    bad = rc.check_extraction(candidate, args, path) or rc.check_identity(candidate, args)
+                    bad = (rc.check_destination_name(candidate, args, path) or
+                           rc.check_extraction(candidate, args, path) or rc.check_identity(candidate, args))
                     if bad:
                         raise Rejected(bad)
                 def preflight():
