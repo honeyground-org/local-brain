@@ -1071,6 +1071,87 @@ def staged_index_checks(db):
 
 
 
+def history_batch_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import revisions
+    import contextlib
+    import sqlite3
+    scope='history-batch'
+    source=_j(db,name='batch_source',description='Source',type='user',body='Friday evidence.',project_id=scope)
+    for name in ('batch_edit_a','batch_edit_b'):
+        _j(db,name=name,description=name,type='user',body=name+' original body.',project_id=scope)
+    paths=[Path(_MEM)/(name+'.md') for name in ('batch_edit_a','batch_edit_b')]
+    originals=[p.read_bytes() for p in paths]
+    history_paths=[revisions.location(str(p)) for p in paths]
+    request=dict(source_name='batch_source',source_sha=source['sha'],quotes=['evidence.'],name='batch_pending',
+                 description='Proposal',type='user',body='Friday proposal.',project_id=scope,topic='batch',facet='day')
+    prepared=json.loads(server.call_tool(db,'prepare_fact',request));assert prepared.get('ok'),prepared
+    target=Path(_MEM)/'batch_pending.md'
+    def refresh(connection=db,**kw):
+        return store.reindex(connection,recalibrate=False,sync=False,heal=False,queue_embedding=False,**kw)
+    def archives():return {p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}
+    real_write=rc.atomic_write
+    real_index=store._index_one
+    class CommitFailure:
+        def __getattr__(self,name):return getattr(db,name)
+        def __enter__(self):db.__enter__();return self
+        def __exit__(self,*args):return db.__exit__(*args)
+        def commit(self):raise sqlite3.OperationalError('fixture commit failure')
+    for absent in (False,True):
+        if absent:history_paths[0].unlink()
+        for failure in ('history_before','history_after','sqlite_row','sqlite_terms','sqlite_commit'):
+            for mode in ('incremental','full','save'):
+                before=archives();dump='\n'.join(db.iterdump())
+                for path,body in zip(paths,originals):path.write_bytes(body+b'\nExternal edit pending observation.\n')
+                source_bytes=[p.read_bytes() for p in paths];published=[];attempted=[]
+                def write(candidate,*args,**kw):
+                    if str(candidate)==str(target):published.append(candidate)
+                    if str(candidate)==str(history_paths[1]):
+                        attempted.append(candidate)
+                        if failure=='history_before':raise PermissionError('fixture second history publication denied')
+                    result=real_write(candidate,*args,**kw)
+                    if str(candidate)==str(history_paths[1]) and failure=='history_after':
+                        raise OSError('fixture failure after second history publication')
+                    return result
+                def index(connection,doc,*args,**kw):
+                    result=real_index(connection,doc,*args,**kw)
+                    if doc['path']==str(paths[1]) and failure=='sqlite_row':
+                        raise sqlite3.OperationalError('fixture database update failure')
+                    return result
+                connection=CommitFailure() if failure=='sqlite_commit' else db
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(patch.object(rc,'atomic_write',side_effect=write))
+                    stack.enter_context(patch.object(store,'_index_one',side_effect=index))
+                    if failure=='sqlite_terms':
+                        for method in ('_recount_terms','_rebuild_terms'):
+                            stack.enter_context(patch.object(store,method,side_effect=sqlite3.OperationalError('fixture terms failure')))
+                    if mode=='save':
+                        result=_j(connection,**prepared['save_arguments'])
+                        assert result.get('error',{}).get('code')=='index_pending',(failure,mode,result)
+                    else:
+                        try:refresh(connection,full=mode=='full')
+                        except (OSError,sqlite3.Error):pass
+                        else:raise AssertionError((failure,mode,'injected failure was accepted'))
+                assert attempted and not published and not target.exists(),(failure,mode)
+                assert '\n'.join(db.iterdump())==dump,(failure,mode,'SQLite changed')
+                assert archives()==before,(failure,mode,'durable history changed')
+                assert [p.read_bytes() for p in paths]==source_bytes,(failure,mode,'source changed')
+                assert not list(revisions.directory().glob('.index-rollback-*'))
+                for path,body in zip(paths,originals):path.write_bytes(body)
+                # Full refresh may legitimately create the absent archive; check restoration only when present.
+                if not absent:
+                    refresh();assert archives()==before,'failed observation survived source restoration'
+    for path,body in zip(paths,originals):path.write_bytes(body+b'\nSuccessful observation.\n')
+    refresh()
+    for history in history_paths:
+        assert 'Successful observation.' in history.read_text(encoding='utf-8')
+    before=archives();refresh();assert archives()==before
+    saved=_j(db,**prepared['save_arguments'])
+    assert saved.get('result')=='new' and _j(db,**prepared['save_arguments']).get('result')=='noop',saved
+    print('PASS: 30 incremental/full/pre-save history/write/SQLite/commit failures preserve sources, exact DB and all history bytes; new archives roll back; success and retry work')
+
+
 def duplicate_usage_checks(db):
     from pathlib import Path
     from unittest.mock import patch
@@ -1299,6 +1380,7 @@ def main() -> int:
     unreadable_fact_checks(db)
     source_failure_checks(db)
     staged_index_checks(db)
+    history_batch_checks(db)
     duplicate_usage_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)

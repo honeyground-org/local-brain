@@ -13,6 +13,7 @@ a person must be able to read and fix them, and git keeps their history. So file
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -833,8 +834,8 @@ def get_meta(db: sqlite3.Connection, k: str, default: str = "") -> str:
     return row["v"] if row else default
 
 
-def set_meta(db: sqlite3.Connection, k: str, v: str) -> None:
-    with db:
+def set_meta(db: sqlite3.Connection, k: str, v: str, commit: bool = True) -> None:
+    with db if commit else contextlib.nullcontext():
         db.execute("INSERT INTO meta(k,v) VALUES(?,?) "
                    "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, str(v)))
 
@@ -1076,12 +1077,12 @@ def _touch(db: sqlite3.Connection, doc_id: Optional[int] = None, terms=()) -> No
     _TOUCHED.update(terms)
 
 
-def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0) -> int:
+def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0, preserve_history=None) -> int:
     from brain import stores
     stores.invalidate(db)
     from brain import revisions
     before = db.execute("SELECT * FROM docs WHERE path=?", (doc["path"],)).fetchone()
-    revisions.preserve(before, doc)
+    (preserve_history or revisions.preserve)(before, doc)
     fields = [
         (doc["name"].replace("_", " "), _W_NAME),
         (doc["title"], _W_TITLE),
@@ -1147,7 +1148,7 @@ def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0) -> int:
     return doc_id
 
 
-def _build_basename_aliases(db: sqlite3.Connection) -> None:
+def _build_basename_aliases(db: sqlite3.Connection, commit: bool = True) -> None:
     """Register a filename as an alias ★only when it is globally unique★.
 
     People write `[[discussion-backlog]]` while the indexed name is
@@ -1159,7 +1160,7 @@ def _build_basename_aliases(db: sqlite3.Connection) -> None:
     wrong place is **far worse than a broken one** (a broken link gives you nothing; a wrong one
     gives you a wrong answer). When in doubt, do not connect.
     """
-    with db:
+    with db if commit else contextlib.nullcontext():
         db.execute(
             "INSERT OR IGNORE INTO aliases(alias, doc_id) "
             "SELECT b.base, b.id FROM ("
@@ -1183,10 +1184,10 @@ def _resolve_path_links(db: sqlite3.Connection) -> None:
     return None
 
 
-def _rebuild_terms(db: sqlite3.Connection) -> None:
+def _rebuild_terms(db: sqlite3.Connection, commit: bool = True) -> None:
     """df is recounted from the postings — ★never maintain a derived value by hand★.
     If incremental indexing updates df slightly wrong, the wrong IDF quietly ruins ranking."""
-    with db:
+    with db if commit else contextlib.nullcontext():
         db.execute("DELETE FROM terms")
         db.execute("INSERT INTO terms(term, df) "
                    "SELECT term, COUNT(*) FROM postings GROUP BY term")
@@ -1197,10 +1198,10 @@ def _chunks(xs: List[str], n: int = 400):
         yield xs[i:i + n]
 
 
-def _recount_terms(db: sqlite3.Connection, touched: set) -> None:
+def _recount_terms(db: sqlite3.Connection, touched: set, commit: bool = True) -> None:
     """The same count as `_rebuild_terms`, for the terms whose postings changed — still recounted from the
     postings, never adjusted by hand. Every other term's postings are untouched, so its df is already right."""
-    with db:
+    with db if commit else contextlib.nullcontext():
         for part in _chunks(sorted(touched)):
             q = ",".join("?" * len(part))
             db.execute("DELETE FROM terms WHERE term IN (%s)" % q, part)
@@ -1511,49 +1512,55 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                 db.execute("UPDATE docs SET id=id WHERE 0")
             if index_stamp != (db.total_changes, db.execute("PRAGMA data_version").fetchone()[0]):
                 raise OSError("Index changed while sources were read; retry indexing")
-            for line in staged:
-                action = json.loads(line)
-                if action[0] == "mtime":
-                    db.execute("UPDATE docs SET mtime=?,size=? WHERE id=?", action[1:])
+            from brain import revisions
+            with revisions.batch() as preserve_history:
+                for line in staged:
+                    action = json.loads(line)
+                    if action[0] == "mtime":
+                        db.execute("UPDATE docs SET mtime=?,size=? WHERE id=?", action[1:])
+                    else:
+                        _index_one(db, action[1], action[2], preserve_history)
+                db.executemany("DELETE FROM usage WHERE path=?", missing_usage)
+                # A vanished file vanishes from the index too (so no orphaned evidence remains).
+                gone = [(p, pid) for p, (pid, _, _, _) in existing.items() if p not in seen_paths]
+                removed = [pid for _, pid in gone]
+                if gone:
+                    from brain import stores
+                    stores.invalidate(db)
+                for path, doc_id in gone:
+                    _touch(db, doc_id)
+                    db.execute("DELETE FROM postings WHERE doc_id=?", (doc_id,))
+                    db.execute("DELETE FROM links WHERE src_id=?", (doc_id,))
+                    # Remove rowid-based derivatives; path-based usage is retained while its file exists.
+                    db.execute("DELETE FROM aliases WHERE doc_id=?", (doc_id,))
+                    db.execute("DELETE FROM path_links WHERE src_id=?", (doc_id,))
+                    db.execute("DELETE FROM docs WHERE id=?", (doc_id,))
+                    # ★and its embeddings★ (2026-10-07) — they stayed, pulled the similarity gate's top-N mean,
+                    # and would have been read as the next document's to take this rowid
+                    try:
+                        db.execute("DELETE FROM vectors WHERE doc_id=?", (doc_id,))
+                    except sqlite3.OperationalError:
+                        pass                                     # no semantic layer on this machine yet
+                _build_basename_aliases(db, commit=False)
+                _resolve_path_links(db)
+                touched = _TOUCHED
+                if touched is None:
+                    _rebuild_terms(db, commit=False)
                 else:
-                    _index_one(db, action[1], action[2])
-            db.executemany("DELETE FROM usage WHERE path=?", missing_usage)
-            # A vanished file vanishes from the index too (so no orphaned evidence remains).
-            gone = [(p, pid) for p, (pid, _, _, _) in existing.items() if p not in seen_paths]
-            removed = [pid for _, pid in gone]
-            if gone:
-                from brain import stores
-                stores.invalidate(db)
-            for path, doc_id in gone:
-                _touch(db, doc_id)
-                db.execute("DELETE FROM postings WHERE doc_id=?", (doc_id,))
-                db.execute("DELETE FROM links WHERE src_id=?", (doc_id,))
-                # Remove rowid-based derivatives; path-based usage is retained while its file exists.
-                db.execute("DELETE FROM aliases WHERE doc_id=?", (doc_id,))
-                db.execute("DELETE FROM path_links WHERE src_id=?", (doc_id,))
-                db.execute("DELETE FROM docs WHERE id=?", (doc_id,))
-                # ★and its embeddings★ (2026-10-07) — they stayed, pulled the similarity gate's top-N mean,
-                # and would have been read as the next document's to take this rowid
-                try:
-                    db.execute("DELETE FROM vectors WHERE doc_id=?", (doc_id,))
-                except sqlite3.OperationalError:
-                    pass                                     # no semantic layer on this machine yet
-    _build_basename_aliases(db)
-    _resolve_path_links(db)
-    touched = _TOUCHED
-    if touched is None:
-        _rebuild_terms(db)
-    else:
-        _recount_terms(db, touched)
-    # ★Stamp which tokenizer read the documents★ — only when every one of them was read by this one
-    # (a full pass, or an index that was empty before this run). A partial pass keeps the old stamp,
-    # so the next human-run index still rebuilds.
-    if full or not existing:
-        set_meta(db, "tokenizer", str(textindex.TOKENIZER_VERSION))
-        set_meta(db, "graph_provenance_version", "6")
-    stats = {"added": added, "updated": updated, "skipped": skipped,
-             "removed": len(removed), "duplicates": dups,
-             "seconds": round(time.time() - t0, 2)}
+                    _recount_terms(db, touched, commit=False)
+                # ★Stamp which tokenizer read the documents★ — only when every one of them was read by this one
+                # (a full pass, or an index that was empty before this run). A partial pass keeps the old stamp,
+                # so the next human-run index still rebuilds.
+                if full or not existing:
+                    set_meta(db, "tokenizer", str(textindex.TOKENIZER_VERSION), commit=False)
+                    set_meta(db, "graph_provenance_version", "6", commit=False)
+                stats = {"added": added, "updated": updated, "skipped": skipped,
+                         "removed": len(removed), "duplicates": dups,
+                         "seconds": round(time.time() - t0, 2)}
+                set_meta(db, "last_index", time.strftime("%Y-%m-%dT%H:%M:%S"), commit=False)
+                set_meta(db, "last_index_stats", json.dumps(stats), commit=False)
+                # Commit inside the history batch so commit errors restore its files too.
+                db.commit()
     # ★Derived tables are built after stats exists★ — put them earlier and `stats` is not yet
     # defined, so a NameError is raised, and the broad except above swallows it so that
     # ★only the report disappears, silently★ (this actually happened once on 2026-08-20:
@@ -1575,8 +1582,10 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
         stats["kind_aliases"] = _build_kind_aliases(db)
     except Exception:                                    # noqa: BLE001
         pass                                             # an alias-learning failure must not block indexing
-    set_meta(db, "last_index", time.strftime("%Y-%m-%dT%H:%M:%S"))
-    set_meta(db, "last_index_stats", json.dumps(stats))
+    try:
+        set_meta(db, "last_index_stats", json.dumps(stats))
+    except Exception:
+        pass                                             # optional derived statistics only
     # ★Embeddings of documents removed before 2026-10-07 stayed behind★ — a human-run index clears them
     if recalibrate:
         try:
