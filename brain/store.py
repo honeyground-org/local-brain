@@ -1377,11 +1377,16 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
             full: bool = False, verbose: bool = False,
             recalibrate: bool = True,
             refresh_history: Optional[bool] = None,
-            sync: bool = True, heal: bool = True, queue_embedding: bool = True) -> dict:
+            sync: bool = True, heal: bool = True, queue_embedding: bool = True,
+            verify_content: bool = False) -> dict:
     """Incremental indexing. Change detection is (mtime, size, sha) — identical on all three, skip.
 
     `recalibrate=False` exists for the places that run **on every prompt, like the hook**.
     The reasoning is in the comment at the calibration call below (index 364ms vs calibrate 3,279ms).
+
+    `verify_content=True` reads sources even when mtime and size match. Guarded fact
+    saves need this: an unchanged metadata pair cannot prove unchanged group membership.
+    Unlike a full rebuild, unchanged content keeps its existing index and history.
 
     `sync=False` / `heal=False` leave the dedicated databases' update and the trigger self-healing for later
     (§deferred) and say so in `stats["deferred"]`. The hook passes both: measured 2026-10-14 on the author's
@@ -1454,7 +1459,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                 # First found wins — so a UNIQUE(path) conflict does not kill the whole index.
                 continue
             prev = existing.get(path)
-            if prev and not full:
+            if prev and not full and not verify_content:
                 st = os.stat(path)
                 if abs(st.st_mtime - prev[1]) < 1e-6 and st.st_size == prev[2]:
                     # ⛔ Judge copies on the fast-skip path too — otherwise a copy that is
