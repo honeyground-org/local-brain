@@ -875,6 +875,99 @@ def unreadable_fact_checks(db):
     print('PASS: invalid UTF8, unreadable and missing same-identity sources refuse preparation/save without DB or memory writes; restored sources prepare/save/retry normally')
 
 
+def source_failure_checks(db):
+    """Use the real indexer: failed reads must never erase an indexed fact or its usage."""
+    from pathlib import Path
+    from unittest.mock import patch
+    import contextlib
+    scope='source-failure'
+    source=_j(db,name='failure_source',description='Source',type='user',body='Friday evidence.',project_id=scope)
+    for name in ('failure_anchor','failure_sibling'):
+        result=_j(db,name=name,description='Identity',type='user',body=name+' Friday.',project_id=scope,
+                  lifecycle=dict(topic='water',facet='day',status='proposed'),embed=False)
+        assert result.get('stored'),result
+        if name=='failure_anchor':anchor=result
+    args=dict(source_name='failure_source',source_sha=source['sha'],quotes=['evidence.'],
+              name='failure_pending',description='Proposal',type='user',body='Friday proposal.',project_id=scope,
+              identity_reference=dict(name='failure_anchor',sha=anchor['sha'],reason='Same reviewed fact'))
+    sibling=Path(_MEM)/'failure_sibling.md';original=sibling.read_bytes()
+    with db:db.execute('INSERT INTO usage(path,hits) VALUES(?,7)',(str(sibling),))
+    def refresh(**kw):
+        return store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False,**kw)
+    for case in ('permission','invalid_utf8','stat','scan'):
+        prepared=json.loads(server.call_tool(db,'prepare_fact',args));assert prepared.get('ok'),prepared
+        # Force the incremental pass to read the sibling; fast-skip is separately covered by full=True.
+        if case=='invalid_utf8':sibling.write_bytes(b'\xff\xfeunreadable')
+        else:os.utime(sibling,(sibling.stat().st_atime,sibling.stat().st_mtime+5))
+        dump='\n'.join(db.iterdump())
+        original_open,original_stat,original_scan=open,os.stat,os.scandir
+        def guarded_open(path,*a,**kw):
+            if case=='permission' and os.fspath(path)==str(sibling):raise PermissionError('fixture source denied')
+            return original_open(path,*a,**kw)
+        def guarded_stat(path,*a,**kw):
+            if case=='stat' and os.fspath(path)==str(sibling):raise PermissionError('fixture stat denied')
+            return original_stat(path,*a,**kw)
+        def guarded_scan(path,*a,**kw):
+            if case=='scan' and os.fspath(path)==_MEM:raise PermissionError('fixture directory denied')
+            return original_scan(path,*a,**kw)
+        try:
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(patch('builtins.open',side_effect=guarded_open))
+                stack.enter_context(patch('os.stat',side_effect=guarded_stat))
+                stack.enter_context(patch('os.scandir',side_effect=guarded_scan))
+                for full in (False,True):
+                    try:refresh(full=full)
+                    except OSError:pass
+                    else:raise AssertionError((case,'incomplete scan was accepted',full))
+                    assert '\n'.join(db.iterdump())==dump,(case,'index/history changed')
+                saved=_j(db,**prepared['save_arguments'])
+                assert saved.get('error',{}).get('code')=='index_pending',(case,saved)
+                assert not (Path(_MEM)/'failure_pending.md').exists()
+                assert '\n'.join(db.iterdump())==dump,(case,'pre-save index changed')
+                if case in ('permission','invalid_utf8'):
+                    again=json.loads(server.call_tool(db,'prepare_fact',args))
+                    assert again.get('error',{}).get('code')=='index_pending',(case,again)
+        finally:sibling.write_bytes(original)
+        refresh()
+        assert db.execute('SELECT hits FROM usage WHERE path=?',(str(sibling),)).fetchone()[0]==7
+        recovered=json.loads(server.call_tool(db,'prepare_fact',args))
+        assert recovered.get('ok') and recovered['expected_fact_sha']==prepared['expected_fact_sha'],recovered
+    saved=_j(db,**recovered['save_arguments'])
+    assert saved.get('result')=='new' and _j(db,**recovered['save_arguments']).get('result')=='noop',saved
+    # Confirmed deletion still removes both the doc and its associated usage.
+    sibling.unlink();refresh()
+    assert not db.execute('SELECT 1 FROM docs WHERE path=?',(str(sibling),)).fetchone()
+    assert not db.execute('SELECT 1 FROM usage WHERE path=?',(str(sibling),)).fetchone()
+    print('PASS: real incremental/full/pre-save indexing preserves docs and usage=7 on read/decode/stat/scan errors; recovery and true deletion work')
+
+    legacy=_j(db,name='unreadable_legacy',description='Legacy',type='user',body='Monday water.',project_id=scope)
+    request=dict(predecessor='unreadable_legacy',name='unreadable_legacy_new',description='Friday',type='user',
+                 body='Friday water.',project_id=scope,topic='legacy-water',facet='day',status='active',
+                 valid_from='2026-11-01',change_reason='User correction',evidence=['User confirmed'],replace_whole_record=True)
+    path=Path(_MEM)/'unreadable_legacy.md';original=path.read_bytes()
+    for case in ('permission','invalid_utf8','missing'):
+        prepared=json.loads(server.call_tool(db,'prepare_revision',request));assert prepared.get('ok'),prepared
+        if case=='invalid_utf8':path.write_bytes(b'\xff\xfeunreadable')
+        if case=='missing':path.unlink()
+        original_open=open
+        def legacy_open(candidate,*a,**kw):
+            if case=='permission' and os.fspath(candidate)==str(path):raise PermissionError('fixture legacy denied')
+            return original_open(candidate,*a,**kw)
+        dump='\n'.join(db.iterdump())
+        try:
+            with patch('builtins.open',side_effect=legacy_open):
+                refused=json.loads(server.call_tool(db,'prepare_revision',request))
+                assert refused.get('error',{}).get('code')=='index_pending',(case,refused)
+                saved=_j(db,**prepared['save_arguments'])
+                assert saved.get('error',{}).get('code')=='invalid_argument',(case,saved)
+                assert not (Path(_MEM)/request['name']).with_suffix('.md').exists()
+                assert '\n'.join(db.iterdump())==dump
+        finally:path.write_bytes(original)
+    saved=_j(db,**prepared['save_arguments'])
+    assert saved.get('result')=='new' and _j(db,**prepared['save_arguments']).get('result')=='noop',saved
+    print('PASS: unreadable/malformed/missing legacy predecessors return structured preparation/save refusals and recover')
+
+
 def exclusive_create_checks(db):
     from unittest.mock import patch
     source = _j(db, name='race_source', description='Source', type='user',
@@ -1058,6 +1151,10 @@ def main() -> int:
     extraction_checks(db)
     identity_checks(db)
     unreadable_fact_checks(db)
+    # The fixture deliberately queues sync/heal work while testing the real indexer.
+    # Keep its unrelated worker from racing the exact SQLite-dump assertions.
+    with patch("brain.deferred.kick", return_value=False):
+        source_failure_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)
     if FAILS:

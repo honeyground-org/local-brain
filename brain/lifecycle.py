@@ -378,7 +378,11 @@ def check_write(db, name, args, current):
         if pinned:
             from brain import remembercontract
             row = snap.docs[ids[0]]
-            if prior or row['sha'] != pinned or remembercontract.file_sha(row['path']) != pinned:
+            try:
+                actual_sha = remembercontract.file_sha(row['path'])
+            except (OSError, UnicodeError):
+                actual_sha = None
+            if prior or row['sha'] != pinned or actual_sha != pinned:
                 return 'legacy replacement requires an untracked predecessor at the exact file SHA you read'
             continue
         if not prior:
