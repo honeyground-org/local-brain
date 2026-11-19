@@ -1425,7 +1425,22 @@ def recorded_feedback_checks(db):
     assert shown['project_id']=='record-a' and shown['sha']==sha and '_feedback_identity' not in shown,shown
     assert not db.execute('SELECT 1 FROM usage WHERE path=?',(str(path),)).fetchone()
     path.write_text(original,encoding='utf-8');refresh();assert usage()==before
+    other=sqlite3.connect(store.db_path(),timeout=0);attempted=[]
+    class RacingDelta(dict):
+        def __getitem__(self,key):
+            try:other.execute('UPDATE docs SET project_id=?,weight=1 WHERE path=?',('record-b',str(path)))
+            except sqlite3.OperationalError as exc:attempted.append('locked' in str(exc))
+            else:other.commit();attempted.append(False)
+            return super().__getitem__(key)
+    try:
+        with patch.object(health,'_W_DELTA',RacingDelta(health._W_DELTA)):
+            feedback=health.feedback(db,name,'useful')
+    finally:other.close()
+    assert attempted==[True],'explicit feedback target changed between lookup and update'
+    assert db.execute('SELECT project_id FROM docs WHERE path=?',(str(path),)).fetchone()[0]=='record-a'
+    assert usage()['useful']==before['useful']+1 and abs(feedback['weight']-0.65)<1e-9
     print('PASS: late scope/topic/facet changes never inherit stale hits; NFC/NFD and unchanged facts record once; original feedback survives, writer lock spans comparison/increment, MCP keeps selected scope/SHA')
+    print('PASS: explicit feedback locks its target before lookup and preserves the selected scope through weight/counter updates')
 
 
 def duplicate_usage_checks(db):

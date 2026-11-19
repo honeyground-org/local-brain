@@ -465,15 +465,19 @@ def suggestions(db: sqlite3.Connection) -> dict:
 def feedback(db: sqlite3.Connection, name: str, signal: str) -> dict:
     if signal not in _W_DELTA:
         return {"error": "unknown signal: %s" % signal}
-    rows = db.execute("SELECT id, path, weight FROM docs WHERE name=?", (name,)).fetchall()
-    if len(rows) > 1:
-        return {"error": "ambiguous memory name; feedback was not applied: %s" % name}
-    row = rows[0] if rows else None
-    if not row:
-        return {"error": "not found: %s" % name}
-    new_w = max(_W_MIN, min(_W_MAX, row["weight"] + _W_DELTA[signal]))
-    col = {"useful": "useful", "wrong": "wrong", "stale": "stale", "open": "opens"}[signal]
     with db:
+        # Selection, ambiguity checking and increments must share the writer
+        # transaction; a path or row ID can otherwise become another fact.
+        if not db.in_transaction:
+            db.execute("BEGIN IMMEDIATE")
+        rows = db.execute("SELECT id, path, weight FROM docs WHERE name=?", (name,)).fetchall()
+        if len(rows) > 1:
+            return {"error": "ambiguous memory name; feedback was not applied: %s" % name}
+        row = rows[0] if rows else None
+        if not row:
+            return {"error": "not found: %s" % name}
+        new_w = max(_W_MIN, min(_W_MAX, row["weight"] + _W_DELTA[signal]))
+        col = {"useful": "useful", "wrong": "wrong", "stale": "stale", "open": "opens"}[signal]
         db.execute("UPDATE docs SET weight=? WHERE id=?", (new_w, row["id"]))
         db.execute("INSERT INTO usage(path,%s) VALUES(?,1) "
                    "ON CONFLICT(path) DO UPDATE SET %s=%s+1" % (col, col, col),
