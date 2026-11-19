@@ -1079,13 +1079,14 @@ def _touch(db: sqlite3.Connection, doc_id: Optional[int] = None, terms=()) -> No
 
 
 def _feedback_identity(doc) -> list:
+    from brain.lifecycle import identity
     item = dict(doc)
     meta = item.get("lifecycle") or {}
     if isinstance(meta, str):
         meta = json.loads(meta)
     scope = item.get("project_id") or ""
     if meta.get("topic") and meta.get("facet"):
-        return [scope, "fact", meta["topic"], meta["facet"]]
+        return [scope, "fact", *identity(meta)]
     return [scope, "name", item["name"]]
 
 
@@ -1093,7 +1094,23 @@ def _retained_feedback(db, path):
     raw = get_meta(db, _RETAINED_WEIGHT_PREFIX + path)
     saved = json.loads(raw) if raw else None
     if isinstance(saved, dict):
-        return saved["records"]
+        if saved["version"] >= 3:
+            return saved["records"]
+        from brain.lifecycle import identity
+        records = {}
+        for old in saved["records"]:
+            key = old["identity"]
+            if key is not None and key[1] == "fact":
+                key = [*key[:2], *identity(dict(topic=key[2], facet=key[3]))]
+            group = tuple(key) if key is not None else None
+            previous = records.get(group, {})
+            # V2 kept its most recently retained snapshot last. Counters have no
+            # event IDs, so adding snapshots could double-count shared events.
+            # Use that last snapshot, preserving every original (raw identity,
+            # weight and usage) as immutable provenance in the canonical group.
+            records[group] = dict(old, identity=key, legacy_snapshots=
+                                  previous.get("legacy_snapshots", []) + [old])
+        return list(records.values())
     usage = db.execute("SELECT * FROM usage WHERE path=?", (path,)).fetchone()
     # Older path-only retention cannot prove the originating scope/fact. Keep it
     # archived without attributing it to a newly indexed identity.
@@ -1111,9 +1128,12 @@ def _retain_feedback(db, doc):
     usage = db.execute("SELECT * FROM usage WHERE path=?", (path,)).fetchone()
     record = {"identity": identity, "weight": item["weight"],
               "usage": dict(usage) if usage is not None else None}
+    previous = next((r for r in records if r["identity"] == identity), {})
+    if "legacy_snapshots" in previous:
+        record["legacy_snapshots"] = previous["legacy_snapshots"]
     records = [r for r in records if r["identity"] != identity] + [record]
     set_meta(db, _RETAINED_WEIGHT_PREFIX + path,
-             json.dumps({"version": 2, "records": records}), commit=False)
+             json.dumps({"version": 3, "records": records}), commit=False)
 
 
 def _restore_feedback(db, doc, doc_id):
@@ -1131,7 +1151,7 @@ def _restore_feedback(db, doc, doc_id):
                    (path,) + tuple(usage[k] for k in ("hits", "opens", "useful", "wrong", "stale", "last_hit")))
     # Keep other identities' history separate, including unattributed legacy state.
     set_meta(db, _RETAINED_WEIGHT_PREFIX + path,
-             json.dumps({"version": 2, "records": records}), commit=False)
+             json.dumps({"version": 3, "records": records}), commit=False)
 
 
 def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0, preserve_history=None) -> int:
