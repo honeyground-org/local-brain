@@ -618,18 +618,25 @@ def iter_source_files(cfg: dict) -> Iterable[Tuple[str, str, str]]:
         if os.path.isfile(root):
             yield root, source, os.path.dirname(root)
             continue
-        base_depth = root.rstrip("/").count(os.sep)
-        def scan_error(exc):
-            # Confirmed absence is deletion; an incomplete scan is not.
-            if not isinstance(exc, FileNotFoundError):
-                raise exc
-        for dirpath, dirnames, filenames in os.walk(root, onerror=scan_error):
-            if dirpath.count(os.sep) - base_depth >= depth:
-                dirnames[:] = []
-            dirnames[:] = sorted(d for d in dirnames
-                                 if not d.startswith(".") and d not in
-                                 ("node_modules", "vendor", "dist", "build", "__pycache__")
-                                 and not _is_worktree(os.path.join(dirpath, d)))
+        pending = [(root, 0)]
+        while pending:
+            dirpath, level = pending.pop()
+            try:
+                entries = os.scandir(dirpath)
+            except FileNotFoundError:
+                continue                         # confirmed absence, including a removed source root
+            directories, filenames = [], []
+            with entries as entries:
+                for item in entries:
+                    # os.walk suppresses errors from DirEntry.is_dir(), even with onerror.
+                    # An unclassified entry must not make its indexed descendants disappear.
+                    if item.is_dir():
+                        if (level < depth and not item.name.startswith(".") and item.name not in
+                                ("node_modules", "vendor", "dist", "build", "__pycache__")
+                                and not item.is_symlink() and not _is_worktree(item.path)):
+                            directories.append(item.path)
+                    else:
+                        filenames.append(item.name)
             for fn in sorted(filenames):
                 p = os.path.join(dirpath, fn)
                 if not any(_match(fn, pat) for pat in include):
@@ -637,6 +644,8 @@ def iter_source_files(cfg: dict) -> Iterable[Tuple[str, str, str]]:
                 if any(ex in p for ex in excludes):
                     continue
                 yield p, source, root
+            pending.extend((p, level + 1) for p in sorted(directories, reverse=True))
+
 
 
 def _match(name: str, pattern: str) -> bool:
