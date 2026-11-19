@@ -124,6 +124,52 @@ def verify_malformed_policy_view():
     print('PASS: malformed scalar/object policy states retain readonly memory/performance views and baseline')
 
 
+def verify_policy_diagnostics():
+    import array, sqlite3
+    from brain import observe, search, server, calibrate
+    for mode in ('query','terms'):
+      for arm in ('fusion','linked'):
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db);vectors.ensure_table(db)
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ,{'BRAIN_VECTOR_STORE':'sqlite','BRAIN_GRAPH_STORE':'sqlite','BRAIN_PERSONAL_MODE':'auto'}),patch.object(vectors,'DIM',2),patch.object(vectors,'model_tag',return_value='fixture'),patch.object(vectors,'embed',side_effect=AssertionError('cached request must not embed')),patch.object(observe,'write') as observed,patch.object(server,'_words_unsure',return_value=False),patch.object(calibrate,'threshold',return_value=.0001),patch.object(personal.time,'monotonic',return_value=1):
+            for name,body in [('word_note','orchid'),('semantic_note','rainfall guidance')]:
+                p=Path(td)/(name+'.md');p.write_text('---\nname: '+name+'\n---\n'+body+'\n',encoding='utf-8')
+                store._index_one(db,store.read_doc(str(p),'memory',td))
+            store._rebuild_terms(db)
+            for row in db.execute('SELECT id,sha FROM docs').fetchall():
+                db.execute('INSERT INTO vectors(doc_id,chunk_no,sha,model,dim,vec) VALUES(?,0,?,?,?,?)',(row['id'],row['sha'],'fixture',2,array.array('f',[1,0]).tobytes()))
+            for query in ('orchid','fixture'):
+                vectors._qcache_get(db,query)
+                vectors._qcache_put(db,query,array.array('f',[1,0]))
+            db.commit()
+            evidence(db,12,arm)
+            if mode=='terms':db.execute("UPDATE personal_events SET terms='[\"schedule\"]'");db.commit()
+            assert personal.update(db,mode)['arm']==arm
+            args=dict(query='orchid',terms=['schedule'] if mode=='terms' else [],format='json')
+            def recall(extra):
+                observed.reset_mock()
+                result=json.loads(server.call_tool(db,'recall',dict(args,**extra)))
+                event=[c.args[1] for c in observed.call_args_list if c.args[0]=='recall'][-1]
+                return result,event
+            keyword,event=recall(dict(semantic_k=0))
+            assert [r['name'] for r in keyword['results']]==['word_note'],keyword
+            assert keyword['lane']=='words' and keyword['meta']['embed_cached'] is None
+            assert not event['reordered'] and event['vector'] is None
+            result,event=recall({})
+            assert {r['name'] for r in result['results']}=={'word_note','semantic_note'},result
+            assert result['lane']=='fused' and result['meta']['embed_cached'] is True,(result,event)
+            assert event['reordered'] and event['embed_cached'] is True and event['vector']['store']=='sqlite' and event['vector']['embedded'] is False,event
+            import hashlib
+            db.execute('DELETE FROM vec_qcache WHERE qsha=?',(hashlib.sha1(b'orchid').hexdigest(),));db.commit()
+            with patch.object(server,'_words_unsure',return_value=True),patch.object(vectors,'embed',return_value=[[1.,0.]]) as embed:
+                uncached,event=recall({})
+            assert uncached['lane']=='fused' and uncached['meta']['embed_cached'] is False and event['embed_cached'] is False and embed.call_count==1,(uncached,event)
+            with patch.object(personal,'candidates',side_effect=ValueError('optional policy failure')):
+                fallback,event=recall({})
+            assert fallback['lane']=='words' and fallback['meta']['embed_cached'] is None and event['vector'] is None,(fallback,event)
+        db.close()
+    print('PASS: actual cached SQLite semantic policy reports fused lane, cache and vector use; keyword-only and failed-policy controls stay words-only')
+
+
 def verify_promoted_feedback():
     import sqlite3
     from brain import observe, search, server, calibrate
@@ -842,6 +888,7 @@ def main():
     verify_serving_cache_fallback()
     verify_promoted_related_context()
     verify_promoted_feedback()
+    verify_policy_diagnostics()
     verify_request_replay_order()
     verify_malformed_policy_view()
     verify_turn_edit_order()

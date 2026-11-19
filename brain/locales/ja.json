@@ -817,6 +817,7 @@
  "dash.inspect.host": "標準 Claude / Codex に対する効果",
  "dash.inspect.host_note": "この画面に接続された比較実験はありません。構成要素の点数では利用効果を証明できません。",
  "dash.inspect.in_sync": "同期済みの記録",
+ "dash.inspect.local_ready": "ローカルで利用可能",
  "dash.inspect.index": "ローカル索引・履歴",
  "dash.inspect.index_at": "索引記録時刻",
  "dash.inspect.indexed": "索引済み文書",

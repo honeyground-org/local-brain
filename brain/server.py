@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.41"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.42"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -639,7 +639,12 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
         if not _measure:
             from brain import personal
             if personal.eligible(args) and not semantic_errors:
-                rows = personal.apply(db, q, rows, k, terms=terms, baseline_cost=baseline_seconds)
+                policy_report = {}
+                rows = personal.apply(db, q, rows, k, terms=terms, baseline_cost=baseline_seconds, report=policy_report)
+                if policy_report.get("reordered"):
+                    reordered = True
+                    if cached is None:
+                        cached = policy_report["embed_cached"]
                 if mrows is not None:
                     shown = {r["path"] for r in rows}
                     mrows = [r for r in mrows if r["path"] not in shown]

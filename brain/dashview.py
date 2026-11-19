@@ -977,6 +977,8 @@ def workspace(p: dict) -> str:
         s=p['stores'].get(role,{})
         backend=s.get('backend','SQLite')
         state = 'in_sync' if s.get('in_sync') and s.get('ok') else 'needs_sync' if s else 'unknown'
+        if s.get('local') and s.get('ok'):
+            state = 'local_ready'
         if role == 'index':
             state='indexed'
         body.append('<div class="role"><span class="role-icon" aria-hidden="true">%s</span><div><strong>%s</strong><small>%s</small></div><div class="role-state">%s<small>%s</small></div></div>' % (icon,esc(backend),label(role),label(state),esc(s.get('at') or ('—' if role!='index' else p.get('index_at') or '—'))))

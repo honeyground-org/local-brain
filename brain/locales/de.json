@@ -817,6 +817,7 @@
  "dash.inspect.host": "Nutzen gegenüber nativem Claude / Codex",
  "dash.inspect.host_note": "Keine gepaarte Host-Studie ist verbunden. Komponentenwerte belegen diesen Nutzen nicht.",
  "dash.inspect.in_sync": "Als synchron erfasst",
+ "dash.inspect.local_ready": "Lokal verfügbar",
  "dash.inspect.index": "Lokaler Index und Verlauf",
  "dash.inspect.index_at": "Indexerfassung",
  "dash.inspect.indexed": "Indexierte Dokumente",

@@ -819,6 +819,7 @@
  "dash.inspect.host": "Benefit over native Claude / Codex",
  "dash.inspect.host_note": "No paired host study is connected to this view. Component scores cannot establish this benefit.",
  "dash.inspect.in_sync": "Recorded as synchronised",
+ "dash.inspect.local_ready": "Available locally",
  "dash.inspect.index": "Local index & history",
  "dash.inspect.index_at": "Index recorded",
  "dash.inspect.indexed": "Indexed documents",

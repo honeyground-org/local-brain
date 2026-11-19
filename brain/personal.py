@@ -288,7 +288,7 @@ def candidates(db, query, base, arm, k, terms=()):
     return selected + [r for r in base if r.get("related") and r["path"] not in direct_paths]
 
 
-def apply(db, query, rows, k, terms=(), baseline_cost=0.0):
+def apply(db, query, rows, k, terms=(), baseline_cost=0.0, report=None):
     """Read the last measured policy; never train in the request."""
     t = time.monotonic()
     s = None
@@ -311,6 +311,8 @@ def apply(db, query, rows, k, terms=(), baseline_cost=0.0):
         if baseline_cost + elapsed > float(s.get("cost_limit", float("inf"))):
             _save(db, s, "baseline", "serving_cost", _latest(db))
             return rows
+        if report is not None:
+            report.update(reordered=True, embed_cached=True)
         return result
     except Exception as exc:
         # A diagnostic rollback must not mask the already-computed baseline.

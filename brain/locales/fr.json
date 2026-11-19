@@ -817,6 +817,7 @@
  "dash.inspect.host": "Gain face à Claude / Codex natifs",
  "dash.inspect.host_note": "Aucune étude comparative des hôtes reliée à cette vue. Les scores de composants ne prouvent pas ce gain.",
  "dash.inspect.in_sync": "Synchronisation enregistrée",
+ "dash.inspect.local_ready": "Disponible localement",
  "dash.inspect.index": "Index et historique locaux",
  "dash.inspect.index_at": "Index enregistré",
  "dash.inspect.indexed": "Documents indexés",
