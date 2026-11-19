@@ -55,26 +55,28 @@ def main() -> int:
     with open(os.environ["BRAIN_CONFIG"], "w", encoding="utf-8") as fh:
         json.dump({"sources": [{"name": "memory", "path": mem, "include": ["*.md"]}]}, fh)
 
-    real_walk = os.walk
+    real_walk, real_scan = os.walk, os.scandir
 
-    def shuffled_walk(top, *a, **k):
-        """What a hash-ordered filesystem may hand back: the same entries, ★reversed★ — never sorted.
+    class shuffled_scan:
+        """The actual directory API returns reverse order, never accidentally sorted."""
+        def __init__(self, top):
+            with real_scan(top) as entries:
+                self.entries = iter(sorted(entries, key=lambda entry: entry.name, reverse=True))
+        def __iter__(self):return self
+        def __next__(self):return next(self.entries)
+        def __enter__(self):return self
+        def __exit__(self, *unused):pass
+        def close(self):pass
 
-        ⛔ A seeded shuffle of six names came out sorted on one CI run (the seed was a random temp path),
-           and the control below went red for nothing. Reversed is unsorted every time.
-        """
-        for dirpath, dirnames, filenames in real_walk(top, *a, **k):
-            dirnames.sort(reverse=True)
-            yield dirpath, dirnames, sorted(filenames, reverse=True)
-    store.os.walk = shuffled_walk
+    store.os.scandir = shuffled_scan
     try:
         got = [os.path.relpath(p, mem) for p, _s, _r in store.iter_source_files(store.load_config())]
-        raw = [os.path.relpath(os.path.join(d, f), mem) for d, _ds, fs in shuffled_walk(mem) for f in fs]
+        raw = [os.path.relpath(os.path.join(d, f), mem) for d, _ds, fs in real_walk(mem) for f in fs]
         db = store.connect()
         store.reindex(db, full=True, recalibrate=False, refresh_history=False)
         ids = [r[0] for r in db.execute("SELECT name FROM docs ORDER BY id")]
     finally:
-        store.os.walk = real_walk
+        store.os.scandir = real_scan
 
     # os.walk only changes traversal order when its directory list is mutated.
     want = []
@@ -88,6 +90,34 @@ def main() -> int:
     check("documents are numbered in that order", ids == order, " · ".join(ids))
     print("\n③ control")
     check("(control) the filesystem order used here is not already sorted", raw != want, " · ".join(raw))
+    from pathlib import Path
+    root = Path(_TMP) / "filters"
+    for relative in ("top.md", "ignored.txt", "excluded.md", "nested/child.md", "nested/deeper/deep.md",
+                     ".hidden/hidden.md", "node_modules/vendor.md", "checkout/worktree.md", "checkout/.git"):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(relative, encoding="utf-8")
+    cfg = {"sources": [{"name": "fixture", "path": str(root), "include": ["*.md"],
+                        "exclude": ["excluded.md"], "max_depth": 1}]}
+    def listed():
+        return [Path(p).relative_to(root).as_posix() for p, _, _ in store.iter_source_files(cfg)]
+    check("depth, include/exclude, hidden/vendor/worktree filters are retained", listed() == ["top.md", "nested/child.md"])
+    cfg["sources"][0]["max_depth"] = 0
+    check("depth zero still indexes the source root files", listed() == ["top.md"])
+    cfg["sources"][0]["max_depth"] = 1
+    try:
+        (root / "linked_dir").symlink_to(root / "nested", target_is_directory=True)
+        (root / "linked_file.md").symlink_to(root / "top.md")
+    except OSError:
+        print("Symlink creation unavailable on this host; core traversal controls still ran")
+    else:
+        check("directory links are not followed and file links remain included",
+              listed() == ["linked_file.md", "top.md", "nested/child.md"])
+    single = {"sources": [{"name": "single", "path": str(root / "top.md")}]}
+    check("single-file sources retain their parent root", list(store.iter_source_files(single)) ==
+          [(str(root / "top.md"), "single", str(root))])
+    missing = {"sources": [{"name": "gone", "path": str(root / "absent")}]}
+    check("confirmed absent roots yield no documents", list(store.iter_source_files(missing)) == [])
     print("\n" + "=" * 78)
     if FAILS:
         print("❌ %d failure(s)" % len(FAILS))

@@ -891,10 +891,12 @@ def source_failure_checks(db):
               name='failure_pending',description='Proposal',type='user',body='Friday proposal.',project_id=scope,
               identity_reference=dict(name='failure_anchor',sha=anchor['sha'],reason='Same reviewed fact'))
     sibling=Path(_MEM)/'failure_sibling.md';original=sibling.read_bytes()
-    with db:db.execute('INSERT INTO usage(path,hits) VALUES(?,7)',(str(sibling),))
     def refresh(**kw):
         return store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False,**kw)
-    for case in ('permission','invalid_utf8','stat','scan'):
+    nested=Path(_MEM)/'failure_nested';nested.mkdir()
+    sibling=sibling.replace(nested/sibling.name);refresh()
+    with db:db.execute('INSERT INTO usage(path,hits) VALUES(?,7)',(str(sibling),))
+    for case in ('permission','invalid_utf8','stat','scan','child_scan','entry_type','entry_link'):
         prepared=json.loads(server.call_tool(db,'prepare_fact',args));assert prepared.get('ok'),prepared
         # Force the incremental pass to read the sibling; fast-skip is separately covered by full=True.
         if case=='invalid_utf8':sibling.write_bytes(b'\xff\xfeunreadable')
@@ -907,14 +909,36 @@ def source_failure_checks(db):
         def guarded_stat(path,*a,**kw):
             if case=='stat' and os.fspath(path)==str(sibling):raise PermissionError('fixture stat denied')
             return original_stat(path,*a,**kw)
+        class GuardedEntry:
+            def __init__(self,entry):self.entry=entry
+            def __getattr__(self,name):return getattr(self.entry,name)
+            def is_dir(self,*a,**kw):
+                if case=='entry_type' and self.entry.path==str(nested):raise PermissionError('fixture entry type denied')
+                return self.entry.is_dir(*a,**kw)
+            def is_symlink(self):
+                if case=='entry_link' and self.entry.path==str(nested):raise PermissionError('fixture link type denied')
+                return self.entry.is_symlink()
+        class typed_scan:
+            def __init__(self,path,*a,**kw):self.entries=original_scan(path,*a,**kw)
+            def __iter__(self):return self
+            def __next__(self):return GuardedEntry(next(self.entries))
+            def __enter__(self):return self
+            def __exit__(self,*unused):self.entries.close()
+            def close(self):self.entries.close()
         def guarded_scan(path,*a,**kw):
             if case=='scan' and os.fspath(path)==_MEM:raise PermissionError('fixture directory denied')
-            return original_scan(path,*a,**kw)
+            if case=='child_scan' and os.fspath(path)==str(nested):raise PermissionError('fixture child scan denied')
+            return typed_scan(path,*a,**kw) if case in ('entry_type','entry_link') else original_scan(path,*a,**kw)
+        published=[];original_write=rc.atomic_write
+        def counted_write(path,*a,**kw):
+            if os.fspath(path)==str(Path(_MEM)/'failure_pending.md'):published.append(path)
+            return original_write(path,*a,**kw)
         try:
             with contextlib.ExitStack() as stack:
                 stack.enter_context(patch('builtins.open',side_effect=guarded_open))
                 stack.enter_context(patch('os.stat',side_effect=guarded_stat))
                 stack.enter_context(patch('os.scandir',side_effect=guarded_scan))
+                stack.enter_context(patch.object(rc,'atomic_write',side_effect=counted_write))
                 for full in (False,True):
                     try:refresh(full=full)
                     except OSError:pass
@@ -922,7 +946,7 @@ def source_failure_checks(db):
                     assert '\n'.join(db.iterdump())==dump,(case,'index/history changed')
                 saved=_j(db,**prepared['save_arguments'])
                 assert saved.get('error',{}).get('code')=='index_pending',(case,saved)
-                assert not (Path(_MEM)/'failure_pending.md').exists()
+                assert not published and not (Path(_MEM)/'failure_pending.md').exists()
                 assert '\n'.join(db.iterdump())==dump,(case,'pre-save index changed')
                 if case in ('permission','invalid_utf8'):
                     again=json.loads(server.call_tool(db,'prepare_fact',args))
@@ -938,7 +962,7 @@ def source_failure_checks(db):
     sibling.unlink();refresh()
     assert not db.execute('SELECT 1 FROM docs WHERE path=?',(str(sibling),)).fetchone()
     assert not db.execute('SELECT 1 FROM usage WHERE path=?',(str(sibling),)).fetchone()
-    print('PASS: real incremental/full/pre-save indexing preserves docs and usage=7 on read/decode/stat/scan errors; recovery and true deletion work')
+    print('PASS: real incremental/full/pre-save indexing preserves docs and usage=7 on read/decode/stat/scan/entry-type errors; recovery and true deletion work')
 
     legacy=_j(db,name='unreadable_legacy',description='Legacy',type='user',body='Monday water.',project_id=scope)
     request=dict(predecessor='unreadable_legacy',name='unreadable_legacy_new',description='Friday',type='user',
