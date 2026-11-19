@@ -299,6 +299,8 @@ def current(path: str) -> Dict[str, Any]:
     meta, body = store.parse_frontmatter(raw)
     from brain import lifecycle
     out["lifecycle"] = lifecycle.from_meta(meta)
+    from brain import privacy
+    out["embed"] = False if privacy.is_local_only(raw, is_text=True) else None
     out["body"] = body.strip()
     out.update({"exists": True, "name": os.path.basename(path)[:-3],
                 "sha": hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest(),

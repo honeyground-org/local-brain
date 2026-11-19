@@ -1839,6 +1839,48 @@ def scope_preservation_checks(db):
     print('PASS: manual tracked and legacy predecessors cannot move/clear/acquire scope, even with exact SHA and fact snapshot; preview warns, zero writes/history changes, usage7 and public two-record history survive; omitted-scope noop and separate new-scope saves work')
 
 
+def existing_privacy_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import privacy,revisions
+    for flag in ('false','no','off','0'):
+        name='existing_private_'+flag
+        args=dict(name=name,description='Private',type='user',body='Original body.',project_id='existing-private',embed=False)
+        path=Path(_MEM)/(name+'.md')
+        path.write_text(rc.render(name,args,'').replace('embed: false','embed: '+flag),encoding='utf-8')
+        original=path.read_bytes();store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+        update=dict(args,body='Updated body.',expected_sha=rc.file_sha(str(path)))
+        dump='\n'.join(db.iterdump());changes=db.total_changes
+        history={p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}
+        for preview in (False,True):
+            with patch.object(rc,'atomic_write',side_effect=AssertionError('privacy refusal must not publish')):
+                refused=_j(db,**dict(update,embed=True,prepare_only=preview))
+            assert (refused.get('error') or {}).get('code')=='privacy_required','existing opt-out accepted opt-in: '+str(refused)
+            assert path.read_bytes()==original and db.total_changes==changes and '\n'.join(db.iterdump())==dump
+            assert {p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}==history
+        update.pop('embed');saved=_j(db,**update)
+        assert saved.get('result')=='updated' and privacy.is_local_only(str(path)),saved
+        assert 'embed: false' in path.read_text(encoding='utf-8')
+        body=path.read_bytes();update.pop('project_id')
+        assert _j(db,**update).get('result')=='noop' and path.read_bytes()==body
+    # Metadata inherited from a manually authored tracked fact also stays local.
+    args=dict(name='existing_private_tracked',description='Tracked',type='user',body='Keep this fact.',project_id='existing-private',
+              lifecycle=dict(topic='private',facet='value',valid_from='2026-11-01',evidence=['User confirmation']),embed=False)
+    path=Path(_MEM)/(args['name']+'.md');path.write_text(rc.render(args['name'],args,''),encoding='utf-8')
+    store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+    update=dict(args,expected_sha=rc.file_sha(str(path)));update.pop('embed')
+    preview=_j(db,**dict(update,prepare_only=True));assert preview.get('ok'),preview
+    update['expected_fact_sha']=preview['expected_fact_sha']
+    assert _j(db,**update).get('stored') and privacy.is_local_only(str(path))
+    assert _j(db,**update).get('result')=='noop'
+    # Existing API-generated retry hashes already include the explicit opt-out.
+    api=dict(name='existing_private_api',description='API',type='user',body='Keep API private.',embed=False)
+    saved=_j(db,**api);assert saved.get('stored'),saved
+    api.pop('embed');assert _j(db,**api).get('result')=='noop'
+    assert privacy.is_local_only(saved['path'])
+    print('PASS: existing false/no/off/0 opt-outs survive omitted embed on updates and retries; explicit opt-in refuses with zero SQL/history/publication changes; manual tracked and API receipt cases stay local')
+
+
 def exclusive_create_checks(db):
     from pathlib import Path
     from brain import revisions
@@ -2045,6 +2087,7 @@ def main() -> int:
     publication_index_checks(db)
     revision_name_checks(db)
     scope_preservation_checks(db)
+    existing_privacy_checks(db)
     unindexed_preparation_checks(db)
     cold_preparation_checks(db)
     print("\n" + "=" * 72)
