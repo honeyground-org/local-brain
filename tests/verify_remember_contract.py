@@ -983,7 +983,7 @@ def source_failure_checks(db):
                 refused=json.loads(server.call_tool(db,'prepare_revision',request))
                 assert refused.get('error',{}).get('code')=='index_pending',(case,refused)
                 saved=_j(db,**prepared['save_arguments'])
-                assert saved.get('error',{}).get('code')=='invalid_argument',(case,saved)
+                assert saved.get('error',{}).get('code')==('invalid_argument' if case=='missing' else 'index_pending'),(case,saved)
                 assert not (Path(_MEM)/request['name']).with_suffix('.md').exists()
                 assert '\n'.join(db.iterdump())==dump
         finally:path.write_bytes(original)
@@ -1128,16 +1128,34 @@ def history_batch_checks(db):
                             stack.enter_context(patch.object(store,method,side_effect=sqlite3.OperationalError('fixture terms failure')))
                     if mode=='save':
                         result=_j(connection,**prepared['save_arguments'])
-                        assert result.get('error',{}).get('code')=='index_pending',(failure,mode,result)
+                        assert result.get('stored') and result.get('indexed_words') is False and result.get('partial') and result.get('retryable'),(failure,mode,result)
+                        assert result.get('index',{}).get('error'),(failure,mode,result)
                     else:
                         try:refresh(connection,full=mode=='full')
                         except (OSError,sqlite3.Error):pass
                         else:raise AssertionError((failure,mode,'injected failure was accepted'))
-                assert attempted and not published and not target.exists(),(failure,mode)
+                assert attempted,(failure,mode)
+                if mode=='save':
+                    assert len(published)==1 and target.exists() and rc.file_sha(str(target))==result['sha'],(failure,mode)
+                else:
+                    assert not published and not target.exists(),(failure,mode)
                 assert '\n'.join(db.iterdump())==dump,(failure,mode,'SQLite changed')
                 assert archives()==before,(failure,mode,'durable history changed')
                 assert [p.read_bytes() for p in paths]==source_bytes,(failure,mode,'source changed')
                 assert not list(revisions.directory().glob('.index-rollback-*'))
+                if mode=='save':
+                    before_retry=target.read_bytes()
+                    retry=_j(db,**prepared['save_arguments'])
+                    assert retry.get('result')=='noop' and retry.get('indexed_words') and target.read_bytes()==before_retry,retry
+                    for history in history_paths:
+                        assert 'External edit pending observation.' in history.read_text(encoding='utf-8')
+                    # Restore this fixture after proving the failed publication can catch up.
+                    target.unlink()
+                    for path,body in zip(paths,originals):path.write_bytes(body)
+                    refresh()
+                    for archive in revisions.directory().glob('*.json'):
+                        if archive.name not in before:archive.unlink()
+                    for name,body in before.items():(revisions.directory()/name).write_bytes(body)
                 for path,body in zip(paths,originals):path.write_bytes(body)
                 # Full refresh may legitimately create the absent archive; check restoration only when present.
                 if not absent:
@@ -1149,7 +1167,7 @@ def history_batch_checks(db):
     before=archives();refresh();assert archives()==before
     saved=_j(db,**prepared['save_arguments'])
     assert saved.get('result')=='new' and _j(db,**prepared['save_arguments']).get('result')=='noop',saved
-    print('PASS: 30 incremental/full/pre-save history/write/SQLite/commit failures preserve sources, exact DB and all history bytes; new archives roll back; success and retry work')
+    print('PASS: 30 incremental/full/post-save history/write/SQLite/commit failures preserve sources, exact DB and history bytes; 10 saved files return partial ACK and retry catches up without rewriting')
 
 
 def content_snapshot_checks(db):
@@ -1556,7 +1574,66 @@ def duplicate_usage_checks(db):
     print('PASS: earlier identical copy preserves every usage field and learned weight=0.35 across refusal/full rebuild/recovery/new/noop; later feedback survives; true deletion resets retained usage and weight')
 
 
+def unindexed_preparation_checks(db):
+    from pathlib import Path
+    args=dict(name='unindexed_successor',description='New schedule',type='user',body='Friday review.',
+              project_id='unindexed-scope',lifecycle=dict(topic='review',facet='day',valid_from='2026-11-02',
+              supersedes=['unindexed_predecessor'],change_reason='Confirmed change',evidence=['User confirmation']))
+    prior=dict(args,name='unindexed_predecessor',body='Monday review.',
+               lifecycle=dict(topic='review',facet='day',valid_from='2026-11-01',evidence=['User confirmation']))
+    path=Path(_MEM)/'unindexed_predecessor.md'
+    path.write_text(rc.render(prior['name'],prior,'2026-11-01'),encoding='utf-8')
+    original=path.read_bytes();dump='\n'.join(db.iterdump());changes=db.total_changes
+    assert not db.execute('SELECT 1 FROM docs WHERE name=?',(prior['name'],)).fetchone()
+    preview=_j(db,**dict(args,prepare_only=True))
+    assert preview.get('ok') and preview.get('write_issue') is None,preview
+    assert db.total_changes==changes and '\n'.join(db.iterdump())==dump
+    saved=_j(db,**dict(args,expected_fact_sha=preview['expected_fact_sha']))
+    assert saved.get('stored') and saved.get('indexed_words'),'fresh preview could not save: '+str(saved)
+    assert path.read_bytes()==original
+    assert _j(db,**dict(args,expected_fact_sha=preview['expected_fact_sha'])).get('result')=='noop'
+
+
+
+def cold_preparation_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    import subprocess
+    args=dict(name="lock_preview",description="Preview",type="user",body="Proposal.",prepare_only=True,
+              lifecycle=dict(topic="lock-preview",facet="value",status="proposed"))
+    with patch.object(rc,"write_lock",side_effect=AssertionError("preview acquired write lock")):
+        assert _j(db,**args).get("ok")
+    # Exercise the actual first MCP call, both with no DB and with an existing DB
+    # whose configured memory directory does not exist. Neither may initialise it.
+    for existing in (False,True):
+        folder=Path(_TMP)/('preview-existing' if existing else 'preview-cold')
+        home=os.environ['BRAIN_HOME'] if existing else str(folder/'home')
+        missing=folder/'missing-memory'
+        folder.mkdir()
+        cfg=folder/'config.json'
+        cfg.write_text(json.dumps({'sources':[{'name':'memory','path':str(missing),'include':['*.md']}]}),encoding='utf-8')
+        request=dict(jsonrpc='2.0',id=1,method='tools/call',params=dict(name='remember',arguments=dict(
+            name='preview',description='Preview',type='user',body='Proposal.',prepare_only=True,
+            lifecycle=dict(topic='preview',facet='value',status='proposed'))))
+        before='\n'.join(db.iterdump())
+        wire=subprocess.run([sys.executable,'-m','brain.server'],input=json.dumps(request)+'\n',
+                            text=True,encoding='utf-8',capture_output=True,cwd=ROOT,
+                            env=dict(os.environ,BRAIN_HOME=home,BRAIN_CONFIG=str(cfg)),timeout=30)
+        assert wire.returncode==0,wire.stderr
+        replies=[json.loads(line) for line in wire.stdout.splitlines() if line.strip()]
+        result=json.loads(replies[-1]['result']['content'][0]['text'])
+        assert not missing.exists(),'prepare-only created memory directory'
+        if existing:assert result.get('ok') and result.get('stored') is False,result
+        else:
+            assert not Path(home).exists(),'prepare-only initialised live database'
+            assert result.get('error',{}).get('code')=='index_pending',result
+        assert '\n'.join(db.iterdump())==before
+    print('PASS: unindexed predecessor preview/save agree; first MCP preparation never creates DB, directory or write lock')
+
+
 def exclusive_create_checks(db):
+    from pathlib import Path
+    from brain import revisions
     from unittest.mock import patch
     source = _j(db, name='race_source', description='Source', type='user',
                 body='The review happens on Friday.', project_id='race-scope')
@@ -1566,6 +1643,11 @@ def exclusive_create_checks(db):
         project_id='race-scope', topic='review', facet='day'), _measure=True))['save_arguments']
     target = os.path.join(_MEM, 'race_proposal.md')
     foreign = '---\nname: race_proposal\nproject_id: other-scope\n---\nPreserve the competing record.\n'
+    unrelated=_j(db,name='race_unrelated',description='Unrelated',type='user',body='Original body.')
+    unrelated_path=Path(unrelated['path'])
+    unrelated_path.write_bytes(unrelated_path.read_bytes()+b'\nExternal edit awaiting observation.\n')
+    before='\n'.join(db.iterdump());changes=db.total_changes
+    history={p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}
     original_write, original_sha = rc.atomic_write, rc.file_sha
     raced = []
     def race_write(path, text, expected_sha):
@@ -1582,6 +1664,8 @@ def exclusive_create_checks(db):
         outcome = _j(db, **prepared)
     check('destination created after final SHA check returns conflict', bool(raced) and outcome.get('result') == 'conflict')
     check('concurrent foreign memory remains byte-identical', _read('race_proposal') == foreign)
+    assert db.total_changes==changes and '\n'.join(db.iterdump())==before,'late conflict wrote live SQL'
+    assert {p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}==history,'late conflict published history'
     check('conflicting create cleans temporary files', not any(n.startswith('.brain-write-') for n in os.listdir(_MEM)))
     os.remove(target)
     outcome = _j(db, **prepared)
@@ -1749,6 +1833,8 @@ def main() -> int:
     recorded_feedback_checks(db)
     rejected_snapshot_checks(db)
     exclusive_create_checks(db)
+    unindexed_preparation_checks(db)
+    cold_preparation_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
         print("❌ failed: %d — %s" % (len(FAILS), " · ".join(FAILS)))

@@ -1484,7 +1484,7 @@ def _validate_staged_docs(db, staged, gone, validate):
         candidate.executemany("DELETE FROM docs WHERE path=?", ((p,) for p in gone))
         candidate.commit()
         candidate.execute("PRAGMA query_only=ON")
-        validate(candidate)
+        return validate(candidate)
     finally:
         candidate.close()
 
@@ -1494,7 +1494,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
             recalibrate: bool = True,
             refresh_history: Optional[bool] = None,
             sync: bool = True, heal: bool = True, queue_embedding: bool = True,
-            verify_content: bool = False, validate=None) -> dict:
+            verify_content: bool = False, validate=None, preview_only: bool = False) -> dict:
     """Incremental indexing. Change detection is (mtime, size, sha) — identical on all three, skip.
 
     `recalibrate=False` exists for the places that run **on every prompt, like the hook**.
@@ -1505,6 +1505,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     Unlike a full rebuild, unchanged content keeps its existing index and history.
     `validate` may reject the staged document projection before any live SQL or
     history writes. It receives a read-only temporary database containing docs.
+    `preview_only=True` returns that callback result without applying observations.
 
     `sync=False` / `heal=False` leave the dedicated databases' update and the trigger self-healing for later
     (§deferred) and say so in `stats["deferred"]`. The hook passes both: measured 2026-10-14 on the author's
@@ -1630,7 +1631,11 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
             except OSError:
                 pass                              # inability to establish absence is not deletion
         if validate is not None:
-            _validate_staged_docs(db, staged, (p for p in existing if p not in seen_paths), validate)
+            preview = _validate_staged_docs(db, staged, (p for p in existing if p not in seen_paths), validate)
+        if preview_only:
+            if index_stamp != (db.total_changes, db.execute("PRAGMA data_version").fetchone()[0]):
+                raise OSError("Index changed while sources were read; retry preparation")
+            return preview if validate is not None else {}
         staged.seek(0)
         with db:
             # Reserve the writer before publishing any history. A concurrent indexer
