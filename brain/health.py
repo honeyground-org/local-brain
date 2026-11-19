@@ -299,13 +299,16 @@ def classify(checks: dict) -> dict:
 
 
 def stores_state(db: sqlite3.Connection) -> dict:
-    """Each dedicated database chosen: is it in sync, did it last answer. From the record only — no network."""
+    """Local availability and recorded remote sync status; never contacts a remote database."""
     out = {}
     try:
         from brain import stores as _st, vectors as _vec
         for role in _st.ROLES:
             c = _st.choice(role)
             if c["backend"] == "sqlite":
+                db.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+                out[role] = {"backend": "sqlite", "local": True, "in_sync": True,
+                             "ok": True, "error": "", "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
                 continue
             h = _st.health(db, role)
             if c.get("error"):

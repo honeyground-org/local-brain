@@ -817,6 +817,7 @@
  "dash.inspect.host": "기본 Claude / Codex 대비 효과",
  "dash.inspect.host_note": "이 화면에 연결된 호스트 비교 실험이 없습니다. 구성요소 점수로 사용자 효과를 입증할 수 없습니다.",
  "dash.inspect.in_sync": "동기화 기록 있음",
+ "dash.inspect.local_ready": "로컬에서 사용 가능",
  "dash.inspect.index": "로컬 색인·이력",
  "dash.inspect.index_at": "색인 기록 시각",
  "dash.inspect.indexed": "색인 문서",

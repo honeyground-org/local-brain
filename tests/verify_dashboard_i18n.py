@@ -44,6 +44,30 @@ def visible(html: str) -> str:
     return re.sub(r"<[^>]+>", "\n", body)
 
 
+def verify_local_store_roles():
+    import sqlite3, tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import stores, vectors
+    with tempfile.TemporaryDirectory() as td:
+        cfg=Path(td)/'config.json';cfg.write_text('{}',encoding='utf-8')
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db);vectors.ensure_table(db);db.commit()
+        before='\n'.join(db.iterdump());db.execute('PRAGMA query_only=ON')
+        with patch.dict(os.environ,{'BRAIN_CONFIG':str(cfg),'BRAIN_VECTOR_STORE':'sqlite','BRAIN_GRAPH_STORE':'sqlite'}),patch.object(stores,'health',side_effect=AssertionError('local roles need no remote health record')),patch.object(stores,'vector_backend',side_effect=AssertionError('remote vector access')),patch.object(stores,'graph_backend',side_effect=AssertionError('remote graph access')):
+            data=dashboard.payload(db)
+            for role in ('vector','graph'):
+                state=data['stores'].get(role,{})
+                assert state.get('backend')=='sqlite' and state.get('local') is True and state.get('ok') is True,state
+            for code in i18n.LANGS:
+                with patch.object(i18n,'lang',return_value=code):
+                    page=dashview.render(data)
+                    assert page.count('data-t="dash.inspect.local_ready"')==2,(code,page[:1000])
+                    assert i18n.t('dash.inspect.local_ready')!='dash.inspect.local_ready',code
+        assert '\n'.join(db.iterdump())==before
+        db.close()
+    print('PASS: default SQLite vector and graph roles render local availability in all six languages with no writes or remote health calls')
+
+
 def verify_cli_readonly():
     import hashlib
     import sqlite3
@@ -562,6 +586,7 @@ def main():
         i18n._cache.clear()
 
     verify_cli_readonly()
+    verify_local_store_roles()
     verify_graph_scopes()
     verify_path_scope()
     verify_workspace_controls()

@@ -817,6 +817,7 @@
  "dash.inspect.host": "Beneficio frente a Claude / Codex nativos",
  "dash.inspect.host_note": "No hay un estudio comparativo de anfitriones conectado. Las puntuaciones de componentes no demuestran este beneficio.",
  "dash.inspect.in_sync": "Sincronización registrada",
+ "dash.inspect.local_ready": "Disponible localmente",
  "dash.inspect.index": "Índice e historial locales",
  "dash.inspect.index_at": "Índice registrado",
  "dash.inspect.indexed": "Documentos indexados",
