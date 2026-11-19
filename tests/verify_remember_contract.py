@@ -743,7 +743,10 @@ def identity_checks(db):
     early=prep(name='occupied_other_scope')
     rejected=_j(db,**dict(occupied,expected_sha=occupant['sha']))
     check('preparation rejects an occupied cross-scope path',(early.get('error') or {}).get('code')=='target_occupied')
-    check('matching SHA never authorises extraction over another scope file',(rejected.get('error') or {}).get('code')=='target_occupied' and _read('occupied_other_scope')==original_occupant)
+    # Existing-record scope validation now precedes extraction occupancy checks.
+    check('matching SHA never authorises extraction over another scope file',
+          (rejected.get('error') or {}).get('code')=='invalid_argument'
+          and 'project_id' in rejected['error']['message'] and _read('occupied_other_scope')==original_occupant)
     root=_j(db,name='identity_legacy_root',description='Single fact',type='user',body='Water on Friday.',project_id=scope)
     anchor_request=call('prepare_revision',predecessor='identity_legacy_root',name='identity_legacy_anchor',description='Tracked fact',type='user',body='Water on Friday.',project_id=scope,topic='legacy-identity',facet='water',status='proposed',valid_from='2026-01-01',change_reason='Explicit whole-record confirmation',evidence=['Fixture owner confirmed'],replace_whole_record=True)
     legacy_anchor=_j(db,**anchor_request['save_arguments'])
