@@ -10,6 +10,7 @@ stops being used, and a brain nobody uses is no brain at all.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -21,7 +22,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.54"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.55"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -444,38 +445,33 @@ def _do_remember(db, args: dict) -> str:
     directory = _memory_dir()
     path = os.path.join(directory, name + ".md")
     try:
-        os.makedirs(directory, exist_ok=True)
-        with rc.write_lock(directory):
+        if not args.get("prepare_only"):
+            os.makedirs(directory, exist_ok=True)
+        with contextlib.nullcontext() if args.get("prepare_only") else rc.write_lock(directory):
             if os.path.islink(path):
                 return json.dumps(rc.error("invalid_argument", "A memory write cannot replace a symbolic link"))
             cur = rc.current(path)
             if "project_id" not in args and cur.get("project_id"):
                 args["project_id"] = cur["project_id"]
             from brain import lifecycle
+            if 'lifecycle' not in args and cur.get('lifecycle'):
+                args['lifecycle'] = cur['lifecycle']
             if args.get('prepare_only'):
-                if 'lifecycle' not in args and cur.get('lifecycle'):
-                    args['lifecycle'] = cur['lifecycle']
-                class PreviewReady(Exception):
-                    pass
                 def prepare_candidate(candidate):
                     if rc.requires_local_only(candidate, args) and args.get("embed") is not False:
-                        raise PreviewReady(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
+                        return rc.error("privacy_required", "Preserve embed:false from the predecessor")
                     bad = rc.check_extraction(candidate, args, path) or rc.check_identity(candidate, args)
                     if bad:
-                        raise PreviewReady(bad)
+                        return bad
                     preview = lifecycle.prepare(candidate, name, args)
                     preview['write_issue'] = lifecycle.check_write(candidate, name, args, cur)
-                    raise PreviewReady(preview)  # A preview never applies its staged observations.
+                    return preview
                 try:
-                    store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False,
-                                  verify_content=True, validate=prepare_candidate)
-                except PreviewReady as ready:
-                    return json.dumps(ready.args[0], ensure_ascii=False)
+                    preview = store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False,
+                                            verify_content=True, validate=prepare_candidate, preview_only=True)
+                    return json.dumps(preview, ensure_ascii=False)
                 except Exception as exc:
                     return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
-            issue = lifecycle.check_write(db, name, args, cur)
-            if issue:
-                return json.dumps(rc.error("invalid_argument", issue), ensure_ascii=False)
             if args.get('expected_fact_sha') and not args.get('lifecycle'):
                 return json.dumps(rc.error('invalid_argument', 'A fact snapshot requires lifecycle topic/facet'))
             if cur.get("lifecycle") and (
@@ -504,10 +500,10 @@ def _do_remember(db, args: dict) -> str:
                         raise Rejected(bad)
                 try:
                     if args.get('lifecycle'):
-                        # Reconcile against fresh source observations under the shared writer lock.
-                        # Refused preconditions never commit the staged index or its history.
+                        # Preview the same fresh state used by preparation. Publish the
+                        # file first: a late destination conflict must not commit observations.
                         store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False,
-                                      verify_content=True, validate=validate_save)
+                                      verify_content=True, validate=validate_save, preview_only=True)
                     else:
                         validate_save(db)
                 except Rejected as rejected:
@@ -885,7 +881,9 @@ def serve() -> int:
             elif method == "tools/call":
                 params = req.get("params") or {}
                 tool_name, arguments = params.get("name"), params.get("arguments", {})
-                readonly_tool = tool_name in ("review_identity", "prepare_fact", "prepare_revision", "memory_review")
+                readonly_tool = (tool_name in ("review_identity", "prepare_fact", "prepare_revision", "memory_review")
+                                 or (tool_name == "remember" and isinstance(arguments, dict)
+                                     and arguments.get("prepare_only") is True))
                 if not readonly_tool and db is None:
                     db = store.connect()
                 if tool_name in ("recall", "memory_history") and isinstance(arguments, dict):
