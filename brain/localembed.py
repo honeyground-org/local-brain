@@ -121,12 +121,12 @@ def cached_plan(db, row, model):
     return json.loads(found[1]) if found and found[0] == row['sha'] else None
 
 
-def stale(db):
+def stale(db, eligible=None):
     from brain import vectors
     ensure(db)
     model = vectors.model_tag()
     result = []
-    for row in vectors.eligible_docs(db):
+    for row in vectors.eligible_docs(db) if eligible is None else eligible:
         planned = cached_plan(db, row, model)
         have = list(db.execute('SELECT chunk_no,sha FROM vectors WHERE doc_id=? AND model=? AND dim=?',
                                (row['id'], model, vectors.DIM)))

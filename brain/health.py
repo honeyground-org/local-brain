@@ -331,8 +331,9 @@ def embedding_state(db: sqlite3.Connection) -> dict:
         if c.get("provider") in (None, "none"):
             out["state"] = "disabled"
             return out
-        eligible = len(vectors.eligible_docs(db))
-        stale = len(vectors.stale_docs(db))
+        snapshot = vectors.eligible_docs(db)
+        eligible = len(snapshot)
+        stale = len(vectors.stale_docs(db, eligible=snapshot))
         out.update(eligible_docs=eligible, current_docs=eligible-stale, pending_docs=stale,
                    current=stale == 0, state="current" if stale == 0 else "pending")
     except Exception as exc:
