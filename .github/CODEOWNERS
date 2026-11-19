@@ -64,6 +64,7 @@
 /brain/dashstyle.py @wangjacsi
 /brain/embedplan.py @wangjacsi
 /brain/graphview.py @wangjacsi
+/brain/indextrim.py @wangjacsi
 /brain/judgegate.py @wangjacsi
 /brain/lifecycle.py @wangjacsi
 /brain/revisions.py @wangjacsi

@@ -62,6 +62,7 @@ HELP_GROUPS = (
         ("add <path>", "cli.help.cmd.add"),
         ("remove <name>", "cli.help.cmd.remove"),
         ("index-audit", "cli.help.cmd.index_audit"),
+        ("index-trim", "cli.help.cmd.index_trim"),
     )),
     ("cli.help.group.semantic", (
         ("engines", "cli.help.cmd.engines"),
@@ -454,6 +455,12 @@ def main(argv=None) -> int:
                    help="three-layer split — which layer can take each instruction")
     p.add_argument("--conditions", action="store_true",
                    help="split by condition clause — a hook needs a 'when' to take it")
+
+    p = sub.add_parser("index-trim",
+                       help="Shorten or drop index lines the audit calls safe, while the file is over its target")
+    p.add_argument("--path", default="", help="index file to trim (default MEMORY.md)")
+    p.add_argument("--apply", action="store_true",
+                   help="write the plan (default: show it only); a backup is kept")
 
     p = sub.add_parser("dashboard",
                        help="Status + ★performance comparison (brain ↔ grep ↔ agent alone)★ as local HTML")
@@ -950,6 +957,10 @@ def main(argv=None) -> int:
             print(indexaudit.render_facts(indexaudit.fact_check(target)))
         else:
             print(indexaudit.render(indexaudit.audit(target)))
+    elif args.cmd == "index-trim":
+        from brain import indextrim
+        plan = indextrim.plan(args.path or "")
+        print(indextrim.render(plan, indextrim.apply(plan) if args.apply else None))
     elif args.cmd == "suggest":
         _p(health.suggestions(db))
     elif args.cmd == "privacy":

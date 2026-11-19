@@ -472,7 +472,7 @@ def size_notice(path: str = "") -> str:
     nbytes = len(text.encode("utf-8"))
     return i18n.t("ia.size.notice", file=os.path.basename(path), chars=f"{chars:,}",
                   bytes_note=(i18n.t("ia.size.bytes", bytes=f"{nbytes:,}") if nbytes != chars else ""),
-                  ok=f"{limit['ok_chars']:,}", when=limit["measured"])
+                  ok=f"{limit['ok_chars']:,}", when=limit["measured"]) + i18n.t("ia.size.trim")
 
 
 # ---------------------------------------------------------------------------

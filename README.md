@@ -422,6 +422,7 @@ All commands work from any directory once installed (`brain <command>`).
 | `brain suggest` | Self-improvement suggestions — stale, orphaned, duplicated memories |
 | `brain triggers` | Every declared trigger phrase, plus checks (uniqueness, resolution, shadowing) |
 | `brain index-audit` | Is each line of your index file still reachable if you delete it? |
+| `brain index-trim` | While the index is over its target, shorten or drop only the lines the audit calls safe (dry run; `--apply` writes, with a backup). Config `"index_trim": {"auto": true}` does it in the daily job |
 | `brain feedback <name> useful\|wrong\|stale` | Rate a recall — it changes future ranking |
 
 ### Corpus (what is in scope)
