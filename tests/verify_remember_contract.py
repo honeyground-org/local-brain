@@ -1152,6 +1152,59 @@ def history_batch_checks(db):
     print('PASS: 30 incremental/full/pre-save history/write/SQLite/commit failures preserve sources, exact DB and all history bytes; new archives roll back; success and retry work')
 
 
+def content_snapshot_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import revisions
+    scope='content-snapshot'
+    source=_j(db,name='content_source',description='Source',type='user',body='Friday evidence.',project_id=scope)
+    anchor=_j(db,name='content_anchor',description='Identity',type='user',body='Monday water.',project_id=scope,
+              lifecycle=dict(topic='plant',facet='water',status='proposed'),embed=False)
+    _j(db,name='content_outsider',description='Other facet',type='user',body='Other observation.',project_id=scope,
+       lifecycle=dict(topic='plant',facet='light',status='proposed'),embed=False)
+    path=Path(_MEM)/'content_outsider.md';original=path.read_bytes()
+    assert original.count(b'light')==1
+    changed=original.replace(b'light',b'water')
+    assert changed!=original and len(changed)==len(original)
+    anchor_path=Path(_MEM)/'content_anchor.md'
+    with db:db.execute('INSERT INTO usage(path,hits) VALUES(?,7)',(str(anchor_path),))
+    request=dict(source_name='content_source',source_sha=source['sha'],quotes=['evidence.'],name='content_pending',
+                 description='Proposal',type='user',body='Friday proposal.',project_id=scope,
+                 identity_reference=dict(name='content_anchor',sha=anchor['sha'],reason='Same reviewed fact'))
+    prepared=json.loads(server.call_tool(db,'prepare_fact',request));assert prepared.get('ok'),prepared
+    target=Path(_MEM)/'content_pending.md'
+    original_write=rc.atomic_write
+    def refresh():return store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False,verify_content=True)
+    for preserve_metadata in (False,True):
+        stat=path.stat()
+        archive=revisions.location(str(path))
+        history=json.loads(archive.read_text(encoding='utf-8'))['observations']
+        anchor_history=revisions.location(str(anchor_path)).read_bytes()
+        path.write_bytes(changed)
+        os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns if preserve_metadata else stat.st_mtime_ns+1000000000))
+        published=[]
+        def publication(candidate,*args,**kw):
+            if str(candidate)==str(target):published.append(candidate)
+            return original_write(candidate,*args,**kw)
+        with patch.object(rc,'atomic_write',side_effect=publication):
+            saved=_j(db,**prepared['save_arguments'])
+        assert saved.get('error',{}).get('code')=='fact_changed',(preserve_metadata,saved)
+        assert not published and not target.exists()
+        assert path.read_bytes()==changed and rc.file_sha(str(anchor_path))==anchor['sha']
+        assert db.execute('SELECT hits FROM usage WHERE path=?',(str(anchor_path),)).fetchone()[0]==7
+        assert revisions.location(str(anchor_path)).read_bytes()==anchor_history
+        observed=json.loads(archive.read_text(encoding='utf-8'))['observations']
+        assert observed[:len(history)]==history,'earlier observed history was lost'
+        assert observed[-1]['record']['lifecycle']['facet']=='water'
+        path.write_bytes(original);os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns));refresh()
+    # Content verification reads unchanged documents but does not reindex/publish them.
+    with patch.object(store,'_index_one',wraps=store._index_one) as index,patch.object(rc,'atomic_write',wraps=rc.atomic_write) as write:
+        refresh();assert not index.called and not write.called
+    saved=_j(db,**prepared['save_arguments'])
+    assert saved.get('result')=='new' and _j(db,**prepared['save_arguments']).get('result')=='noop',saved
+    print('PASS: pre-save content verification rejects same-size/same-mtime group entrants; metadata-change control, source/history/usage preservation and restored-source new/noop pass')
+
+
 def duplicate_usage_checks(db):
     from pathlib import Path
     from unittest.mock import patch
@@ -1381,6 +1434,7 @@ def main() -> int:
     source_failure_checks(db)
     staged_index_checks(db)
     history_batch_checks(db)
+    content_snapshot_checks(db)
     duplicate_usage_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)

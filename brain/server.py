@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.48"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.49"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -484,7 +484,8 @@ def _do_remember(db, args: dict) -> str:
                     try:
                         # Reconcile against fresh source observations under the shared writer lock.
                         # No remote sync, trigger healing or inference inside this precondition check.
-                        store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False)
+                        store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False,
+                                      verify_content=True)
                     except Exception as exc:
                         return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
                     issue = lifecycle.check_write(db, name, args, cur)
