@@ -124,6 +124,40 @@ def verify_malformed_policy_view():
     print('PASS: malformed scalar/object policy states retain readonly memory/performance views and baseline')
 
 
+def verify_promoted_related_context():
+    import sqlite3
+    from brain import observe, search, server, calibrate
+    for mode in ('query','terms'):
+      for arm in ('fusion','linked'):
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+        with tempfile.TemporaryDirectory() as td:
+            for name,body in [('orchid_seed','orchid schedule [[context_note]]'),('context_note','Supplementary background')]:
+                p=Path(td)/(name+'.md');p.write_text('---\nname: '+name+'\n---\n'+body+'\n',encoding='utf-8')
+                store._index_one(db,store.read_doc(str(p),'memory',td))
+            store._rebuild_terms(db);db.commit()
+            with patch.dict(os.environ,{'BRAIN_GRAPH_STORE':'sqlite'}),patch.object(observe,'write'),patch.object(calibrate,'threshold',return_value=.0001),patch.object(server,'_words_unsure',return_value=False),patch.object(vectors,'_qcache_get',return_value=[1.,0.]),patch.object(personal.time,'monotonic',return_value=1):
+                evidence(db,12,arm)
+                if mode=='terms':db.execute("UPDATE personal_events SET terms='[\"orchid\"]'");db.commit()
+                assert personal.update(db,mode)['arm']==arm
+                assert personal.certified(db,personal.state(db,mode))
+                args=dict(query='orchid',terms=['schedule'] if mode=='terms' else [],format='json')
+                with patch.dict(os.environ,{'BRAIN_PERSONAL_MODE':'observe'}):
+                    baseline=json.loads(server.call_tool(db,'recall',args))
+                assert [r['name'] for r in baseline['related']]==['context_note'],baseline
+                base=search.recall(db,'orchid');direct=next(r for r in base if not r.get('related'));context=next(r for r in base if r.get('related'))
+                with patch.dict(os.environ,{'BRAIN_PERSONAL_MODE':'auto'}),patch.object(search,'meaning',return_value=([direct],'')):
+                    promoted=json.loads(server.call_tool(db,'recall',args))
+                assert promoted['related']==baseline['related'],(arm,mode,promoted)
+                assert [r['name'] for r in promoted['results']]==[r['name'] for r in baseline['results']]
+                raised=dict(context,related=False,via_vector=True,cosine=.9)
+                with patch.dict(os.environ,{'BRAIN_PERSONAL_MODE':'auto'}),patch.object(search,'meaning',return_value=([raised,direct],'')):
+                    promoted=json.loads(server.call_tool(db,'recall',args))
+                assert 'context_note' in [r['name'] for r in promoted['results']]
+                assert not promoted['related'],'promoted direct path duplicated as graph context'
+        db.close()
+    print('PASS: certified fusion/linked MCP recall preserves graph context for query/terms and deduplicates promoted direct paths')
+
+
 def verify_serving_cache_fallback():
     import array, hashlib, sqlite3
     from brain import observe, search, server
@@ -763,6 +797,7 @@ def main():
     verify_semantic_route()
     verify_rejected_observations()
     verify_serving_cache_fallback()
+    verify_promoted_related_context()
     verify_request_replay_order()
     verify_malformed_policy_view()
     verify_turn_edit_order()

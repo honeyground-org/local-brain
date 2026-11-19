@@ -282,7 +282,10 @@ def candidates(db, query, base, arm, k, terms=()):
         for rank, path in enumerate(ranked):
             score[path] = score.get(path, 0.0) + 1.0 / (search.FUSE_K + rank + 1)
     ranked = sorted(pool, key=lambda p: (-score.get(p, 0.0), order[p]))
-    return [pool[p] for p in ranked[:k]]
+    selected = [pool[p] for p in ranked[:k]]
+    direct_paths = {r["path"] for r in selected}
+    # Graph context is supplementary, not a ranking vote or part of the direct k.
+    return selected + [r for r in base if r.get("related") and r["path"] not in direct_paths]
 
 
 def apply(db, query, rows, k, terms=(), baseline_cost=0.0):
