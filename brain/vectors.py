@@ -555,20 +555,26 @@ def no_embed_sources() -> List[str]:
             if s.get("embed") is False and s.get("name")]
 
 
+def eligible_docs(db: sqlite3.Connection) -> List[sqlite3.Row]:
+    """Share build and coverage eligibility; local-only notes never enter remote batches."""
+    from brain import privacy
+    skip = set(no_embed_sources())
+    return [row for row in db.execute("SELECT id,path,name,source,title,description,body,sha FROM docs")
+            if row["source"] not in skip
+            and (PROVIDER == "embeddinggemma" or not privacy.is_local_only(row["path"]))]
+
+
 def stale_docs(db: sqlite3.Connection) -> List[sqlite3.Row]:
     """Missing, stale or incomplete documents, including a previously capped suffix."""
     ensure_table(db)
     if PROVIDER == "embeddinggemma":
         from brain import localembed
         return localembed.stale(db)
-    skip = set(no_embed_sources())
     held = {}
     for r in db.execute("SELECT doc_id,chunk_no,sha,model,dim FROM vectors WHERE model=? AND dim=?", (model_tag(), DIM)):
         held.setdefault(r[0], []).append(tuple(r[1:]))
     todo = []
-    for row in db.execute("SELECT id,name,source,title,description,body,sha FROM docs"):
-        if row["source"] in skip:
-            continue
+    for row in eligible_docs(db):
         expected = len(chunk_spans(row["body"] or ""))
         have = held.get(row["id"], [])
         good = {n for n, sha, model, dim in have
@@ -696,13 +702,11 @@ def build(db: sqlite3.Connection, limit_docs: int = 0,
 
 def coverage(db: sqlite3.Connection) -> dict:
     ensure_table(db)
-    tot = db.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
-    have = db.execute("SELECT COUNT(DISTINCT doc_id) FROM vectors WHERE model=? AND dim=?",
-                      (model_tag(), DIM)).fetchone()[0]
-    ch = db.execute("SELECT COUNT(*) FROM vectors WHERE model=? AND dim=?",
-                    (model_tag(), DIM)).fetchone()[0]
-    return {"docs": tot, "embedded": have, "chunks": ch,
-            "stale": len(stale_docs(db))}
+    eligible = {r["id"] for r in eligible_docs(db)}
+    rows = list(db.execute("SELECT doc_id FROM vectors WHERE model=? AND dim=?", (model_tag(), DIM)))
+    have = {r[0] for r in rows if r[0] in eligible}
+    return {"docs": len(eligible), "embedded": len(have),
+            "chunks": sum(r[0] in eligible for r in rows), "stale": len(stale_docs(db))}
 
 
 def query_tag() -> str:

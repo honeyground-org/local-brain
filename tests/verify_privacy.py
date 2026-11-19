@@ -222,6 +222,49 @@ blob = json.dumps(rep, ensure_ascii=False)
 check(not leaks(blob), "the audit result has no secret value (only names and pattern names)")
 print("   %d memories scanned, %d had a pattern" % (rep["files"], len(rep["flagged"])))
 
+head("⑥ document and source opt-outs reach actual remote build requests")
+import sqlite3
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+from brain import store, health, engines, stores
+
+with tempfile.TemporaryDirectory() as td:
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    samples=[('private_note','memory','false','PRIVATE_ORCHID_BODY'),
+             ('source_note','excluded','true','EXCLUDED_SOURCE_BODY'),
+             ('public_note','memory','true','PUBLIC_CONTROL_BODY')]
+    for name,source,flag,body in samples:
+        p=Path(td)/(name+'.md');p.write_text('---\nname: '+name+'\nembed: '+flag+'\n---\n'+body+'\n',encoding='utf-8')
+        store._index_one(db,store.read_doc(str(p),source,td))
+    db.commit()
+    originals={p:p.read_bytes() for p in Path(td).glob('*.md')}
+    config={'sources':[{'name':'memory'},{'name':'excluded','embed':False}]}
+    for provider in ('gemini','openai'):
+        sent=[]
+        def intercept(req,*a,**kw):
+            body=json.loads(req.data.decode());sent.append(body)
+            n=len(body['requests'] if provider=='gemini' else body['input'])
+            return _FakeResp({'embeddings':[{'values':[1.,0.]} for _ in range(n)],
+                              'data':[{'index':i,'embedding':[1.,0.]} for i in range(n)]})
+        with patch.object(vectors,'PROVIDER',provider),patch.object(vectors,'DIM',2),patch.object(vectors,'api_key',return_value='fixture'),patch.object(vectors,'_wait_for_quota',return_value=0),patch.object(vectors,'_mark_sent'),patch.object(store,'load_config',return_value=config),patch.object(stores,'sync_if_chosen',return_value={}),patch.object(urllib.request,'urlopen',side_effect=intercept),patch.object(engines,'choice',return_value={'provider':provider}):
+            vectors.ensure_table(db);db.execute('DELETE FROM vectors');db.commit()
+            cov=vectors.coverage(db)
+            check(cov['docs']==1 and cov['stale']==1,'remote coverage excludes both opt-outs '+provider,str(cov))
+            vectors.build(db,only_ids=[r[0] for r in db.execute('SELECT id FROM docs')])
+            wire=json.dumps(sent)
+            check(bool(sent) and 'PUBLIC_CONTROL_BODY' in wire and 'PRIVATE_ORCHID_BODY' not in wire and 'EXCLUDED_SOURCE_BODY' not in wire,'actual remote batch contains only eligible control '+provider)
+            cov=vectors.coverage(db);state=health.embedding_state(db)
+            check(cov['docs']==cov['embedded']==cov['chunks']==1 and cov['stale']==0 and state['eligible_docs']==state['current_docs']==1,'build and coverage share eligibility '+provider,str((cov,state)))
+            # Old excluded vectors must not inflate the eligible coverage numerator.
+            private=db.execute("SELECT id,sha FROM docs WHERE name='private_note'").fetchone()
+            db.execute('INSERT INTO vectors VALUES(?,?,?,?,?,?)',(private['id'],0,private['sha'],vectors.model_tag(),2,vectors._unit([1,0]).tobytes()));db.commit()
+            check(vectors.coverage(db)['embedded']==1,'old excluded vectors are not counted '+provider)
+    with patch.object(vectors,'PROVIDER','embeddinggemma'),patch.object(store,'load_config',return_value=config):
+        check({r['name'] for r in vectors.eligible_docs(db)}=={'private_note','public_note'},'local-only document remains eligible for local computation')
+    check(all(p.read_bytes()==body for p,body in originals.items()) and db.execute('SELECT count(*) FROM docs').fetchone()[0]==3,'source bytes and all lexical documents preserved')
+    db.close()
+
 print("\n" + "=" * 72)
 if FAIL:
     print("❌ %d failure(s): %s" % (len(FAIL), " · ".join(FAIL)))
