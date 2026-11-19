@@ -1078,12 +1078,71 @@ def _touch(db: sqlite3.Connection, doc_id: Optional[int] = None, terms=()) -> No
     _TOUCHED.update(terms)
 
 
+def _feedback_identity(doc) -> list:
+    item = dict(doc)
+    meta = item.get("lifecycle") or {}
+    if isinstance(meta, str):
+        meta = json.loads(meta)
+    scope = item.get("project_id") or ""
+    if meta.get("topic") and meta.get("facet"):
+        return [scope, "fact", meta["topic"], meta["facet"]]
+    return [scope, "name", item["name"]]
+
+
+def _retained_feedback(db, path):
+    raw = get_meta(db, _RETAINED_WEIGHT_PREFIX + path)
+    saved = json.loads(raw) if raw else None
+    if isinstance(saved, dict):
+        return saved["records"]
+    usage = db.execute("SELECT * FROM usage WHERE path=?", (path,)).fetchone()
+    # Older path-only retention cannot prove the originating scope/fact. Keep it
+    # archived without attributing it to a newly indexed identity.
+    if saved is not None or usage is not None:
+        return [{"identity": None, "weight": saved if saved is not None else 1.0,
+                 "usage": dict(usage) if usage is not None else None}]
+    return []
+
+
+def _retain_feedback(db, doc):
+    item = dict(doc)
+    path = item["path"]
+    records = _retained_feedback(db, path) if get_meta(db, _RETAINED_WEIGHT_PREFIX + path) else []
+    identity = _feedback_identity(item)
+    usage = db.execute("SELECT * FROM usage WHERE path=?", (path,)).fetchone()
+    record = {"identity": identity, "weight": item["weight"],
+              "usage": dict(usage) if usage is not None else None}
+    records = [r for r in records if r["identity"] != identity] + [record]
+    set_meta(db, _RETAINED_WEIGHT_PREFIX + path,
+             json.dumps({"version": 2, "records": records}), commit=False)
+
+
+def _restore_feedback(db, doc, doc_id):
+    path = doc["path"]
+    records = _retained_feedback(db, path)
+    if not records:
+        return
+    identity = _feedback_identity(doc)
+    record = next((r for r in records if r["identity"] == identity), None)
+    db.execute("UPDATE docs SET weight=? WHERE id=?", (record["weight"] if record else 1.0, doc_id))
+    db.execute("DELETE FROM usage WHERE path=?", (path,))
+    if record and record["usage"] is not None:
+        usage = record["usage"]
+        db.execute("INSERT INTO usage(path,hits,opens,useful,wrong,stale,last_hit) VALUES(?,?,?,?,?,?,?)",
+                   (path,) + tuple(usage[k] for k in ("hits", "opens", "useful", "wrong", "stale", "last_hit")))
+    # Keep other identities' history separate, including unattributed legacy state.
+    set_meta(db, _RETAINED_WEIGHT_PREFIX + path,
+             json.dumps({"version": 2, "records": records}), commit=False)
+
+
 def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0, preserve_history=None) -> int:
     from brain import stores
     stores.invalidate(db)
     from brain import revisions
     before = db.execute("SELECT * FROM docs WHERE path=?", (doc["path"],)).fetchone()
     (preserve_history or revisions.preserve)(before, doc)
+    identity_changed = before is not None and _feedback_identity(before) != _feedback_identity(doc)
+    if identity_changed:
+        _retain_feedback(db, before)
     fields = [
         (doc["name"].replace("_", " "), _W_NAME),
         (doc["title"], _W_TITLE),
@@ -1121,13 +1180,8 @@ def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0, preserve_h
              doc["description"], doc["body"], doc["mtime"], doc["size"], doc["sha"],
              doclen, prior, doc.get("evidence_date", ""), now, doc.get("project_id", "")))
         doc_id = int(cursor.lastrowid)
-        # Deduplication can temporarily remove this derivative row while its source
-        # still lives. Restore the learned weight, then retire the temporary copy.
-        weight_key = _RETAINED_WEIGHT_PREFIX + doc["path"]
-        weight = get_meta(db, weight_key)
-        if weight:
-            db.execute("UPDATE docs SET weight=? WHERE id=?", (float(weight), doc_id))
-            db.execute("DELETE FROM meta WHERE k=?", (weight_key,))
+    if before is None or identity_changed:
+        _restore_feedback(db, doc, doc_id)
     db.execute("UPDATE docs SET lifecycle=? WHERE id=?", (doc.get("lifecycle", "{}"), doc_id))
     db.executemany("INSERT INTO postings(term,doc_id,tf) VALUES(?,?,?)",
                    [(t, doc_id, v) for t, v in tf.items()])
@@ -1545,9 +1599,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                     from brain import stores
                     stores.invalidate(db)
                 for path, doc_id in gone:
-                    weight = db.execute("SELECT weight FROM docs WHERE id=?", (doc_id,)).fetchone()[0]
-                    if weight != 1.0:
-                        set_meta(db, _RETAINED_WEIGHT_PREFIX + path, str(weight), commit=False)
+                    _retain_feedback(db, db.execute("SELECT * FROM docs WHERE id=?", (doc_id,)).fetchone())
                     _touch(db, doc_id)
                     db.execute("DELETE FROM postings WHERE doc_id=?", (doc_id,))
                     db.execute("DELETE FROM links WHERE src_id=?", (doc_id,))

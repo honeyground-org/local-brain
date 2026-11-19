@@ -1205,6 +1205,84 @@ def content_snapshot_checks(db):
     print('PASS: pre-save content verification rejects same-size/same-mtime group entrants; metadata-change control, source/history/usage preservation and restored-source new/noop pass')
 
 
+def feedback_scope_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import health
+    scope='feedback-scope-a'
+    source=_j(db,name='feedback_source',description='Source',type='user',body='Friday evidence.',project_id=scope)
+    anchor=_j(db,name='feedback_anchor',description='Identity',type='user',body='Feedback probe.',project_id=scope,
+              lifecycle=dict(topic='plant',facet='water',status='proposed'),embed=False)
+    path=Path(_MEM)/'feedback_anchor.md';original=path.read_bytes()
+    health.feedback(db,'feedback_anchor','wrong')
+    with db:db.execute('UPDATE usage SET hits=7 WHERE path=?',(str(path),))
+    original_usage=tuple(db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone())
+    weight=db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()[0]
+    assert weight==0.5
+    request=dict(source_name='feedback_source',source_sha=source['sha'],quotes=['evidence.'],name='feedback_pending',
+                 description='Proposal',type='user',body='Friday proposal.',project_id=scope,
+                 identity_reference=dict(name='feedback_anchor',sha=anchor['sha'],reason='Same reviewed fact'))
+    prepared=json.loads(server.call_tool(db,'prepare_fact',request));assert prepared.get('ok'),prepared
+    copy=Path(_MEM)/'00_feedback_copy.md';target=Path(_MEM)/'feedback_pending.md'
+    def refresh():return store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False,verify_content=True)
+    real_write=rc.atomic_write
+    for change in ('scope','fact','both'):
+        copy.write_bytes(original)
+        published=[]
+        def publication(candidate,*args,**kw):
+            if str(candidate)==str(target):published.append(candidate)
+            return real_write(candidate,*args,**kw)
+        with patch.object(rc,'atomic_write',side_effect=publication):saved=_j(db,**prepared['save_arguments'])
+        assert saved.get('error',{}).get('code')=='fact_changed',saved
+        assert not published and not target.exists()
+        changed=original.replace(b'feedback_anchor',('feedback_other_'+change).encode('ascii'))
+        if change in ('scope','both'):changed=changed.replace(b'feedback-scope-a',b'feedback-scope-b')
+        if change in ('fact','both'):changed=changed.replace(b'water',b'light')
+        path.write_bytes(changed);refresh()
+        row=db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()
+        assert row and row[0]==1.0,(change,'foreign feedback weight applied')
+        assert not db.execute('SELECT 1 FROM usage WHERE path=?',(str(path),)).fetchone(),(change,'foreign usage applied')
+        indexed_name=db.execute('SELECT name FROM docs WHERE path=?',(str(path),)).fetchone()[0]
+        new_feedback=health.feedback(db,indexed_name,'useful')
+        assert 'error' not in new_feedback,new_feedback
+        new_usage=tuple(db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone())
+        copy.unlink();path.write_bytes(original);refresh()
+        assert tuple(db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone())==original_usage
+        assert db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()[0]==weight
+        # Direct identity changes (without deduplication) also keep both ledgers separate.
+        path.write_bytes(changed);refresh()
+        assert tuple(db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone())==new_usage
+        assert abs(db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()[0]-new_feedback['weight'])<1e-9
+        path.write_bytes(original);refresh()
+        assert tuple(db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone())==original_usage
+        assert db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()[0]==weight
+    saved=_j(db,**prepared['save_arguments'])
+    assert saved.get('result')=='new' and _j(db,**prepared['save_arguments']).get('result')=='noop',saved
+    assert path.read_bytes()==original
+    print('PASS: scope-only, fact-only and combined path reuse never inherit old feedback; both identities recover their own counters/weights; direct switches and new/noop pass')
+    for old_weight in (True,False):
+        name='legacy_feedback_'+str(old_weight)
+        _j(db,name=name,description='Legacy',type='user',body='Legacy observation.',project_id='legacy-a',
+           lifecycle=dict(topic=name,facet='water',status='proposed'),embed=False)
+        old_path=Path(_MEM)/(name+'.md');old_bytes=old_path.read_bytes()
+        health.feedback(db,name,'wrong')
+        with db:db.execute('UPDATE usage SET hits=7 WHERE path=?',(str(old_path),))
+        old_copy=Path(_MEM)/('00_'+name+'.md');old_copy.write_bytes(old_bytes);refresh()
+        # Simulate the prior path-only formats, which had no origin identity.
+        key='retained_doc_weight:'+str(old_path)
+        with db:
+            if old_weight:db.execute('UPDATE meta SET v=? WHERE k=?',('0.5',key))
+            else:db.execute('DELETE FROM meta WHERE k=?',(key,))
+        old_path.write_bytes(old_bytes.replace(b'legacy-a',b'legacy-b'));refresh()
+        assert db.execute('SELECT weight FROM docs WHERE path=?',(str(old_path),)).fetchone()[0]==1.0
+        assert not db.execute('SELECT 1 FROM usage WHERE path=?',(str(old_path),)).fetchone()
+        archived=json.loads(store.get_meta(db,key))['records']
+        assert archived[0]['identity'] is None and archived[0]['usage']['hits']==7
+        old_path.unlink();old_copy.unlink();refresh()
+        assert store.get_meta(db,key)==''
+    print('PASS: legacy path-only weights/counters are retained unattributed, never guessed into a new scope; confirmed deletion clears them')
+
+
 def duplicate_usage_checks(db):
     from pathlib import Path
     from unittest.mock import patch
@@ -1449,6 +1527,7 @@ def main() -> int:
     history_batch_checks(db)
     content_snapshot_checks(db)
     duplicate_usage_checks(db)
+    feedback_scope_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
