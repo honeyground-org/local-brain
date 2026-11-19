@@ -237,6 +237,13 @@ with tempfile.TemporaryDirectory() as td:
     for name,source,flag,body in samples:
         p=Path(td)/(name+'.md');p.write_text('---\nname: '+name+'\nembed: '+flag+'\n---\n'+body+'\n',encoding='utf-8')
         store._index_one(db,store.read_doc(str(p),source,td))
+    for name,flag,body in [('long_private','false','LONG_PRIVATE_BODY'),('missing_private','false','MISSING_PRIVATE_BODY'),('changed_private','false','CHANGED_PRIVATE_BODY'),('quoted_private','"false"','QUOTED_PRIVATE_BODY'),('crlf_private','false','CRLF_PRIVATE_BODY')]:
+        p=Path(td)/(name+'.md')
+        content='---\nname: '+name+'\ndescription: '+('x'*5000)+'\nembed: '+flag+'\n---\n'+body+'\n'
+        p.write_bytes((content.replace('\n','\r\n') if name=='crlf_private' else content).encode())
+        store._index_one(db,store.read_doc(str(p),'memory',td))
+        if name=='missing_private':p.unlink()
+        if name=='changed_private':p.write_text(content.replace('embed: false','embed: true'),encoding='utf-8')
     db.commit()
     originals={p:p.read_bytes() for p in Path(td).glob('*.md')}
     config={'sources':[{'name':'memory'},{'name':'excluded','embed':False}]}
@@ -253,7 +260,7 @@ with tempfile.TemporaryDirectory() as td:
             check(cov['docs']==1 and cov['stale']==1,'remote coverage excludes both opt-outs '+provider,str(cov))
             vectors.build(db,only_ids=[r[0] for r in db.execute('SELECT id FROM docs')])
             wire=json.dumps(sent)
-            check(bool(sent) and 'PUBLIC_CONTROL_BODY' in wire and 'PRIVATE_ORCHID_BODY' not in wire and 'EXCLUDED_SOURCE_BODY' not in wire,'actual remote batch contains only eligible control '+provider)
+            check(bool(sent) and 'PUBLIC_CONTROL_BODY' in wire and 'PRIVATE_ORCHID_BODY' not in wire and 'EXCLUDED_SOURCE_BODY' not in wire and all(marker not in wire for marker in ('LONG_PRIVATE_BODY','MISSING_PRIVATE_BODY','CHANGED_PRIVATE_BODY','QUOTED_PRIVATE_BODY','CRLF_PRIVATE_BODY')),'actual remote batch contains only eligible control '+provider)
             cov=vectors.coverage(db);state=health.embedding_state(db)
             check(cov['docs']==cov['embedded']==cov['chunks']==1 and cov['stale']==0 and state['eligible_docs']==state['current_docs']==1,'build and coverage share eligibility '+provider,str((cov,state)))
             # Old excluded vectors must not inflate the eligible coverage numerator.
@@ -261,8 +268,8 @@ with tempfile.TemporaryDirectory() as td:
             db.execute('INSERT INTO vectors VALUES(?,?,?,?,?,?)',(private['id'],0,private['sha'],vectors.model_tag(),2,vectors._unit([1,0]).tobytes()));db.commit()
             check(vectors.coverage(db)['embedded']==1,'old excluded vectors are not counted '+provider)
     with patch.object(vectors,'PROVIDER','embeddinggemma'),patch.object(store,'load_config',return_value=config):
-        check({r['name'] for r in vectors.eligible_docs(db)}=={'private_note','public_note'},'local-only document remains eligible for local computation')
-    check(all(p.read_bytes()==body for p,body in originals.items()) and db.execute('SELECT count(*) FROM docs').fetchone()[0]==3,'source bytes and all lexical documents preserved')
+        check({r['name'] for r in vectors.eligible_docs(db)}=={'private_note','public_note','long_private','missing_private','changed_private','quoted_private','crlf_private'},'local-only document remains eligible for local computation')
+    check(all(p.read_bytes()==body for p,body in originals.items()) and db.execute('SELECT count(*) FROM docs').fetchone()[0]==8,'source bytes and all lexical documents preserved')
     db.close()
 
 print("\n" + "=" * 72)

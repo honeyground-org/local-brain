@@ -120,9 +120,6 @@ def scrub_all(texts: Sequence[str]) -> Tuple[List[str], List[str]]:
 
 
 # ── document-level opt-out ───────────────────────────────────────────────────
-_FM_EMBED = re.compile(r"^embed:\s*(false|no|off|0)\s*$", re.I | re.M)
-
-
 def is_local_only(path_or_text: str, is_text: bool = False) -> bool:
     """Did this document declare in frontmatter ★never export me★ (`embed: false`).
 
@@ -130,18 +127,28 @@ def is_local_only(path_or_text: str, is_text: bool = False) -> bool:
     on and only one document is excluded. Not having this is why nobody turned anything off at measurement time and everything went out.
     """
     if is_text:
-        head = (path_or_text or "")[:4000]
+        head = path_or_text or ""
     else:
         try:
             with open(path_or_text, encoding="utf-8", errors="replace") as fh:
-                head = fh.read(4000)
+                head = fh.read()
         except OSError:
             return False
-    if not head.startswith("---"):
+    from brain import store
+    meta, _ = store.parse_frontmatter(head)
+    return str(meta.get("embed", "")).lower() in ("false", "no", "off", "0")
+
+
+def exportable_version(path: str, sha: str) -> bool:
+    """Only export an indexed snapshot after its complete source policy is verified."""
+    import hashlib
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            raw = fh.read()
+    except (OSError, ValueError):
         return False
-    end = head.find("\n---", 3)
-    front = head[:end if end > 0 else len(head)]
-    return bool(_FM_EMBED.search(front))
+    return (hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest() == sha
+            and not is_local_only(raw, is_text=True))
 
 
 def audit(mem_dir: str = "") -> Dict[str, object]:
