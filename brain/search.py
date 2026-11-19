@@ -611,16 +611,7 @@ def recall(db: sqlite3.Connection, query: str, k: int = 8,
         results = [r for r in results if r["name"] not in in_hand]
 
     if log:
-        # ★Recording must never kill recall★ — this function's job is to return memories, and
-        # noting "it was used" is a side task. After usage keys moved rowid→path on 2026-08-11, an
-        # MCP server still holding the old module blew up right here and ⛔ **recall itself failed**
-        # (the user could not get their memories out and had to grep files by hand). A side task's
-        # failure must not stop the main one — but it must not be **swallowed silently** either (say it on stderr).
-        try:
-            _record(db, query, extra_terms, results)
-        except Exception as exc:                             # noqa: BLE001
-            print("[brain] " + i18n.t("search.usage_record_failed", err=exc) + "\n"
-                  "[brain] " + i18n.t("search.schema_diverged"), file=sys.stderr)
+        record(db, query, extra_terms, results)
     return results
 
 
@@ -681,6 +672,15 @@ def _present(row: sqlite3.Row, score: float, matched: List[str],
     }
 
 
+def record(db: sqlite3.Connection, query: str, extra_terms, results: List[dict]) -> None:
+    """Record the final result list; optional activity logging must never break recall."""
+    try:
+        _record(db, query, extra_terms, results)
+    except Exception as exc:                             # noqa: BLE001
+        print("[brain] " + i18n.t("search.usage_record_failed", err=exc) + "\n"
+              "[brain] " + i18n.t("search.schema_diverged"), file=sys.stderr)
+
+
 def _record(db: sqlite3.Connection, query: str, extra_terms, results: List[dict]) -> None:
     """★Record that it was used★ — the only evidence self-improvement has (§health.suggestions)."""
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -690,7 +690,7 @@ def _record(db: sqlite3.Connection, query: str, extra_terms, results: List[dict]
             (now, query[:500], json.dumps(list(extra_terms), ensure_ascii=False)[:500],
              len(results), json.dumps([r["name"] for r in results[:5]], ensure_ascii=False)))
         for r in results:
-            row = db.execute("SELECT path FROM docs WHERE name=?", (r["name"],)).fetchone()
+            row = db.execute("SELECT path FROM docs WHERE path=?", (r["path"],)).fetchone()
             if not row:
                 continue
             db.execute(

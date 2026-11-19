@@ -147,8 +147,19 @@ def verify_policy_diagnostics():
             args=dict(query='orchid',terms=['schedule'] if mode=='terms' else [],format='json')
             def recall(extra):
                 observed.reset_mock()
-                result=json.loads(server.call_tool(db,'recall',dict(args,**extra)))
+                count=db.execute('SELECT COUNT(*) FROM recalls').fetchone()[0]
+                usage=dict(db.execute('SELECT path,hits FROM usage'))
+                captured=[]
+                raw=server.call_tool(db,'recall',dict(args,**extra),_capture=captured)
+                result=raw if extra.get('format')=='text' else json.loads(raw)
                 event=[c.args[1] for c in observed.call_args_list if c.args[0]=='recall'][-1]
+                recorded=db.execute('SELECT hits,top FROM recalls ORDER BY id DESC LIMIT 1').fetchone()
+                assert db.execute('SELECT COUNT(*) FROM recalls').fetchone()[0]==count+1
+                expected=[r['name'] for r in captured]
+                assert recorded['hits']==len(captured) and json.loads(recorded['top'])==expected[:5],dict(expected=expected,recorded=dict(recorded))
+                after=dict(db.execute('SELECT path,hits FROM usage'))
+                shown={r['path'] for r in captured}
+                assert all(after.get(p,0)-usage.get(p,0)==int(p in shown) for p in set(usage)|set(after)),(usage,after,shown)
                 return result,event
             keyword,event=recall(dict(semantic_k=0))
             assert [r['name'] for r in keyword['results']]==['word_note'],keyword
@@ -158,6 +169,11 @@ def verify_policy_diagnostics():
             assert {r['name'] for r in result['results']}=={'word_note','semantic_note'},result
             assert result['lane']=='fused' and result['meta']['embed_cached'] is True,(result,event)
             assert event['reordered'] and event['embed_cached'] is True and event['vector']['store']=='sqlite' and event['vector']['embedded'] is False,event
+            text,event=recall(dict(format='text'))
+            assert 'word_note' in text and 'semantic_note' in text,text
+            before=(list(db.execute('SELECT * FROM recalls')),list(db.execute('SELECT * FROM usage')))
+            server.call_tool(db,'recall',args,_measure=True)
+            assert before==(list(db.execute('SELECT * FROM recalls')),list(db.execute('SELECT * FROM usage'))),'measurement wrote activity'
             import hashlib
             db.execute('DELETE FROM vec_qcache WHERE qsha=?',(hashlib.sha1(b'orchid').hexdigest(),));db.commit()
             with patch.object(server,'_words_unsure',return_value=True),patch.object(vectors,'embed',return_value=[[1.,0.]]) as embed:
@@ -168,6 +184,32 @@ def verify_policy_diagnostics():
             assert fallback['lane']=='words' and fallback['meta']['embed_cached'] is None and event['vector'] is None,(fallback,event)
         db.close()
     print('PASS: actual cached SQLite semantic policy reports fused lane, cache and vector use; keyword-only and failed-policy controls stay words-only')
+
+
+def verify_recorded_path_identity():
+    import sqlite3,io
+    from contextlib import redirect_stderr
+    from brain import search,server,observe
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    with tempfile.TemporaryDirectory() as td,patch.object(server,'_words_unsure',return_value=False),patch.object(observe,'write'):
+        for scope in ('a','b'):
+            p=Path(td)/scope/'shared.md';p.parent.mkdir();p.write_text('---\nproject_id: '+scope+'\n---\norchid\n',encoding='utf-8')
+            store._index_one(db,store.read_doc(str(p),'memory',td))
+        p=Path(td)/'unrelated.md';p.write_text('rainfall',encoding='utf-8');store._index_one(db,store.read_doc(str(p),'memory',td))
+        store._rebuild_terms(db);db.commit()
+        args=dict(query='orchid',scope='b',semantic_k=0)
+        result=json.loads(server.call_tool(db,'recall',args))
+        selected=str(Path(td)/'b'/'shared.md')
+        assert [r['path'] for r in result['results']]==[selected],result
+        assert dict(db.execute('SELECT path,hits FROM usage'))=={selected:1},list(db.execute('SELECT path,hits FROM usage'))
+        before=db.execute('SELECT COUNT(*) FROM recalls').fetchone()[0]
+        err=io.StringIO()
+        with patch.object(search,'_record',side_effect=sqlite3.OperationalError('logging unavailable')),redirect_stderr(err):
+            fallback=json.loads(server.call_tool(db,'recall',args))
+        assert [r['path'] for r in fallback['results']]==[selected] and err.getvalue()
+        assert db.execute('SELECT COUNT(*) FROM recalls').fetchone()[0]==before
+    db.close()
+    print('PASS: final activity uses exact scoped paths and optional recording failure preserves the response')
 
 
 def verify_promoted_feedback():
@@ -889,6 +931,7 @@ def main():
     verify_promoted_related_context()
     verify_promoted_feedback()
     verify_policy_diagnostics()
+    verify_recorded_path_identity()
     verify_request_replay_order()
     verify_malformed_policy_view()
     verify_turn_edit_order()

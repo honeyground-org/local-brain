@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.42"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.43"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -576,7 +576,7 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
         q, k = args["query"], args.get("k", 8)
         terms = args.get("terms") or []
         as_json = args.get("format", "json") != "text"
-        rows = search.recall(db, q, k=k, extra_terms=terms, kinds=args.get("kinds"), sources=args.get("sources"), log=not _measure,
+        rows = search.recall(db, q, k=k, extra_terms=terms, kinds=args.get("kinds"), sources=args.get("sources"), log=False,
                              scope=args.get("scope") or None)
         hint = ""
         if not args.get("terms"):
@@ -651,6 +651,7 @@ def _call_tool(db, name: str, args: dict, *, _measure: bool = False, _capture=No
                     start = len([r for r in rows if not r.get("related")]) + 1
                     more = ("\n\n" + _fmt_meaning(mrows, why, cost, start, auto=auto)
                             if mrows or not auto else "")
+            search.record(db, q, terms, rows)
             _note_recall(args, rows, sk, mrows, why, cached, t0, auto=auto,
                          unsure=was_unsure, bridged=len(bridged), reordered=reordered)
         if _retrieval is not None:
