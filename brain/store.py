@@ -1455,12 +1455,46 @@ def _learn_index_aliases(db: sqlite3.Connection) -> int:
     return len(pairs)
 
 
+def _validate_staged_docs(db, staged, gone, validate):
+    """Validate the prospective document set without touching the live index.
+
+    Only document rows are copied, streaming into a private temporary SQLite
+    database. Embeddings/postings/history archives are neither copied nor written.
+    """
+    candidate = sqlite3.connect("")
+    candidate.row_factory = sqlite3.Row
+    try:
+        candidate.execute(db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='docs'").fetchone()[0])
+        columns = [r[1] for r in db.execute("PRAGMA table_info(docs)")]
+        candidate.executemany("INSERT INTO docs VALUES(%s)" % ",".join("?" for _ in columns),
+                              db.execute("SELECT * FROM docs"))
+        staged.seek(0)
+        for line in staged:
+            action = json.loads(line)
+            if action[0] == "mtime":
+                candidate.execute("UPDATE docs SET mtime=?,size=? WHERE id=?", action[1:])
+            else:
+                doc = dict(action[1], prior=action[2])
+                fields = [k for k in columns if k != "id" and k in doc]
+                candidate.execute(
+                    "INSERT INTO docs(%s) VALUES(%s) ON CONFLICT(path) DO UPDATE SET %s" %
+                    (",".join(fields), ",".join("?" for _ in fields),
+                     ",".join(k+"=excluded."+k for k in fields if k != "path")),
+                    [doc[k] for k in fields])
+        candidate.executemany("DELETE FROM docs WHERE path=?", ((p,) for p in gone))
+        candidate.commit()
+        candidate.execute("PRAGMA query_only=ON")
+        validate(candidate)
+    finally:
+        candidate.close()
+
+
 def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
             full: bool = False, verbose: bool = False,
             recalibrate: bool = True,
             refresh_history: Optional[bool] = None,
             sync: bool = True, heal: bool = True, queue_embedding: bool = True,
-            verify_content: bool = False) -> dict:
+            verify_content: bool = False, validate=None) -> dict:
     """Incremental indexing. Change detection is (mtime, size, sha) — identical on all three, skip.
 
     `recalibrate=False` exists for the places that run **on every prompt, like the hook**.
@@ -1469,6 +1503,8 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     `verify_content=True` reads sources even when mtime and size match. Guarded fact
     saves need this: an unchanged metadata pair cannot prove unchanged group membership.
     Unlike a full rebuild, unchanged content keeps its existing index and history.
+    `validate` may reject the staged document projection before any live SQL or
+    history writes. It receives a read-only temporary database containing docs.
 
     `sync=False` / `heal=False` leave the dedicated databases' update and the trigger self-healing for later
     (§deferred) and say so in `stats["deferred"]`. The hook passes both: measured 2026-10-14 on the author's
@@ -1593,6 +1629,8 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                 missing_paths.append((path,))
             except OSError:
                 pass                              # inability to establish absence is not deletion
+        if validate is not None:
+            _validate_staged_docs(db, staged, (p for p in existing if p not in seen_paths), validate)
         staged.seek(0)
         with db:
             # Reserve the writer before publishing any history. A concurrent indexer
