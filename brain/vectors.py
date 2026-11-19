@@ -561,7 +561,7 @@ def eligible_docs(db: sqlite3.Connection) -> List[sqlite3.Row]:
     skip = set(no_embed_sources())
     return [row for row in db.execute("SELECT id,path,name,source,title,description,body,sha FROM docs")
             if row["source"] not in skip
-            and (PROVIDER == "embeddinggemma" or not privacy.is_local_only(row["path"]))]
+            and (PROVIDER == "embeddinggemma" or privacy.exportable_version(row["path"], row["sha"]))]
 
 
 def stale_docs(db: sqlite3.Connection) -> List[sqlite3.Row]:
