@@ -1208,12 +1208,16 @@ def content_snapshot_checks(db):
 def duplicate_usage_checks(db):
     from pathlib import Path
     from unittest.mock import patch
+    from brain import health
     def refresh(**kw):
         return store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False,**kw)
     anchor=_j(db,name='zz_duplicate_anchor',description='Identity',type='user',body='Keep original path usage.',project_id='duplicate-usage',
               lifecycle=dict(topic='water',facet='day',status='proposed'),embed=False)
     path=Path(_MEM)/'zz_duplicate_anchor.md';original=path.read_bytes()
     with db:db.execute('INSERT INTO usage(path,hits,opens,useful,wrong,stale) VALUES(?,7,3,2,1,1)',(str(path),))
+    for signal in ('wrong','wrong','useful'):
+        feedback=health.feedback(db,'zz_duplicate_anchor',signal)
+    assert feedback['weight']==0.35,feedback
     usage=tuple(db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone())
     source=_j(db,name='duplicate_source',description='Source',type='user',body='Friday evidence.',project_id='duplicate-usage')
     request=dict(source_name='duplicate_source',source_sha=source['sha'],project_id='duplicate-usage',
@@ -1237,15 +1241,24 @@ def duplicate_usage_checks(db):
     assert db.execute('SELECT count(*) FROM docs WHERE sha=?',(anchor['sha'],)).fetchone()[0]==1
     copy.unlink();refresh()
     assert db.execute('SELECT 1 FROM docs WHERE path=?',(str(path),)).fetchone()
+    assert abs(db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()[0]-0.35)<1e-9
     retained=db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone()
     assert retained and tuple(retained)==usage,'duplicate exclusion discarded usage'
     saved=_j(db,**prepared['save_arguments']);assert saved.get('result')=='new',saved
     assert _j(db,**prepared['save_arguments']).get('result')=='noop'
+    assert abs(db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()[0]-0.35)<1e-9
+    # A later feedback change must supersede the first retained weight.
+    feedback=health.feedback(db,'zz_duplicate_anchor','useful')
+    copy.write_bytes(original);refresh();copy.unlink();refresh()
+    assert abs(db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()[0]-feedback['weight'])<1e-9
     # Even an already-deduplicated path loses usage only when its source really disappears.
     copy.write_bytes(original);refresh();assert not db.execute('SELECT 1 FROM docs WHERE path=?',(str(path),)).fetchone()
     path.unlink();refresh();assert not db.execute('SELECT 1 FROM usage WHERE path=?',(str(path),)).fetchone()
     copy.unlink();refresh()
-    print('PASS: earlier identical copy preserves every original usage field across refusal, full rebuild and recovery; actual deletion cleans orphan usage')
+    path.write_bytes(original);refresh()
+    assert db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()[0]==1.0
+    assert not db.execute('SELECT 1 FROM usage WHERE path=?',(str(path),)).fetchone()
+    print('PASS: earlier identical copy preserves every usage field and learned weight=0.35 across refusal/full rebuild/recovery/new/noop; later feedback survives; true deletion resets retained usage and weight')
 
 
 def exclusive_create_checks(db):

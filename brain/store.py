@@ -29,6 +29,7 @@ from brain import i18n, textindex, lifecycle
 # 4 = moved the usage key from rowid to path (2026-08-11). Always bump it —
 # an already-running old process reads this number and announces that it is stale.
 SCHEMA_VERSION = "6"   # 6: lifecycle metadata; 5: project_id
+_RETAINED_WEIGHT_PREFIX = "retained_doc_weight:"
 
 # ★Index the change history★ (2026-08-18 · goal ③ history)
 #
@@ -1120,6 +1121,13 @@ def _index_one(db: sqlite3.Connection, doc: dict, prior: float = 1.0, preserve_h
              doc["description"], doc["body"], doc["mtime"], doc["size"], doc["sha"],
              doclen, prior, doc.get("evidence_date", ""), now, doc.get("project_id", "")))
         doc_id = int(cursor.lastrowid)
+        # Deduplication can temporarily remove this derivative row while its source
+        # still lives. Restore the learned weight, then retire the temporary copy.
+        weight_key = _RETAINED_WEIGHT_PREFIX + doc["path"]
+        weight = get_meta(db, weight_key)
+        if weight:
+            db.execute("UPDATE docs SET weight=? WHERE id=?", (float(weight), doc_id))
+            db.execute("DELETE FROM meta WHERE k=?", (weight_key,))
     db.execute("UPDATE docs SET lifecycle=? WHERE id=?", (doc.get("lifecycle", "{}"), doc_id))
     db.executemany("INSERT INTO postings(term,doc_id,tf) VALUES(?,?,?)",
                    [(t, doc_id, v) for t, v in tf.items()])
@@ -1497,14 +1505,18 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                 added += 1
             if verbose:
                 print("  %s %s" % ("~" if prev else "+", doc["name"]))
-        missing_usage = []
-        for row in db.execute("SELECT path FROM usage"):
-            if row[0] in observed_paths:
+        retained_paths = {r[0][len(_RETAINED_WEIGHT_PREFIX):] for r in db.execute(
+            "SELECT k FROM meta WHERE substr(k,1,?)=?",
+            (len(_RETAINED_WEIGHT_PREFIX), _RETAINED_WEIGHT_PREFIX))}
+        tracked_paths = set(existing) | {r[0] for r in db.execute("SELECT path FROM usage")} | retained_paths
+        missing_paths = []
+        for path in tracked_paths:
+            if path in observed_paths:
                 continue
             try:
-                os.stat(row[0])
+                os.stat(path)
             except FileNotFoundError:
-                missing_usage.append((row[0],))
+                missing_paths.append((path,))
             except OSError:
                 pass                              # inability to establish absence is not deletion
         staged.seek(0)
@@ -1525,7 +1537,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                         db.execute("UPDATE docs SET mtime=?,size=? WHERE id=?", action[1:])
                     else:
                         _index_one(db, action[1], action[2], preserve_history)
-                db.executemany("DELETE FROM usage WHERE path=?", missing_usage)
+                db.executemany("DELETE FROM usage WHERE path=?", missing_paths)
                 # A vanished file vanishes from the index too (so no orphaned evidence remains).
                 gone = [(p, pid) for p, (pid, _, _, _) in existing.items() if p not in seen_paths]
                 removed = [pid for _, pid in gone]
@@ -1533,6 +1545,9 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                     from brain import stores
                     stores.invalidate(db)
                 for path, doc_id in gone:
+                    weight = db.execute("SELECT weight FROM docs WHERE id=?", (doc_id,)).fetchone()[0]
+                    if weight != 1.0:
+                        set_meta(db, _RETAINED_WEIGHT_PREFIX + path, str(weight), commit=False)
                     _touch(db, doc_id)
                     db.execute("DELETE FROM postings WHERE doc_id=?", (doc_id,))
                     db.execute("DELETE FROM links WHERE src_id=?", (doc_id,))
@@ -1546,6 +1561,10 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                         db.execute("DELETE FROM vectors WHERE doc_id=?", (doc_id,))
                     except sqlite3.OperationalError:
                         pass                                     # no semantic layer on this machine yet
+                # A genuinely deleted source loses retained feedback even if it had
+                # already been deduplicated and therefore had no docs row this pass.
+                db.executemany("DELETE FROM meta WHERE k=?",
+                               [(_RETAINED_WEIGHT_PREFIX + path,) for path, in missing_paths])
                 _build_basename_aliases(db, commit=False)
                 _resolve_path_links(db)
                 touched = _TOUCHED
