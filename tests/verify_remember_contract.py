@@ -830,6 +830,51 @@ def identity_checks(db):
     print('Identity fixture: 5 translated identifier groups vs 1 explicitly reused; 0 homonym/facet/scope merges. Not an answer-quality benchmark.')
 
 
+def unreadable_fact_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    import unicodedata
+    scope='unreadable-fact'
+    source=_j(db,name='unreadable_source',description='Source',type='user',body='\ud55c\uae00\U0001f642 evidence.',project_id=scope)
+    for name,topic in [('unreadable_anchor','caf\u00e9'),('unreadable_sibling',unicodedata.normalize('NFD','caf\u00e9'))]:
+        result=_j(db,name=name,description='Reviewed identity',type='user',body='Water on Friday.',project_id=scope,
+                  lifecycle=dict(topic=topic,facet='water',status='proposed'),embed=False)
+        assert result.get('stored'),result
+        if name=='unreadable_anchor':anchor=result
+    args=dict(source_name='unreadable_source',source_sha=source['sha'],quotes=['evidence.'],description='Proposed fact',type='user',body='A reviewed proposal.',project_id=scope,
+              identity_reference=dict(name='unreadable_anchor',sha=anchor['sha'],reason='Reviewed as the same fact'))
+    sibling=Path(_MEM)/'unreadable_sibling.md';original=sibling.read_bytes()
+    for case in ('invalid_utf8','permission','missing'):
+        request=dict(args,name='unreadable_pending_'+case)
+        prepared=json.loads(server.call_tool(db,'prepare_fact',request))
+        assert prepared.get('ok'),prepared
+        payload=prepared['save_arguments']
+        if case=='invalid_utf8':sibling.write_bytes(b'\xff\xfeunreadable')
+        if case=='missing':sibling.unlink()
+        before={p.name:p.read_bytes() for p in Path(_MEM).glob('*.md')}
+        dump='\n'.join(db.iterdump());db.execute('PRAGMA query_only=ON')
+        original_open=open
+        def guarded_open(path,*a,**kw):
+            if case=='permission' and os.fspath(path)==str(sibling):raise PermissionError('fixture unreadable source')
+            return original_open(path,*a,**kw)
+        try:
+            with patch('builtins.open',side_effect=guarded_open),patch.object(store,'reindex',return_value={}),patch.object(rc,'atomic_write',side_effect=AssertionError('refusal must not publish a file')) as publish:
+                refused=json.loads(server.call_tool(db,'prepare_fact',request))
+                assert refused.get('error',{}).get('code')=='index_pending',(case,refused)
+                saved=_j(db,**payload)
+                assert saved.get('error',{}).get('code')=='fact_changed',(case,saved)
+                assert not publish.called
+            assert '\n'.join(db.iterdump())==dump
+            assert {p.name:p.read_bytes() for p in Path(_MEM).glob('*.md')}==before
+        finally:
+            db.execute('PRAGMA query_only=OFF');sibling.write_bytes(original)
+        recovered=json.loads(server.call_tool(db,'prepare_fact',request))
+        assert recovered.get('ok') and recovered['expected_fact_sha']==prepared['expected_fact_sha'],recovered
+        saved=_j(db,**payload)
+        assert saved.get('result')=='new' and _j(db,**payload).get('result')=='noop',saved
+    print('PASS: invalid UTF8, unreadable and missing same-identity sources refuse preparation/save without DB or memory writes; restored sources prepare/save/retry normally')
+
+
 def exclusive_create_checks(db):
     from unittest.mock import patch
     source = _j(db, name='race_source', description='Source', type='user',
@@ -1012,6 +1057,7 @@ def main() -> int:
     review_checks()
     extraction_checks(db)
     identity_checks(db)
+    unreadable_fact_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
