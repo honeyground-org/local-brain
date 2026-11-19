@@ -67,7 +67,10 @@ def prepare(db, name, args):
         if (record['project_id'] != scope or not meta.get('topic')
                 or (identity(record['meta']) != identity(meta) and did not in family)):
             continue
-        actual_sha = remembercontract.file_sha(record['path'])
+        try:
+            actual_sha = remembercontract.file_sha(record['path'])
+        except (OSError, UnicodeError):
+            actual_sha = None
         versions.append((record['name'], record['path'], record['sha'], actual_sha))
         row = db.execute('SELECT body FROM docs WHERE id=?', (did,)).fetchone()
         records.append({'name': record['name'], 'sha': record['sha'], 'source_matches_index': actual_sha == record['sha'],
