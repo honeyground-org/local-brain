@@ -331,6 +331,20 @@ def verify_history_recovery():
         for language in i18n.LANGS:
             with patch.object(i18n,'_lang',language):
                 check('recovered performance remains dated in '+language,'2001-01-01T12:00:00' in dashview.render(p))
+        computed=scorecard.compute(dict(recall=.7248))
+        good_line=json.dumps(good).encode()
+        for suffix in (b'',good_line,good_line+b'\n',good_line+b'\n{broken',good_line+b'\n{broken\n',good_line+b'\n\xe2',good_line+b'\r'):
+            path.write_bytes(suffix);before='\n'.join(db.iterdump())
+            with patch.object(scorecard,'_judge_stamp',return_value='fixture'):
+                scorecard.save(computed,note='recovery fixture',path=str(path))
+            after=path.read_bytes();p=dashboard.payload(db);page=dashview.render(p)
+            check('append preserves interrupted log and displays new measurement '+repr(suffix[-12:]),after.startswith(suffix) and p['performance']['total']==90.6 and p['performance']['axes']['recall']==90.6 and '90.6' in page and 'kept_memory' in page and before=='\n'.join(db.iterdump()))
+            check('append remains one independent JSONL record',json.loads(after.splitlines()[-1])['total']==90.6 and after[len(suffix):].startswith(b'{' if not suffix or suffix.endswith(b'\n') else b'\n{'))
+        before=path.read_bytes();rejected=False
+        with patch.object(scorecard,'_judge_stamp',return_value='fixture'):
+            try:scorecard.save(dict(computed,total=10),path=str(path))
+            except ValueError:rejected=True
+        check('invalid new measurement cannot corrupt the log',rejected and path.read_bytes()==before)
         p['performance']=dict(good,axes=dict(precision='N/A'))
         check('renderer also tolerates an invalid supplied measurement','kept_memory' in dashview.render(p))
     db.close()
