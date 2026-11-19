@@ -1151,7 +1151,10 @@ def main() -> int:
     extraction_checks(db)
     identity_checks(db)
     unreadable_fact_checks(db)
-    source_failure_checks(db)
+    # The fixture deliberately queues sync/heal work while testing the real indexer.
+    # Keep its unrelated worker from racing the exact SQLite-dump assertions.
+    with patch("brain.deferred.kick", return_value=False):
+        source_failure_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
