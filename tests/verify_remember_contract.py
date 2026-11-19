@@ -1576,8 +1576,6 @@ def duplicate_usage_checks(db):
 
 def unindexed_preparation_checks(db):
     from pathlib import Path
-    from unittest.mock import patch
-    import subprocess
     args=dict(name='unindexed_successor',description='New schedule',type='user',body='Friday review.',
               project_id='unindexed-scope',lifecycle=dict(topic='review',facet='day',valid_from='2026-11-02',
               supersedes=['unindexed_predecessor'],change_reason='Confirmed change',evidence=['User confirmation']))
@@ -1613,7 +1611,7 @@ def cold_preparation_checks(db):
         missing=folder/'missing-memory'
         folder.mkdir()
         cfg=folder/'config.json'
-        cfg.write_text(json.dumps({'sources':[{'name':'memory','path':str(missing),'include':['*.md']}]}))
+        cfg.write_text(json.dumps({'sources':[{'name':'memory','path':str(missing),'include':['*.md']}]}),encoding='utf-8')
         request=dict(jsonrpc='2.0',id=1,method='tools/call',params=dict(name='remember',arguments=dict(
             name='preview',description='Preview',type='user',body='Proposal.',prepare_only=True,
             lifecycle=dict(topic='preview',facet='value',status='proposed'))))
