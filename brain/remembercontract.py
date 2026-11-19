@@ -142,7 +142,11 @@ def prepare_revision(db, args: dict) -> dict:
     if snap.by_name.get((scope, save["name"])):
         return error("name_taken", "Choose an unused name for the new revision")
     prior = snap.docs[ids[0]]
-    if file_sha(prior["path"]) != prior["sha"]:
+    try:
+        actual_sha = file_sha(prior["path"])
+    except (OSError, UnicodeError):
+        actual_sha = None
+    if actual_sha != prior["sha"]:
         return dict(error("index_pending", "The predecessor source changed; refresh the index and prepare again"), retryable=True)
     old = prior["meta"]
     if old and lifecycle.validate(old):

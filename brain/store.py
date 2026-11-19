@@ -414,9 +414,9 @@ def _triggers_of(meta: Dict[str, str]) -> List[str]:
     return out
 
 
-def read_doc(path: str, source: str, root: str = "") -> Optional[dict]:
+def read_doc(path: str, source: str, root: str = "", strict: bool = False) -> Optional[dict]:
     try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
+        with open(path, encoding="utf-8", errors="strict" if strict else "replace") as fh:
             raw = fh.read()
     except OSError:
         return None
@@ -619,7 +619,11 @@ def iter_source_files(cfg: dict) -> Iterable[Tuple[str, str, str]]:
             yield root, source, os.path.dirname(root)
             continue
         base_depth = root.rstrip("/").count(os.sep)
-        for dirpath, dirnames, filenames in os.walk(root):
+        def scan_error(exc):
+            # Confirmed absence is deletion; an incomplete scan is not.
+            if not isinstance(exc, FileNotFoundError):
+                raise exc
+        for dirpath, dirnames, filenames in os.walk(root, onerror=scan_error):
             if dirpath.count(os.sep) - base_depth >= depth:
                 dirnames[:] = []
             dirnames[:] = sorted(d for d in dirnames
@@ -1435,10 +1439,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                 continue
             prev = existing.get(path)
             if prev and not full:
-                try:
-                    st = os.stat(path)
-                except OSError:
-                    continue
+                st = os.stat(path)
                 if abs(st.st_mtime - prev[1]) < 1e-6 and st.st_size == prev[2]:
                     # ⛔ Judge copies on the fast-skip path too — otherwise a copy that is
                     #    already indexed stays forever (the file is not read, so take the sha from the DB).
@@ -1449,9 +1450,14 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
                     seen_paths.add(path)
                     skipped += 1
                     continue
-            doc = read_doc(path, source, root)
+            # Refuse an incomplete observation before deletion cleanup. The transaction
+            # retains indexed identities, usage and stamps until every source can be read.
+            try:
+                doc = read_doc(path, source, root, strict=True)
+            except UnicodeError as exc:
+                raise OSError("Source is not valid UTF-8: " + path) from exc
             if doc is None:
-                continue
+                raise OSError("Source could not be read: " + path)
             if doc["sha"] in seen_sha:
                 dups += 1
                 continue                         # a copy — not indexed, and any existing row is cleaned up
