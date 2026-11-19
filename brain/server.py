@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.53"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.54"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -455,18 +455,24 @@ def _do_remember(db, args: dict) -> str:
             if args.get('prepare_only'):
                 if 'lifecycle' not in args and cur.get('lifecycle'):
                     args['lifecycle'] = cur['lifecycle']
+                class PreviewReady(Exception):
+                    pass
+                def prepare_candidate(candidate):
+                    if rc.requires_local_only(candidate, args) and args.get("embed") is not False:
+                        raise PreviewReady(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
+                    bad = rc.check_extraction(candidate, args, path) or rc.check_identity(candidate, args)
+                    if bad:
+                        raise PreviewReady(bad)
+                    preview = lifecycle.prepare(candidate, name, args)
+                    preview['write_issue'] = lifecycle.check_write(candidate, name, args, cur)
+                    raise PreviewReady(preview)  # A preview never applies its staged observations.
                 try:
-                    store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False)
+                    store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False,
+                                  verify_content=True, validate=prepare_candidate)
+                except PreviewReady as ready:
+                    return json.dumps(ready.args[0], ensure_ascii=False)
                 except Exception as exc:
                     return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
-                if rc.requires_local_only(db, args) and args.get("embed") is not False:
-                    return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
-                bad = rc.check_extraction(db, args, path) or rc.check_identity(db, args)
-                if bad:
-                    return json.dumps(bad, ensure_ascii=False)
-                preview = lifecycle.prepare(db, name, args)
-                preview['write_issue'] = lifecycle.check_write(db, name, args, cur)
-                return json.dumps(preview, ensure_ascii=False)
             issue = lifecycle.check_write(db, name, args, cur)
             if issue:
                 return json.dumps(rc.error("invalid_argument", issue), ensure_ascii=False)
@@ -480,31 +486,38 @@ def _do_remember(db, args: dict) -> str:
             args = rc.prepared(args)
             result, conflict = rc.decide(cur, args)
             if result in ('new', 'updated'):
-                if args.get('lifecycle'):
-                    try:
-                        # Reconcile against fresh source observations under the shared writer lock.
-                        # No remote sync, trigger healing or inference inside this precondition check.
-                        store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False,
-                                      verify_content=True)
-                    except Exception as exc:
-                        return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
-                    issue = lifecycle.check_write(db, name, args, cur)
+                class Rejected(Exception):
+                    pass
+                def validate_save(candidate):
+                    issue = lifecycle.check_write(candidate, name, args, cur)
                     if issue:
-                        return json.dumps(rc.error('invalid_argument', issue), ensure_ascii=False)
-                code, review = lifecycle.reconcile_write(db, name, args, unchanged_fact=bool(cur.get('lifecycle')))
-                if code:
-                    review['records'] = [{k: r[k] for k in ('name', 'sha', 'source_matches_index', 'lifecycle')}
-                                         for r in review['records']]
-                    return json.dumps(rc.error(code, 'Review the current fact before saving; no memory was written', review), ensure_ascii=False)
+                        raise Rejected(rc.error('invalid_argument', issue))
+                    code, review = lifecycle.reconcile_write(candidate, name, args, unchanged_fact=bool(cur.get('lifecycle')))
+                    if code:
+                        review['records'] = [{k: r[k] for k in ('name', 'sha', 'source_matches_index', 'lifecycle')}
+                                             for r in review['records']]
+                        raise Rejected(rc.error(code, 'Review the current fact before saving; no memory was written', review))
+                    if rc.requires_local_only(candidate, args) and args.get("embed") is not False:
+                        raise Rejected(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
+                    bad = rc.check_extraction(candidate, args, path) or rc.check_identity(candidate, args)
+                    if bad:
+                        raise Rejected(bad)
+                try:
+                    if args.get('lifecycle'):
+                        # Reconcile against fresh source observations under the shared writer lock.
+                        # Refused preconditions never commit the staged index or its history.
+                        store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False,
+                                      verify_content=True, validate=validate_save)
+                    else:
+                        validate_save(db)
+                except Rejected as rejected:
+                    return json.dumps(rejected.args[0], ensure_ascii=False)
+                except Exception as exc:
+                    return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
             verified_at = (cur.get("verified_at") if result == "noop"
                            else (args.get("observed_at") or ("" if args.get("lifecycle") else time.strftime("%Y-%m-%d"))))
             stats: dict = {}
             if result in ("new", "updated"):
-                if rc.requires_local_only(db, args) and args.get("embed") is not False:
-                    return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
-                bad = rc.check_extraction(db, args, path) or rc.check_identity(db, args)
-                if bad:
-                    return json.dumps(bad, ensure_ascii=False)
                 try:
                     rc.atomic_write(path, rc.render(name, args, verified_at), cur.get("sha"))
                 except FileExistsError:

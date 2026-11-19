@@ -858,11 +858,11 @@ def unreadable_fact_checks(db):
             if case=='permission' and os.fspath(path)==str(sibling):raise PermissionError('fixture unreadable source')
             return original_open(path,*a,**kw)
         try:
-            with patch('builtins.open',side_effect=guarded_open),patch.object(store,'reindex',return_value={}),patch.object(rc,'atomic_write',side_effect=AssertionError('refusal must not publish a file')) as publish:
+            with patch('builtins.open',side_effect=guarded_open),patch.object(rc,'atomic_write',side_effect=AssertionError('refusal must not publish a file')) as publish:
                 refused=json.loads(server.call_tool(db,'prepare_fact',request))
                 assert refused.get('error',{}).get('code')=='index_pending',(case,refused)
                 saved=_j(db,**payload)
-                assert saved.get('error',{}).get('code')=='fact_changed',(case,saved)
+                assert saved.get('error',{}).get('code')==('fact_changed' if case=='missing' else 'index_pending'),(case,saved)
                 assert not publish.called
             assert '\n'.join(db.iterdump())==dump
             assert {p.name:p.read_bytes() for p in Path(_MEM).glob('*.md')}==before
@@ -1182,6 +1182,7 @@ def content_snapshot_checks(db):
         anchor_history=revisions.location(str(anchor_path)).read_bytes()
         path.write_bytes(changed)
         os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns if preserve_metadata else stat.st_mtime_ns+1000000000))
+        dump='\n'.join(db.iterdump());changes=db.total_changes
         published=[]
         def publication(candidate,*args,**kw):
             if str(candidate)==str(target):published.append(candidate)
@@ -1194,8 +1195,8 @@ def content_snapshot_checks(db):
         assert db.execute('SELECT hits FROM usage WHERE path=?',(str(anchor_path),)).fetchone()[0]==7
         assert revisions.location(str(anchor_path)).read_bytes()==anchor_history
         observed=json.loads(archive.read_text(encoding='utf-8'))['observations']
-        assert observed[:len(history)]==history,'earlier observed history was lost'
-        assert observed[-1]['record']['lifecycle']['facet']=='water'
+        assert observed==history,'a rejected save published observations'
+        assert '\n'.join(db.iterdump())==dump and db.total_changes==changes
         path.write_bytes(original);os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns));refresh()
     # Content verification reads unchanged documents but does not reindex/publish them.
     with patch.object(store,'_index_one',wraps=store._index_one) as index,patch.object(rc,'atomic_write',wraps=rc.atomic_write) as write:
@@ -1443,6 +1444,59 @@ def recorded_feedback_checks(db):
     print('PASS: explicit feedback locks its target before lookup and preserves the selected scope through weight/counter updates')
 
 
+def rejected_snapshot_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    import sqlite3
+    from brain import revisions
+    scope='rejected-snapshot'
+    source=_j(db,name='rejected_source',description='Source',type='user',body='Friday evidence.',project_id=scope)
+    anchor=_j(db,name='rejected_anchor',description='Identity',type='user',body='Water on Friday.',project_id=scope,
+              lifecycle=dict(topic='plant',facet='water',status='proposed'),embed=False)
+    path=Path(_MEM)/'rejected_anchor.md';original=path.read_bytes()
+    with db:db.execute('INSERT INTO usage(path,hits) VALUES(?,7)',(str(path),))
+    request=dict(source_name='rejected_source',source_sha=source['sha'],quotes=['evidence.'],name='rejected_pending',
+                 description='Proposal',type='user',body='Friday proposal.',project_id=scope,
+                 identity_reference=dict(name='rejected_anchor',sha=anchor['sha'],reason='Same reviewed fact'))
+    prepared=json.loads(server.call_tool(db,'prepare_fact',request));assert prepared.get('ok'),prepared
+    target=Path(_MEM)/'rejected_pending.md'
+    for changed in (False,True):
+        if changed:path.write_bytes(original+b'\nAn external edit.\n')
+        dump='\n'.join(db.iterdump());changes=db.total_changes
+        archives={p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}
+        args=dict(prepared['save_arguments'],expected_fact_sha='0'*64)
+        with patch.object(rc,'atomic_write',wraps=rc.atomic_write) as publish:
+            for _ in range(2):
+                result=_j(db,**args)
+                assert result.get('error',{}).get('code')=='fact_changed',result
+                assert not publish.called and not target.exists()
+                assert db.total_changes==changes,'rejected snapshot wrote SQL'
+                assert '\n'.join(db.iterdump())==dump,'rejected snapshot changed index metadata'
+                assert {p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}==archives
+                assert db.execute('SELECT hits FROM usage WHERE path=?',(str(path),)).fetchone()[0]==7
+        path.write_bytes(original)
+    # Validators see only a read-only projection; they cannot mutate live rows.
+    changes=db.total_changes;dump='\n'.join(db.iterdump())
+    def invalid_validator(candidate):candidate.execute('DELETE FROM docs')
+    try:store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False,verify_content=True,validate=invalid_validator)
+    except sqlite3.OperationalError as exc:assert 'readonly' in str(exc)
+    else:raise AssertionError('projection allowed writes')
+    assert db.total_changes==changes and '\n'.join(db.iterdump())==dump
+    for invalid in (False,True):
+        args=dict(prepared['save_arguments'],prepare_only=True)
+        if invalid:args['extracted_from']=dict(args['extracted_from'],sha='0'*40)
+        with patch.object(rc,'atomic_write',side_effect=AssertionError('preview must not publish')):
+            preview=_j(db,**args)
+        if invalid:assert preview.get('error',{}).get('code')=='source_changed',preview
+        else:assert preview.get('ok') and preview.get('stored') is False,preview
+        assert db.total_changes==changes and '\n'.join(db.iterdump())==dump,'prepare-only wrote live SQL'
+    saved=_j(db,**prepared['save_arguments'])
+    assert saved.get('result')=='new' and _j(db,**prepared['save_arguments']).get('result')=='noop',saved
+    assert path.read_bytes()==original
+    print('PASS: rejected snapshots with unchanged or edited sources cause zero live SQL changes, metadata/history changes and publications; retries preserve usage7; accepted new/noop still work')
+    print('PASS: successful and refused prepare-only requests are read-only against the live index')
+
+
 def duplicate_usage_checks(db):
     from pathlib import Path
     from unittest.mock import patch
@@ -1467,9 +1521,12 @@ def duplicate_usage_checks(db):
     def publication(candidate,*a,**kw):
         if os.fspath(candidate)==str(target):published.append(candidate)
         return original_write(candidate,*a,**kw)
+    dump='\n'.join(db.iterdump());changes=db.total_changes
     with patch.object(rc,'atomic_write',side_effect=publication):saved=_j(db,**prepared['save_arguments'])
     assert saved.get('error',{}).get('code')=='fact_changed',saved
     assert not published and not target.exists() and path.read_bytes()==original
+    assert '\n'.join(db.iterdump())==dump and db.total_changes==changes
+    refresh()  # Only an explicit index pass publishes the observed deduplication.
     assert not db.execute('SELECT 1 FROM docs WHERE path=?',(str(path),)).fetchone()
     retained=db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone()
     assert retained and tuple(retained)==usage,'duplicate exclusion discarded usage'
@@ -1690,6 +1747,7 @@ def main() -> int:
     feedback_scope_checks(db)
     unicode_feedback_checks(db)
     recorded_feedback_checks(db)
+    rejected_snapshot_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
