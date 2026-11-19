@@ -1631,6 +1631,97 @@ def cold_preparation_checks(db):
     print('PASS: unindexed predecessor preview/save agree; first MCP preparation never creates DB, directory or write lock')
 
 
+def publication_source_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import revisions
+    scope='publication-source'
+    source=_j(db,name='publication_source',description='Source',type='user',body='Friday evidence.',project_id=scope)
+    anchor=_j(db,name='publication_anchor',description='Anchor',type='user',body='Monday schedule.',project_id=scope,
+              lifecycle=dict(topic='review',facet='day',valid_from='2026-11-01',evidence=['User confirmation']),embed=False)
+    originals={name:(Path(_MEM)/(name+'.md')).read_bytes() for name in ('publication_source','publication_anchor')}
+    original_write,original_link=rc.atomic_write,os.link
+    for role in ('source','identity','predecessor','entrant'):
+        for same_metadata in (False,True):
+            name='publication_pending_'+role+str(int(same_metadata))
+            if role=='predecessor':
+                prepared=json.loads(server.call_tool(db,'prepare_revision',dict(predecessor='publication_anchor',name=name,
+                    description='Revision',type='user',body='Friday revision.',project_id=scope,status='active',
+                    valid_from='2026-11-02',change_reason='User correction',evidence=['User confirmation'])))
+            else:
+                prepared=json.loads(server.call_tool(db,'prepare_fact',dict(source_name='publication_source',source_sha=source['sha'],
+                    quotes=['Friday evidence.'],name=name,description='Proposal',type='user',body='Friday proposal.',project_id=scope,
+                    identity_reference=dict(name='publication_anchor',sha=anchor['sha'],reason='Same reviewed fact'))))
+            assert prepared.get('ok'),prepared
+            target=Path(_MEM)/(name+'.md')
+            edited=Path(_MEM)/(('publication_source' if role=='source' else 'publication_anchor')+'.md')
+            stat=edited.stat();original=edited.read_bytes()
+            changed=original.replace(b'Friday',b'Sunday') if role=='source' else original.replace(b'Monday',b'Sunday')
+            entrant=Path(_MEM)/'publication_entrant.md'
+            dump='\n'.join(db.iterdump());changes=db.total_changes
+            history={p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}
+            mutated=[];published=[]
+            def write(path,*args,**kwargs):
+                if str(path)!=str(target):return original_write(path,*args,**kwargs)
+                # Change the source during target staging, after the initial save
+                # validation. The final callback must run after this fsync point.
+                real_sync=os.fsync
+                def sync(fd):
+                    if not mutated:
+                        if role=='entrant':
+                            entrant.write_bytes(original.replace(b'publication_anchor',b'publication_entrant'))
+                        else:
+                            edited.write_bytes(changed)
+                            os.utime(edited,ns=(stat.st_atime_ns,stat.st_mtime_ns if same_metadata else stat.st_mtime_ns+1000000000))
+                        mutated.append(True)
+                    return real_sync(fd)
+                with patch('os.fsync',side_effect=sync):return original_write(path,*args,**kwargs)
+            def link(src,dest,*args,**kwargs):
+                if str(dest)==str(target):published.append(dest)
+                return original_link(src,dest,*args,**kwargs)
+            try:
+                with patch.object(rc,'atomic_write',side_effect=write),patch('os.link',side_effect=link):
+                    result=_j(db,**prepared['save_arguments'])
+                assert mutated and not result.get('stored'),'source changed after validation was published: '+str(result)
+                assert result.get('error',{}).get('code')==('source_changed' if role=='source' else 'fact_changed'),result
+                assert not published and not target.exists(),(role,same_metadata)
+                assert db.total_changes==changes and '\n'.join(db.iterdump())==dump,'publication revalidation wrote SQL'
+                assert {p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}==history
+                assert not list(Path(_MEM).glob('.brain-write-*'))
+                if role!='entrant':assert edited.read_bytes()==changed
+            finally:
+                edited.write_bytes(original);os.utime(edited,ns=(stat.st_atime_ns,stat.st_mtime_ns))
+                if entrant.exists():entrant.unlink()
+            saved=_j(db,**prepared['save_arguments'])
+            assert saved.get('result')=='new' and _j(db,**prepared['save_arguments']).get('result')=='noop',saved
+            target.unlink()
+            store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False)
+    assert all((Path(_MEM)/(name+'.md')).read_bytes()==body for name,body in originals.items())
+    print('PASS: late source/identity/predecessor/group-entrant changes after validation refuse publication with zero SQL/history changes; same-metadata controls and restored new/noop pass')
+
+
+def publication_index_checks(db):
+    from pathlib import Path
+    from brain import revisions
+    prior=_j(db,name='publication_index_prior',description='Prior',type='user',body='Monday schedule.',project_id='publication-index',
+             lifecycle=dict(topic='review',facet='day',valid_from='2026-11-01',evidence=['User confirmation']))
+    path=Path(prior['path']);stat=path.stat();changed=path.read_bytes().replace(b'Monday',b'Friday')
+    path.write_bytes(changed);os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns))
+    assert rc.file_sha(str(path))!=prior['sha']
+    args=dict(name='publication_index_next',description='Next',type='user',body='Sunday schedule.',project_id='publication-index',
+              lifecycle=dict(topic='review',facet='day',valid_from='2026-11-02',supersedes=['publication_index_prior'],
+                             change_reason='User correction',evidence=['User confirmation']))
+    preview=_j(db,**dict(args,prepare_only=True))
+    assert preview.get('ok') and preview.get('write_issue') is None,preview
+    saved=_j(db,**dict(args,expected_fact_sha=preview['expected_fact_sha']))
+    assert saved.get('stored') and saved.get('indexed_words'),saved
+    indexed=db.execute('SELECT sha,body FROM docs WHERE path=?',(str(path),)).fetchone()
+    assert indexed['sha']==rc.file_sha(str(path)) and 'Friday' in indexed['body'],'published index retained stale predecessor'
+    assert path.read_bytes()==changed and 'Friday' in revisions.location(str(path)).read_text(encoding='utf-8')
+    assert _j(db,**dict(args,expected_fact_sha=preview['expected_fact_sha'])).get('result')=='noop'
+    print('PASS: saved index and history reflect the content-verified predecessor even with unchanged size/mtime')
+
+
 def exclusive_create_checks(db):
     from pathlib import Path
     from brain import revisions
@@ -1650,7 +1741,7 @@ def exclusive_create_checks(db):
     history={p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}
     original_write, original_sha = rc.atomic_write, rc.file_sha
     raced = []
-    def race_write(path, text, expected_sha):
+    def race_write(path, text, expected_sha, **kwargs):
         def race_sha(candidate):
             value = original_sha(candidate)
             if candidate == target and value is None and not raced:
@@ -1659,7 +1750,7 @@ def exclusive_create_checks(db):
                 raced.append(True)
             return value
         with patch.object(rc, 'file_sha', side_effect=race_sha):
-            return original_write(path, text, expected_sha)
+            return original_write(path, text, expected_sha, **kwargs)
     with patch.object(rc, 'atomic_write', side_effect=race_write):
         outcome = _j(db, **prepared)
     check('destination created after final SHA check returns conflict', bool(raced) and outcome.get('result') == 'conflict')
@@ -1833,6 +1924,8 @@ def main() -> int:
     recorded_feedback_checks(db)
     rejected_snapshot_checks(db)
     exclusive_create_checks(db)
+    publication_source_checks(db)
+    publication_index_checks(db)
     unindexed_preparation_checks(db)
     cold_preparation_checks(db)
     print("\n" + "=" * 72)

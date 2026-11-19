@@ -219,7 +219,7 @@ def write_lock(directory: str):
         db.close()
 
 
-def atomic_write(path: str, text: str, expected_sha: Optional[str]) -> None:
+def atomic_write(path: str, text: str, expected_sha: Optional[str], *, before_publish=None) -> None:
     """A failed write preserves the old file. Recheck edits made outside the writer lock."""
     directory = os.path.dirname(path)
     fd, temporary = tempfile.mkstemp(prefix=".brain-write-", suffix=".tmp", dir=directory)
@@ -228,6 +228,8 @@ def atomic_write(path: str, text: str, expected_sha: Optional[str]) -> None:
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
+        if before_publish is not None:
+            before_publish()
         if os.path.islink(path) or file_sha(path) != expected_sha:
             raise FileExistsError("Memory changed while preparing the write; read its current version")
         if expected_sha is None:

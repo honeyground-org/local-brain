@@ -22,7 +22,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.55"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.56"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -498,14 +498,16 @@ def _do_remember(db, args: dict) -> str:
                     bad = rc.check_extraction(candidate, args, path) or rc.check_identity(candidate, args)
                     if bad:
                         raise Rejected(bad)
-                try:
+                def preflight():
                     if args.get('lifecycle'):
-                        # Preview the same fresh state used by preparation. Publish the
-                        # file first: a late destination conflict must not commit observations.
+                        # The same read-only check runs before staging the target and
+                        # again inside atomic_write after its temporary file is flushed.
                         store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False,
                                       verify_content=True, validate=validate_save, preview_only=True)
                     else:
                         validate_save(db)
+                try:
+                    preflight()
                 except Rejected as rejected:
                     return json.dumps(rejected.args[0], ensure_ascii=False)
                 except Exception as exc:
@@ -515,14 +517,17 @@ def _do_remember(db, args: dict) -> str:
             stats: dict = {}
             if result in ("new", "updated"):
                 try:
-                    rc.atomic_write(path, rc.render(name, args, verified_at), cur.get("sha"))
+                    rc.atomic_write(path, rc.render(name, args, verified_at), cur.get("sha"),
+                                    before_publish=preflight)
+                except Rejected as rejected:
+                    return json.dumps(rejected.args[0], ensure_ascii=False)
                 except FileExistsError:
                     cur = rc.current(path)
                     result, conflict = "conflict", {"reason": "sha_mismatch", "current_sha": cur.get("sha")}
             if result != "conflict":
                 try:
                     # No embedding calls or calibration in a client's save/ACK round trip.
-                    stats = store.reindex(db, recalibrate=False)
+                    stats = store.reindex(db, recalibrate=False, verify_content=bool(args.get("lifecycle")))
                 except Exception as exc:                 # Stored but not indexed: a retry catches up.
                     stats = {"error": str(exc)[:200]}
             out = rc.ack(db, name=name, path=path, result=result, conflict=conflict, args=args,
