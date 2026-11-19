@@ -349,6 +349,9 @@ def remap_scores(db, scores, words, kinds=None, sources=None):
 
 
 def check_write(db, name, args, current):
+    if current.get('exists') and ((args.get('project_id', current.get('project_id')) or '') !=
+                                  (current.get('project_id') or '')):
+        return 'project_id cannot change in place; create a separate memory in the new scope'
     value = args.get('lifecycle')
     if value is None:
         if current.get('lifecycle'):
