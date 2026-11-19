@@ -1175,10 +1175,7 @@ def main() -> int:
     extraction_checks(db)
     identity_checks(db)
     unreadable_fact_checks(db)
-    # The fixture deliberately queues sync/heal work while testing the real indexer.
-    # Keep its unrelated worker from racing the exact SQLite-dump assertions.
-    with patch("brain.deferred.kick", return_value=False):
-        source_failure_checks(db)
+    source_failure_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
@@ -1189,4 +1186,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from unittest.mock import patch
+    # Contract fixtures share one database and assert exact preservation. Workers
+    # have their own integration suite; do not let earlier saves launch concurrent
+    # writers into later read-only or fault-injection cases. Queueing stays real.
+    with patch("brain.deferred.kick", return_value=False):
+        sys.exit(main())
