@@ -331,8 +331,7 @@ def embedding_state(db: sqlite3.Connection) -> dict:
         if c.get("provider") in (None, "none"):
             out["state"] = "disabled"
             return out
-        skip = set(vectors.no_embed_sources())
-        eligible = sum(r[0] not in skip for r in db.execute("SELECT source FROM docs"))
+        eligible = len(vectors.eligible_docs(db))
         stale = len(vectors.stale_docs(db))
         out.update(eligible_docs=eligible, current_docs=eligible-stale, pending_docs=stale,
                    current=stale == 0, state="current" if stale == 0 else "pending")

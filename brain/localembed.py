@@ -125,11 +125,8 @@ def stale(db):
     from brain import vectors
     ensure(db)
     model = vectors.model_tag()
-    skip = set(vectors.no_embed_sources())
     result = []
-    for row in db.execute('SELECT id,name,source,title,description,body,sha FROM docs'):
-        if row['source'] in skip:
-            continue
+    for row in vectors.eligible_docs(db):
         planned = cached_plan(db, row, model)
         have = list(db.execute('SELECT chunk_no,sha FROM vectors WHERE doc_id=? AND model=? AND dim=?',
                                (row['id'], model, vectors.DIM)))
