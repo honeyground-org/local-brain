@@ -262,7 +262,8 @@ def valid_history_record(row) -> bool:
         if row["total"] != _weighted_total(row["axes"], version):
             return False
         raw = row.get("raw", {})
-        return (set(raw).issubset(row["axes"])
+        return (all(value is None or 0 <= value <= 1 for value in raw.values())
+                and set(raw).issubset(row["axes"])
                 and all(row["axes"][key] == _pct(value, HISTORY_TARGETS[version][key], digits)
                         for key, value in raw.items()))
     except OverflowError:

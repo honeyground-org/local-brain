@@ -297,6 +297,10 @@ def verify_history_recovery():
     bad += [dict(good,axes={}),dict(good,axes=dict(precison=50)),dict(good,raw=dict(precison=.5)),dict(good,axis_version=3),dict(good,pipeline='unknown')]
     bad += [dict(good,total=100,axes=dict(precision=None)),dict(good,total=100,axes=dict(precision=0)),dict(good,total=None,axes=dict(precision=100)),dict(good,total=42.4),dict(good,total=42.55,axes=dict(precision=None,recall=42.55)),dict(good,raw=dict(precision=.95)),dict(good,raw=dict(stability=.9))]
     bad += [dict(good,**{field:value}) for field in ('total','axes') for value in ((-5,105) if field=='total' else (dict(precision=-5),dict(precision=105)))]
+    for key in scorecard.HISTORY_AXES[scorecard.AXIS_VERSION]:
+        for value in (-.0001,1.01):
+            computed=scorecard.compute({key:value})
+            bad.append(dict(good,total=computed['total'],axes={a['key']:a['score'] for a in computed['axes']},raw={a['key']:a['raw'] for a in computed['axes']}))
     with tempfile.TemporaryDirectory() as td,patch.object(scorecard,'_store_home',return_value=td),patch.object(scorecard,'collect',side_effect=AssertionError('fresh measurement')),patch.object(scorecard,'bench',side_effect=AssertionError('fresh benchmark')):
         path=Path(td)/'scorecard.jsonl'
         for i,value in enumerate(bad):
@@ -340,6 +344,17 @@ def verify_history_recovery():
             after=path.read_bytes();p=dashboard.payload(db);page=dashview.render(p)
             check('append preserves interrupted log and displays new measurement '+repr(suffix[-12:]),after.startswith(suffix) and p['performance']['total']==90.6 and p['performance']['axes']['recall']==90.6 and '90.6' in page and 'kept_memory' in page and before=='\n'.join(db.iterdump()))
             check('append remains one independent JSONL record',json.loads(after.splitlines()[-1])['total']==90.6 and after[len(suffix):].startswith(b'{' if not suffix or suffix.endswith(b'\n') else b'\n{'))
+        for key in scorecard.HISTORY_AXES[scorecard.AXIS_VERSION]:
+            for value in (-.0001,1.01,0,1,None):
+                before=path.read_bytes();rejected=False
+                with patch.object(scorecard,'_judge_stamp',return_value='fixture'):
+                    try:scorecard.save(scorecard.compute({key:value}),path=str(path))
+                    except ValueError:rejected=True
+                invalid=value is not None and not 0<=value<=1
+                if invalid:
+                    check('raw ratio rejected before saving '+str((key,value)),rejected and path.read_bytes()==before)
+                else:
+                    check('raw ratio boundary remains valid '+str((key,value)),not rejected and scorecard.history(limit=1)[0]['raw'][key]==value)
         before=path.read_bytes();rejected=False
         with patch.object(scorecard,'_judge_stamp',return_value='fixture'):
             try:scorecard.save(dict(computed,total=10),path=str(path))
