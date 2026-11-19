@@ -272,6 +272,28 @@ with tempfile.TemporaryDirectory() as td:
     check(all(p.read_bytes()==body for p,body in originals.items()) and db.execute('SELECT count(*) FROM docs').fetchone()[0]==8,'source bytes and all lexical documents preserved')
     db.close()
 
+head("⑦ embedding counts use one eligibility snapshot during source transitions")
+with tempfile.TemporaryDirectory() as td:
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+    p=Path(td)/'public.md';p.write_text('---\nname: public\n---\nPUBLIC_CONTROL_BODY\n',encoding='utf-8')
+    store._index_one(db,store.read_doc(str(p),'memory',td));vectors.ensure_table(db);db.commit()
+    before='\n'.join(db.iterdump());db.execute('PRAGMA query_only=ON')
+    for first in (True,False):
+        for read in (health.embedding_state,vectors.coverage):
+            calls=[]
+            def changing_source(path,sha):
+                calls.append(path)
+                return first if len(calls)==1 else not first
+            with patch.object(vectors,'PROVIDER','gemini'),patch.object(vectors,'no_embed_sources',return_value=[]),patch.object(privacy,'exportable_version',side_effect=changing_source),patch.object(engines,'choice',return_value={'provider':'gemini'}):
+                out=read(db)
+            if read==health.embedding_state:
+                ok=out['eligible_docs']==int(first) and out['current_docs']==0 and out['pending_docs']==int(first)
+            else:
+                ok=out['docs']==int(first) and out['embedded']==0 and out['stale']==int(first)
+            check(ok and len(calls)==1,'one source snapshot prevents false completion and negative counts '+str((read.__name__,first)),str(out))
+    check(before=='\n'.join(db.iterdump()),'embedding transition diagnostics leave database unchanged')
+    db.close()
+
 print("\n" + "=" * 72)
 if FAIL:
     print("❌ %d failure(s): %s" % (len(FAIL), " · ".join(FAIL)))

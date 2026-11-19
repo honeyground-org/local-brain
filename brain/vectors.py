@@ -564,17 +564,17 @@ def eligible_docs(db: sqlite3.Connection) -> List[sqlite3.Row]:
             and (PROVIDER == "embeddinggemma" or privacy.exportable_version(row["path"], row["sha"]))]
 
 
-def stale_docs(db: sqlite3.Connection) -> List[sqlite3.Row]:
+def stale_docs(db: sqlite3.Connection, eligible=None) -> List[sqlite3.Row]:
     """Missing, stale or incomplete documents, including a previously capped suffix."""
     ensure_table(db)
     if PROVIDER == "embeddinggemma":
         from brain import localembed
-        return localembed.stale(db)
+        return localembed.stale(db, eligible=eligible)
     held = {}
     for r in db.execute("SELECT doc_id,chunk_no,sha,model,dim FROM vectors WHERE model=? AND dim=?", (model_tag(), DIM)):
         held.setdefault(r[0], []).append(tuple(r[1:]))
     todo = []
-    for row in eligible_docs(db):
+    for row in eligible_docs(db) if eligible is None else eligible:
         expected = len(chunk_spans(row["body"] or ""))
         have = held.get(row["id"], [])
         good = {n for n, sha, model, dim in have
@@ -702,11 +702,12 @@ def build(db: sqlite3.Connection, limit_docs: int = 0,
 
 def coverage(db: sqlite3.Connection) -> dict:
     ensure_table(db)
-    eligible = {r["id"] for r in eligible_docs(db)}
+    snapshot = eligible_docs(db)
+    eligible = {r["id"] for r in snapshot}
     rows = list(db.execute("SELECT doc_id FROM vectors WHERE model=? AND dim=?", (model_tag(), DIM)))
     have = {r[0] for r in rows if r[0] in eligible}
     return {"docs": len(eligible), "embedded": len(have),
-            "chunks": sum(r[0] in eligible for r in rows), "stale": len(stale_docs(db))}
+            "chunks": sum(r[0] in eligible for r in rows), "stale": len(stale_docs(db, eligible=snapshot))}
 
 
 def query_tag() -> str:
