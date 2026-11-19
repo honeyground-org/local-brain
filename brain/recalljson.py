@@ -111,7 +111,7 @@ def _row(r: dict, rank: Optional[int], via: str, shas: Dict[str, str], pids: Dic
         "path": r.get("path"),
         "source": r.get("source"),
         "kind": r.get("kind") or None,
-        "sha": shas.get(r.get("path") or "", None),
+        "sha": r.get("sha", shas.get(r.get("path") or "", None)),
         "score": r.get("score"),
         "why": r.get("why"),
         "retrieved_via": r.get("retrieved_via", []),
@@ -125,7 +125,7 @@ def _row(r: dict, rank: Optional[int], via: str, shas: Dict[str, str], pids: Dic
         "excerpt_chars": shown,
         "via": via,
         "related": bool(r.get("related")),
-        "project_id": pids.get(r.get("path") or "", None),
+        "project_id": r.get("project_id", pids.get(r.get("path") or "", None)),
     }
 
 
@@ -175,7 +175,7 @@ def response(db: sqlite3.Connection, *, query: str, terms: Sequence[str], k: int
                          shas, pids, shown) for i, r in enumerate(direct, 1)],
         "related": [{"name": r.get("name"), "via_graph": r.get("via_graph"),
                      "description": r.get("description") or r.get("title"),
-                     "project_id": pids.get(r.get("path") or "", None)} for r in related],
+                     "project_id": r.get("project_id", pids.get(r.get("path") or "", None))} for r in related],
         "meaning": meaning,
         "meta": {"latency_ms": int((time.time() - t0) * 1000), "embed_cached": embed_cached,
                  "partial": partial, "fallback_reason": (why_none or None) if partial else None,

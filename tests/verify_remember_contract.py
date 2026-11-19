@@ -1356,6 +1356,78 @@ def unicode_feedback_checks(db):
     print('PASS: V2 split histories migrate losslessly into canonical groups; latest retained/active snapshots win without summing, originals survive later feedback and retries, true deletion clears them')
 
 
+def recorded_feedback_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    import sqlite3
+    import unicodedata
+    from brain import health, search, observe
+    name='recorded_feedback'
+    for i in range(3):
+        _j(db,name='recorded_background_'+str(i),description='Background',type='reference',body='Unrelated rainfall.',embed=False)
+    _j(db,name=name,description='Usage identity',type='user',body='Orchid watering evidence.',project_id='record-a',
+       lifecycle=dict(topic='caf\u00e9',facet='water',status='active',valid_from='2026-01-01',evidence=['Fixture']),embed=False)
+    path=Path(_MEM)/(name+'.md');original=path.read_text(encoding='utf-8')
+    health.feedback(db,name,'wrong')
+    with db:db.execute('UPDATE usage SET hits=7 WHERE path=?',(str(path),))
+    def refresh():
+        store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False,verify_content=True)
+    def usage():return dict(db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone())
+    def results():
+        return [r for r in search.recall(db,'orchid',scope='record-a',graph=False,log=False,bridge=False) if r['path']==str(path)]
+    for label,text,same in [('scope',original.replace('record-a','record-b'),False),
+                            ('topic',original.replace('caf\u00e9','another-topic'),False),
+                            ('facet',original.replace('water','light'),False),
+                            ('unicode',unicodedata.normalize('NFD',original),True),
+                            ('unchanged',original,True)]:
+        before=usage();rows=results();assert len(rows)==1
+        recalls=db.execute('SELECT count(*) FROM recalls').fetchone()[0]
+        path.write_text(text,encoding='utf-8');refresh()
+        search.record(db,'orchid',[],rows)
+        assert db.execute('SELECT count(*) FROM recalls').fetchone()[0]==recalls+1
+        if same:
+            after=usage();assert after['hits']==before['hits']+1,(label,'same fact was not recorded')
+            assert all(after[k]==v for k,v in before.items() if k not in ('hits','last_hit'))
+        else:
+            assert not db.execute('SELECT 1 FROM usage WHERE path=?',(str(path),)).fetchone(),(label,'stale hit credited to new fact')
+        path.write_text(original,encoding='utf-8');refresh()
+        assert usage()==(after if same else before),(label,'original feedback changed')
+        assert db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()[0]==0.5
+    rows=results();before=usage()
+    # Legacy/partial synthetic results cannot prove the identity that was shown.
+    unpinned=dict(rows[0]);unpinned.pop('_feedback_identity',None)
+    search.record(db,'orchid',[],[unpinned]);assert usage()==before
+    # A competing writer cannot replace the identity between comparison and hit
+    # insertion, including on a connection configured for autocommit.
+    other=sqlite3.connect(store.db_path(),timeout=0)
+    attempted=[]
+    def compete(sql):
+        if sql.startswith('SELECT path,name,project_id,lifecycle FROM docs WHERE path='):
+            try:other.execute('UPDATE docs SET project_id=? WHERE path=?',('record-b',str(path)))
+            except sqlite3.OperationalError as exc:attempted.append('locked' in str(exc))
+            else:other.commit();attempted.append(False)
+    isolation=db.isolation_level
+    try:
+        db.isolation_level=None;db.set_trace_callback(compete)
+        search.record(db,'orchid',[],rows)
+    finally:
+        db.set_trace_callback(None);db.isolation_level=isolation;other.close()
+    assert attempted==[True] and usage()['hits']==before['hits']+1,attempted
+    # Exercise the public MCP boundary: a late reindex cannot relabel old result
+    # text with the new scope/SHA, and private recording metadata stays internal.
+    before=usage();sha=rc.file_sha(str(path));record=search.record
+    def move(db,query,terms,rows):
+        path.write_text(original.replace('record-a','record-b'),encoding='utf-8');refresh()
+        return record(db,query,terms,rows)
+    with patch.object(search,'record',side_effect=move),patch.object(server,'_words_unsure',return_value=False),patch.object(observe,'write'):
+        response=json.loads(server.call_tool(db,'recall',dict(query='orchid',scope='record-a',semantic_k=0)))
+    shown=next(r for r in response['results'] if r['path']==str(path))
+    assert shown['project_id']=='record-a' and shown['sha']==sha and '_feedback_identity' not in shown,shown
+    assert not db.execute('SELECT 1 FROM usage WHERE path=?',(str(path),)).fetchone()
+    path.write_text(original,encoding='utf-8');refresh();assert usage()==before
+    print('PASS: late scope/topic/facet changes never inherit stale hits; NFC/NFD and unchanged facts record once; original feedback survives, writer lock spans comparison/increment, MCP keeps selected scope/SHA')
+
+
 def duplicate_usage_checks(db):
     from pathlib import Path
     from unittest.mock import patch
@@ -1602,6 +1674,7 @@ def main() -> int:
     duplicate_usage_checks(db)
     feedback_scope_checks(db)
     unicode_feedback_checks(db)
+    recorded_feedback_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
