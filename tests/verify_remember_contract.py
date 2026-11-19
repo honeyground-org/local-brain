@@ -1283,6 +1283,79 @@ def feedback_scope_checks(db):
     print('PASS: legacy path-only weights/counters are retained unattributed, never guessed into a new scope; confirmed deletion clears them')
 
 
+def unicode_feedback_checks(db):
+    from pathlib import Path
+    import unicodedata
+    from brain import health
+    name='unicode_feedback'
+    topic,facet='caf\u00e9','temp\u00e9rature'
+    _j(db,name=name,description='Unicode identity',type='user',body='Preserve feedback.',project_id='unicode-a',
+       lifecycle=dict(topic=topic,facet=facet,status='proposed'),embed=False)
+    path=Path(_MEM)/(name+'.md');original=path.read_text(encoding='utf-8')
+    key='retained_doc_weight:'+str(path)
+    copy=Path(_MEM)/'00_unicode_feedback.md'
+    def refresh(**kw):
+        return store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False,verify_content=True,**kw)
+    def state():
+        row=db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone()
+        return (db.execute('SELECT weight FROM docs WHERE path=?',(str(path),)).fetchone()[0],dict(row) if row else None)
+    health.feedback(db,name,'wrong')
+    with db:db.execute('UPDATE usage SET hits=7,opens=3,useful=2,stale=1,last_hit=? WHERE path=?',('2026-01-01',str(path)))
+    initial=state();assert initial[0]==0.5
+    variants=[original.replace(value,unicodedata.normalize('NFD',value)) for value in (topic,facet)]
+    variants.append(unicodedata.normalize('NFD',original))
+    for text in variants:
+        path.write_text(text,encoding='utf-8');refresh()
+        assert state()==initial,'Unicode-only change reset active feedback'
+        copy.write_text(text,encoding='utf-8');refresh()
+        assert not db.execute('SELECT 1 FROM docs WHERE path=?',(str(path),)).fetchone()
+        path.write_text(original,encoding='utf-8');refresh()
+        assert state()==initial,'Unicode-only change lost retained feedback'
+        copy.unlink();refresh(full=True);assert state()==initial
+    for changed in (original.replace('unicode-a','unicode-b'),original.replace(topic,'Cafe'),original.replace(facet,'humidity')):
+        path.write_text(changed,encoding='utf-8');refresh();assert state()==(1.0,None)
+        path.write_text(original,encoding='utf-8');refresh();assert state()==initial
+    print('PASS: NFC/NFD topics and facets preserve every feedback field across direct changes, deduplication and full rebuild; scope/case/different-facet controls remain separate')
+
+    # Reproduce both possible V2 retention orders. Its snapshots can overlap;
+    # their array order, not last_hit (which only dates hits), records recency.
+    raw_nfc=['unicode-a','fact',topic,facet]
+    raw_nfd=['unicode-a','fact',unicodedata.normalize('NFD',topic),unicodedata.normalize('NFD',facet)]
+    a=dict(identity=raw_nfc,weight=initial[0],usage=initial[1])
+    b=dict(identity=raw_nfd,weight=0.7,usage=dict(initial[1],hits=9,useful=4,last_hit='2025-01-01'))
+    foreign=dict(identity=['unicode-b','fact',topic,facet],weight=0.2,usage=None)
+    for snapshots in ([a,b],[b,a],[a,dict(a,identity=raw_nfd)]):
+        copy.write_text(original,encoding='utf-8');refresh()
+        with db:store.set_meta(db,key,json.dumps(dict(version=2,records=snapshots+[foreign])),commit=False)
+        copy.unlink();path.write_text(variants[-1],encoding='utf-8');refresh()
+        assert state()==(snapshots[-1]['weight'],snapshots[-1]['usage']),'V2 latest snapshot was not restored'
+        saved=json.loads(store.get_meta(db,key));assert saved['version']==3
+        canonical=next(r for r in saved['records'] if r['identity']==raw_nfc)
+        assert canonical['legacy_snapshots']==snapshots,'V2 originals were dropped or rewritten'
+        assert len(saved['records'])==2
+        # Feedback received after migration takes precedence over the snapshots,
+        # whose immutable provenance survives re-retention and repeated restores.
+        health.feedback(db,name,'useful');updated=state()
+        for text in (original,variants[-1],original):
+            path.write_text(text,encoding='utf-8');refresh();assert state()==updated
+            copy.write_text(text,encoding='utf-8');refresh();copy.unlink();refresh(full=True)
+            assert state()==updated,'Repeated migration duplicated or reverted feedback'
+            saved=json.loads(store.get_meta(db,key))
+            assert next(r for r in saved['records'] if r['identity']==raw_nfc)['legacy_snapshots']==snapshots
+        path.write_text(original.replace('unicode-a','unicode-b'),encoding='utf-8');refresh()
+        assert state()==(0.2,None)
+        path.write_text(original,encoding='utf-8');refresh();assert state()==updated
+    # An existing indexed row is newer than archived V2 snapshots. Preserve its
+    # active counters while migrating the older snapshots on the next retention.
+    with db:store.set_meta(db,key,json.dumps(dict(version=2,records=[a,b])),commit=False)
+    active=state();path.write_text(variants[-1],encoding='utf-8');refresh();assert state()==active
+    path.write_text(original.replace('unicode-a','unicode-b'),encoding='utf-8');refresh()
+    path.write_text(original,encoding='utf-8');refresh();assert state()==active
+    assert json.loads(store.get_meta(db,key))['records'][0]['legacy_snapshots']==[a,b]
+    path.unlink();refresh();assert store.get_meta(db,key)==''
+    print('PASS: V2 split histories migrate losslessly into canonical groups; latest retained/active snapshots win without summing, originals survive later feedback and retries, true deletion clears them')
+
+
 def duplicate_usage_checks(db):
     from pathlib import Path
     from unittest.mock import patch
@@ -1528,6 +1601,7 @@ def main() -> int:
     content_snapshot_checks(db)
     duplicate_usage_checks(db)
     feedback_scope_checks(db)
+    unicode_feedback_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
