@@ -1482,10 +1482,19 @@ def rejected_snapshot_checks(db):
     except sqlite3.OperationalError as exc:assert 'readonly' in str(exc)
     else:raise AssertionError('projection allowed writes')
     assert db.total_changes==changes and '\n'.join(db.iterdump())==dump
+    for invalid in (False,True):
+        args=dict(prepared['save_arguments'],prepare_only=True)
+        if invalid:args['extracted_from']=dict(args['extracted_from'],sha='0'*40)
+        with patch.object(rc,'atomic_write',side_effect=AssertionError('preview must not publish')):
+            preview=_j(db,**args)
+        if invalid:assert preview.get('error',{}).get('code')=='source_changed',preview
+        else:assert preview.get('ok') and preview.get('stored') is False,preview
+        assert db.total_changes==changes and '\n'.join(db.iterdump())==dump,'prepare-only wrote live SQL'
     saved=_j(db,**prepared['save_arguments'])
     assert saved.get('result')=='new' and _j(db,**prepared['save_arguments']).get('result')=='noop',saved
     assert path.read_bytes()==original
     print('PASS: rejected snapshots with unchanged or edited sources cause zero live SQL changes, metadata/history changes and publications; retries preserve usage7; accepted new/noop still work')
+    print('PASS: successful and refused prepare-only requests are read-only against the live index')
 
 
 def duplicate_usage_checks(db):

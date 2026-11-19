@@ -455,18 +455,24 @@ def _do_remember(db, args: dict) -> str:
             if args.get('prepare_only'):
                 if 'lifecycle' not in args and cur.get('lifecycle'):
                     args['lifecycle'] = cur['lifecycle']
+                class PreviewReady(Exception):
+                    pass
+                def prepare_candidate(candidate):
+                    if rc.requires_local_only(candidate, args) and args.get("embed") is not False:
+                        raise PreviewReady(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
+                    bad = rc.check_extraction(candidate, args, path) or rc.check_identity(candidate, args)
+                    if bad:
+                        raise PreviewReady(bad)
+                    preview = lifecycle.prepare(candidate, name, args)
+                    preview['write_issue'] = lifecycle.check_write(candidate, name, args, cur)
+                    raise PreviewReady(preview)  # A preview never applies its staged observations.
                 try:
-                    store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False)
+                    store.reindex(db, recalibrate=False, sync=False, heal=False, queue_embedding=False,
+                                  verify_content=True, validate=prepare_candidate)
+                except PreviewReady as ready:
+                    return json.dumps(ready.args[0], ensure_ascii=False)
                 except Exception as exc:
                     return json.dumps(dict(rc.error('index_pending', str(exc)[:200]), retryable=True), ensure_ascii=False)
-                if rc.requires_local_only(db, args) and args.get("embed") is not False:
-                    return json.dumps(rc.error("privacy_required", "Preserve embed:false from the predecessor"))
-                bad = rc.check_extraction(db, args, path) or rc.check_identity(db, args)
-                if bad:
-                    return json.dumps(bad, ensure_ascii=False)
-                preview = lifecycle.prepare(db, name, args)
-                preview['write_issue'] = lifecycle.check_write(db, name, args, cur)
-                return json.dumps(preview, ensure_ascii=False)
             issue = lifecycle.check_write(db, name, args, cur)
             if issue:
                 return json.dumps(rc.error("invalid_argument", issue), ensure_ascii=False)
