@@ -513,6 +513,15 @@ def extraction_evidence(value, reference=None):
     return evidence
 
 
+def check_destination_name(db, args, target_path):
+    """A newly published fact name must remain unambiguous in its exact scope."""
+    rows = db.execute("SELECT path FROM docs WHERE name=? AND COALESCE(project_id, '')=?",
+                      (args["name"], args.get("project_id") or "")).fetchall()
+    if any(os.path.abspath(r["path"]) != os.path.abspath(target_path) for r in rows):
+        return error("name_taken", "Another source now uses this fact name in the same scope; prepare a new name")
+    return None
+
+
 def check_extraction(db, args, target_path=None):
     value = args.get("extracted_from")
     if value is None:
@@ -536,10 +545,9 @@ def check_extraction(db, args, target_path=None):
         # Identical saved retries are decided before this new-write guard.
         if os.path.lexists(target_path):
             return error("target_occupied", "Keep the existing file; choose a new fact path")
-        rows = db.execute("SELECT path FROM docs WHERE name=? AND COALESCE(project_id, '')=?",
-                          (args["name"], args.get("project_id") or "")).fetchall()
-        if any(os.path.abspath(r["path"]) != os.path.abspath(target_path) for r in rows):
-            return error("name_taken", "Another source now uses this fact name in the same scope; prepare a new name")
+        bad = check_destination_name(db, args, target_path)
+        if bad:
+            return bad
     source, bad = extraction_source(db, value["name"], value["sha"], args.get("project_id") or "")
     if bad:
         return bad
