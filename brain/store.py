@@ -19,6 +19,7 @@ import os
 import re
 import sqlite3
 import sys
+import tempfile
 import time
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -1419,6 +1420,7 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # Now nothing is deleted — `_index_one` removes and reinserts its own rows per document, so
     # rowids survive, and only vanished files are cleaned up below.
     full = full or bool(db.execute("SELECT 1 FROM docs WHERE lifecycle='' LIMIT 1").fetchone())
+    index_stamp = (db.total_changes, db.execute("PRAGMA data_version").fetchone()[0])
     existing = {r["path"]: (r["id"], r["mtime"], r["size"], r["sha"])
                 for r in db.execute("SELECT id,path,mtime,size,sha FROM docs")}
     # ★An incremental pass recounts only what it touched★ (§_TOUCHED) — a full pass or a first index recounts all.
@@ -1440,8 +1442,12 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
     # The first one found wins (source order → the workspace's canonical copy comes first).
     seen_sha: Dict[str, str] = {}
     dups = 0
-    with db:
+    # Stage parsed observations in a private temporary file, not the durable history.
+    # Full rebuilds stay bounded in memory; a failed scan leaves no history observations.
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as staged:
+        observed_paths = set()
         for path, source, root in iter_source_files(cfg):
+            observed_paths.add(path)
             if path in seen_paths:
                 # Two sources can overlap in scope (a guide source passing over docs).
                 # First found wins — so a UNIQUE(path) conflict does not kill the whole index.
@@ -1475,39 +1481,63 @@ def reindex(db: sqlite3.Connection, cfg: Optional[dict] = None,
             # ⛔ Without `not full`, a full reindex **fixes nothing** — unchanged content is
             # skipped, so fixing the parser leaves aliases and links at their old values.
             if prev and not full and doc["sha"] == prev[3]:
-                db.execute("UPDATE docs SET mtime=?,size=? WHERE id=?",
-                           (doc["mtime"], doc["size"], prev[0]))
+                staged.write(json.dumps(["mtime", doc["mtime"], doc["size"], prev[0]]) + "\n")
                 skipped += 1
                 continue
-            _index_one(db, doc, priors.get(source, 1.0))
+            staged.write(json.dumps(["index", doc, priors.get(source, 1.0)]) + "\n")
             if prev:
                 updated += 1
             else:
                 added += 1
             if verbose:
                 print("  %s %s" % ("~" if prev else "+", doc["name"]))
-        # A vanished file vanishes from the index too (so no orphaned evidence remains).
-        gone = [(p, pid) for p, (pid, _, _, _) in existing.items() if p not in seen_paths]
-        removed = [pid for _, pid in gone]
-        if gone:
-            from brain import stores
-            stores.invalidate(db)
-        for path, doc_id in gone:
-            _touch(db, doc_id)
-            db.execute("DELETE FROM postings WHERE doc_id=?", (doc_id,))
-            db.execute("DELETE FROM links WHERE src_id=?", (doc_id,))
-            # ★Delete what hangs off it as well★ — leave it, and the moment the next document
-            # inherits that rowid it wears someone else's aliases and someone else's usage history.
-            db.execute("DELETE FROM aliases WHERE doc_id=?", (doc_id,))
-            db.execute("DELETE FROM path_links WHERE src_id=?", (doc_id,))
-            db.execute("DELETE FROM usage WHERE path=?", (path,))
-            db.execute("DELETE FROM docs WHERE id=?", (doc_id,))
-            # ★and its embeddings★ (2026-10-07) — they stayed, pulled the similarity gate's top-N mean,
-            # and would have been read as the next document's to take this rowid
+        missing_usage = []
+        for row in db.execute("SELECT path FROM usage"):
+            if row[0] in observed_paths:
+                continue
             try:
-                db.execute("DELETE FROM vectors WHERE doc_id=?", (doc_id,))
-            except sqlite3.OperationalError:
-                pass                                     # no semantic layer on this machine yet
+                os.stat(row[0])
+            except FileNotFoundError:
+                missing_usage.append((row[0],))
+            except OSError:
+                pass                              # inability to establish absence is not deletion
+        staged.seek(0)
+        with db:
+            # Reserve the writer before publishing any history. A concurrent indexer
+            # may have committed while sources were read; never apply an obsolete plan.
+            if not db.in_transaction:
+                db.execute("BEGIN IMMEDIATE")
+            else:
+                db.execute("UPDATE docs SET id=id WHERE 0")
+            if index_stamp != (db.total_changes, db.execute("PRAGMA data_version").fetchone()[0]):
+                raise OSError("Index changed while sources were read; retry indexing")
+            for line in staged:
+                action = json.loads(line)
+                if action[0] == "mtime":
+                    db.execute("UPDATE docs SET mtime=?,size=? WHERE id=?", action[1:])
+                else:
+                    _index_one(db, action[1], action[2])
+            db.executemany("DELETE FROM usage WHERE path=?", missing_usage)
+            # A vanished file vanishes from the index too (so no orphaned evidence remains).
+            gone = [(p, pid) for p, (pid, _, _, _) in existing.items() if p not in seen_paths]
+            removed = [pid for _, pid in gone]
+            if gone:
+                from brain import stores
+                stores.invalidate(db)
+            for path, doc_id in gone:
+                _touch(db, doc_id)
+                db.execute("DELETE FROM postings WHERE doc_id=?", (doc_id,))
+                db.execute("DELETE FROM links WHERE src_id=?", (doc_id,))
+                # Remove rowid-based derivatives; path-based usage is retained while its file exists.
+                db.execute("DELETE FROM aliases WHERE doc_id=?", (doc_id,))
+                db.execute("DELETE FROM path_links WHERE src_id=?", (doc_id,))
+                db.execute("DELETE FROM docs WHERE id=?", (doc_id,))
+                # ★and its embeddings★ (2026-10-07) — they stayed, pulled the similarity gate's top-N mean,
+                # and would have been read as the next document's to take this rowid
+                try:
+                    db.execute("DELETE FROM vectors WHERE doc_id=?", (doc_id,))
+                except sqlite3.OperationalError:
+                    pass                                     # no semantic layer on this machine yet
     _build_basename_aliases(db)
     _resolve_path_links(db)
     touched = _TOUCHED

@@ -992,6 +992,128 @@ def source_failure_checks(db):
     print('PASS: unreadable/malformed/missing legacy predecessors return structured preparation/save refusals and recover')
 
 
+def staged_index_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    from brain import revisions
+    import sqlite3
+    scope='staged-index'
+    source=_j(db,name='staged_source',description='Source',type='user',body='Friday evidence.',project_id=scope)
+    anchor=_j(db,name='staged_anchor',description='Identity',type='user',body='Monday water.',project_id=scope,
+              lifecycle=dict(topic='water',facet='day',status='proposed'),embed=False)
+    sibling=_j(db,name='staged_sibling',description='Sibling',type='user',body='Related Friday.',project_id=scope,
+               lifecycle=dict(topic='water',facet='day',status='proposed'),embed=False)
+    nested=Path(_MEM)/'zz_staged';nested.mkdir()
+    (Path(_MEM)/'staged_sibling.md').replace(nested/'staged_sibling.md')
+    def refresh(**kw):
+        return store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False,**kw)
+    refresh()
+    path=Path(_MEM)/'staged_anchor.md';original=path.read_bytes()
+    with db:db.execute('INSERT INTO usage(path,hits) VALUES(?,7)',(str(path),))
+    request=dict(source_name='staged_source',source_sha=source['sha'],quotes=['evidence.'],name='staged_pending',
+                 description='Proposal',type='user',body='Friday proposal.',project_id=scope,
+                 identity_reference=dict(name='staged_anchor',sha=anchor['sha'],reason='Same reviewed fact'))
+    prepared=json.loads(server.call_tool(db,'prepare_fact',request));assert prepared.get('ok'),prepared
+    def archives():return {p.name:p.read_bytes() for p in revisions.directory().glob('*.json')}
+    before=archives();dump='\n'.join(db.iterdump())
+    path.write_bytes(original+b'\nAn external edit observed before the failing directory.\n')
+    original_scan=os.scandir
+    def denied(candidate,*a,**kw):
+        if os.fspath(candidate)==str(nested):raise PermissionError('fixture late scan denied')
+        return original_scan(candidate,*a,**kw)
+    try:
+        with patch('os.scandir',side_effect=denied),patch.object(rc,'atomic_write',wraps=rc.atomic_write) as publish:
+            for full in (False,True):
+                try:refresh(full=full)
+                except OSError:pass
+                else:raise AssertionError('late source failure accepted')
+                assert '\n'.join(db.iterdump())==dump
+                assert archives()==before,'a failed scan changed durable history'
+            saved=_j(db,**prepared['save_arguments'])
+            assert saved.get('error',{}).get('code')=='index_pending',saved
+            assert not publish.called,'a failed scan published history or a proposal'
+            assert '\n'.join(db.iterdump())==dump and archives()==before
+    finally:path.write_bytes(original)
+    refresh()
+    assert archives()==before,'failed-scan history survived source restoration'
+    assert db.execute('SELECT hits FROM usage WHERE path=?',(str(path),)).fetchone()[0]==7
+    # A legitimate edit only becomes history after the complete source observation succeeds.
+    path.write_bytes(original+b'\nA complete observation.\n');refresh()
+    assert archives()!=before
+    observed=archives();refresh();assert archives()==observed
+    path.write_bytes(original);refresh()
+    recovered=json.loads(server.call_tool(db,'prepare_fact',request));assert recovered.get('ok'),recovered
+    saved=_j(db,**recovered['save_arguments'])
+    assert saved.get('result')=='new' and _j(db,**recovered['save_arguments']).get('result')=='noop',saved
+    print('PASS: late source failure preserves exact SQLite and durable history bytes with zero publications; complete observations and retries succeed')
+
+    # Staging must not apply a plan against a concurrently changed index.
+    path.write_bytes(original+b'\nAnother observed edit.\n')
+    before=archives();prior_docs=[tuple(r) for r in db.execute('SELECT * FROM docs ORDER BY id')]
+    other=sqlite3.connect(store.db_path());real_read=store.read_doc;changed=[]
+    def concurrent_read(candidate,*a,**kw):
+        doc=real_read(candidate,*a,**kw)
+        if candidate==str(path) and not changed:
+            with other:other.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('concurrent_fixture','retained')")
+            changed.append(True)
+        return doc
+    try:
+        with patch.object(store,'read_doc',side_effect=concurrent_read),patch.object(rc,'atomic_write',wraps=rc.atomic_write) as publish:
+            try:refresh()
+            except OSError as exc:assert 'Index changed' in str(exc),exc
+            else:raise AssertionError('concurrent index change was overwritten')
+            assert changed and not publish.called
+        assert [tuple(r) for r in db.execute('SELECT * FROM docs ORDER BY id')]==prior_docs
+        assert archives()==before and store.get_meta(db,'concurrent_fixture')=='retained'
+    finally:other.close();path.write_bytes(original)
+    refresh()
+    print('PASS: a concurrent index commit refuses the staged plan before history writes and preserves the competing change')
+
+
+
+def duplicate_usage_checks(db):
+    from pathlib import Path
+    from unittest.mock import patch
+    def refresh(**kw):
+        return store.reindex(db,recalibrate=False,sync=False,heal=False,queue_embedding=False,**kw)
+    anchor=_j(db,name='zz_duplicate_anchor',description='Identity',type='user',body='Keep original path usage.',project_id='duplicate-usage',
+              lifecycle=dict(topic='water',facet='day',status='proposed'),embed=False)
+    path=Path(_MEM)/'zz_duplicate_anchor.md';original=path.read_bytes()
+    with db:db.execute('INSERT INTO usage(path,hits,opens,useful,wrong,stale) VALUES(?,7,3,2,1,1)',(str(path),))
+    usage=tuple(db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone())
+    source=_j(db,name='duplicate_source',description='Source',type='user',body='Friday evidence.',project_id='duplicate-usage')
+    request=dict(source_name='duplicate_source',source_sha=source['sha'],project_id='duplicate-usage',
+                 quotes=['evidence.'],name='duplicate_pending',description='Proposal',type='user',body='Friday proposal.',
+                 identity_reference=dict(name='zz_duplicate_anchor',sha=anchor['sha'],reason='Same reviewed fact'))
+    prepared=json.loads(server.call_tool(db,'prepare_fact',request));assert prepared.get('ok'),prepared
+    copy=Path(_MEM)/'00_duplicate_copy.md';copy.write_bytes(original)
+    target=Path(_MEM)/'duplicate_pending.md';original_write=rc.atomic_write;published=[]
+    def publication(candidate,*a,**kw):
+        if os.fspath(candidate)==str(target):published.append(candidate)
+        return original_write(candidate,*a,**kw)
+    with patch.object(rc,'atomic_write',side_effect=publication):saved=_j(db,**prepared['save_arguments'])
+    assert saved.get('error',{}).get('code')=='fact_changed',saved
+    assert not published and not target.exists() and path.read_bytes()==original
+    assert not db.execute('SELECT 1 FROM docs WHERE path=?',(str(path),)).fetchone()
+    retained=db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone()
+    assert retained and tuple(retained)==usage,'duplicate exclusion discarded usage'
+    refresh(full=True)
+    retained=db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone()
+    assert retained and tuple(retained)==usage,'duplicate exclusion discarded usage'
+    assert db.execute('SELECT count(*) FROM docs WHERE sha=?',(anchor['sha'],)).fetchone()[0]==1
+    copy.unlink();refresh()
+    assert db.execute('SELECT 1 FROM docs WHERE path=?',(str(path),)).fetchone()
+    retained=db.execute('SELECT * FROM usage WHERE path=?',(str(path),)).fetchone()
+    assert retained and tuple(retained)==usage,'duplicate exclusion discarded usage'
+    saved=_j(db,**prepared['save_arguments']);assert saved.get('result')=='new',saved
+    assert _j(db,**prepared['save_arguments']).get('result')=='noop'
+    # Even an already-deduplicated path loses usage only when its source really disappears.
+    copy.write_bytes(original);refresh();assert not db.execute('SELECT 1 FROM docs WHERE path=?',(str(path),)).fetchone()
+    path.unlink();refresh();assert not db.execute('SELECT 1 FROM usage WHERE path=?',(str(path),)).fetchone()
+    copy.unlink();refresh()
+    print('PASS: earlier identical copy preserves every original usage field across refusal, full rebuild and recovery; actual deletion cleans orphan usage')
+
+
 def exclusive_create_checks(db):
     from unittest.mock import patch
     source = _j(db, name='race_source', description='Source', type='user',
@@ -1176,6 +1298,8 @@ def main() -> int:
     identity_checks(db)
     unreadable_fact_checks(db)
     source_failure_checks(db)
+    staged_index_checks(db)
+    duplicate_usage_checks(db)
     exclusive_create_checks(db)
     print("\n" + "=" * 72)
     if FAILS:
