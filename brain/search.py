@@ -273,7 +273,7 @@ def _hydrate(db: sqlite3.Connection, doc_id: int) -> Optional[sqlite3.Row]:
         return None
     doc_id = resolved[0]
     return db.execute(
-        "SELECT id,name,path,source,kind,title,description,body,mtime,weight,evidence_date,project_id "
+        "SELECT id,name,path,source,kind,title,description,body,mtime,weight,evidence_date,project_id,sha,lifecycle "
         "FROM docs WHERE id=?", (doc_id,)).fetchone()
 
 
@@ -632,6 +632,10 @@ def _present(row: sqlite3.Row, score: float, matched: List[str],
     return {
         "name": row["name"],
         "path": row["path"],
+        "sha": row["sha"],
+        # Carry the identity from the same row as the displayed content. A path
+        # can identify another fact by the time optional usage logging runs.
+        "_feedback_identity": store._feedback_identity(row),
         "source": row["source"],
         "kind": row["kind"],
         "title": row["title"],
@@ -685,13 +689,15 @@ def _record(db: sqlite3.Connection, query: str, extra_terms, results: List[dict]
     """★Record that it was used★ — the only evidence self-improvement has (§health.suggestions)."""
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     with db:
+        if not db.in_transaction:
+            db.execute("BEGIN IMMEDIATE")
         db.execute(
             "INSERT INTO recalls(ts,query,terms,hits,top) VALUES(?,?,?,?,?)",
             (now, query[:500], json.dumps(list(extra_terms), ensure_ascii=False)[:500],
              len(results), json.dumps([r["name"] for r in results[:5]], ensure_ascii=False)))
         for r in results:
-            row = db.execute("SELECT path FROM docs WHERE path=?", (r["path"],)).fetchone()
-            if not row:
+            row = db.execute("SELECT path,name,project_id,lifecycle FROM docs WHERE path=?", (r["path"],)).fetchone()
+            if not row or r.get("_feedback_identity") != store._feedback_identity(row):
                 continue
             db.execute(
                 "INSERT INTO usage(path,hits,last_hit) VALUES(?,1,?) "
