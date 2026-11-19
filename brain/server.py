@@ -22,7 +22,7 @@ from typing import Any, Dict, List
 from brain import health, search, store
 
 SERVER_NAME = "brain"
-SERVER_VERSION = "2.7.57"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
+SERVER_VERSION = "2.7.58"      # JSON defaults and safe writes; orbit-1 fields remain compatible.
 PROTOCOL_FALLBACK = "2024-11-05"
 _PROTOCOL = PROTOCOL_FALLBACK     # what `initialize` negotiated — `brain_capabilities` reports it
 
@@ -451,6 +451,10 @@ def _do_remember(db, args: dict) -> str:
             if os.path.islink(path):
                 return json.dumps(rc.error("invalid_argument", "A memory write cannot replace a symbolic link"))
             cur = rc.current(path)
+            if cur.get("embed") is False:
+                if args.get("embed") is True:
+                    return json.dumps(rc.error("privacy_required", "Preserve embed:false from the existing memory"))
+                args["embed"] = False
             if "project_id" not in args and cur.get("project_id"):
                 args["project_id"] = cur["project_id"]
             from brain import lifecycle
