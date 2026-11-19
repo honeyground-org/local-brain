@@ -124,6 +124,49 @@ def verify_malformed_policy_view():
     print('PASS: malformed scalar/object policy states retain readonly memory/performance views and baseline')
 
 
+def verify_promoted_feedback():
+    import sqlite3
+    from brain import observe, search, server, calibrate
+    for mode,arm,count in [(m,a,n) for m in ('query','terms') for a in ('fusion','linked') for n in (2,4)]:
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;store._init(db)
+        with tempfile.TemporaryDirectory() as td:
+            for name,body in [('preferred','orchid schedule'),('other_a','orchid'),('other_b','orchid'),('other_c','orchid')][:count]:
+                p=Path(td)/(name+'.md');p.write_text('---\nname: '+name+'\n---\n'+body+'\n',encoding='utf-8')
+                store._index_one(db,store.read_doc(str(p),'memory',td))
+            store._rebuild_terms(db);db.commit()
+            def semantic(*args,**kwargs):
+                rows=[search._present(row,1,[],None,[],db) for row in db.execute("SELECT * FROM docs WHERE name!='fixture' ORDER BY name='preferred' DESC,name")]
+                return rows,''
+            args=dict(query='orchid schedule',terms=['schedule'] if mode=='terms' else [],format='json')
+            with patch.dict(os.environ,{'BRAIN_GRAPH_STORE':'sqlite'}),patch.object(observe,'write'),patch.object(calibrate,'threshold',return_value=.0001),patch.object(server,'_words_unsure',return_value=False),patch.object(vectors,'_qcache_get',return_value=[1.,0.]),patch.object(personal.time,'monotonic',return_value=1),patch.object(search,'meaning',side_effect=semantic):
+                evidence(db,12,arm)
+                if mode=='terms':db.execute("UPDATE personal_events SET terms='[\"schedule\"]'");db.commit()
+                assert personal.update(db,mode)['arm']==arm
+                with patch.dict(os.environ,{'BRAIN_PERSONAL_MODE':'auto'}):
+                    before=json.loads(server.call_tool(db,'recall',args))
+                assert before['results'][0]['name']=='preferred',before
+                for _ in range(2):
+                    feedback=json.loads(server.call_tool(db,'brain_feedback',dict(name='preferred',signal='wrong')))
+                assert feedback['weight']==.2,feedback
+                assert personal.certified(db,personal.state(db,mode))
+                with patch.dict(os.environ,{'BRAIN_PERSONAL_MODE':'observe'}):
+                    baseline=json.loads(server.call_tool(db,'recall',args))
+                with patch.dict(os.environ,{'BRAIN_PERSONAL_MODE':'auto'}):
+                    after=json.loads(server.call_tool(db,'recall',args))
+                assert baseline['results'][0]['name']!='preferred',baseline
+                assert after['results'][0]['name']!='preferred',(mode,arm,after)
+                assert (after['results'][-1]['name']=='preferred'),after
+                # The background measurement must score the same downweighted top three.
+                path=str(Path(td)/'preferred.md')
+                personal.record(db,args['query'],path,'feedback-'+mode+'-'+arm,1,terms=args['terms'])
+                personal.settle(db,'feedback-'+mode+'-'+arm,1)
+                personal.update(db,mode)
+                measured=db.execute('SELECT measured,scores FROM personal_events WHERE path=?',(path,)).fetchone()
+                assert measured['measured']==1 and all(v==int(count==2) for v in json.loads(measured['scores']).values()),dict(measured)
+        db.close()
+    print('PASS: certified fusion/linked query/terms MCP and replay honour wrong feedback with an undemoted positive control')
+
+
 def verify_promoted_related_context():
     import sqlite3
     from brain import observe, search, server, calibrate
@@ -798,6 +841,7 @@ def main():
     verify_rejected_observations()
     verify_serving_cache_fallback()
     verify_promoted_related_context()
+    verify_promoted_feedback()
     verify_request_replay_order()
     verify_malformed_policy_view()
     verify_turn_edit_order()

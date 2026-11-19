@@ -281,7 +281,7 @@ def candidates(db, query, base, arm, k, terms=()):
     for ranked in lists:
         for rank, path in enumerate(ranked):
             score[path] = score.get(path, 0.0) + 1.0 / (search.FUSE_K + rank + 1)
-    ranked = sorted(pool, key=lambda p: (-score.get(p, 0.0), order[p]))
+    ranked = sorted(pool, key=lambda p: (-score.get(p, 0.0) * pool[p].get("feedback", {}).get("priority_factor", 1.0), order[p]))
     selected = [pool[p] for p in ranked[:k]]
     direct_paths = {r["path"] for r in selected}
     # Graph context is supplementary, not a ranking vote or part of the direct k.
