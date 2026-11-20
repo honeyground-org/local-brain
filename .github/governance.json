@@ -59,7 +59,7 @@
       "impact": "medium",
       "summary": "the command line, status, timeline, background jobs",
       "paths": ["brain/cli.py", "brain/health.py", "brain/timeline.py", "brain/jobs.py", "brain/scheduler.py",
-                "brain/deadline.py", "brain/indexaudit.py", "brain/i18n.py"],
+                "brain/deadline.py", "brain/indexaudit.py", "brain/indextrim.py", "brain/i18n.py"],
       "owners": []
     },
     "i18n": {

@@ -171,6 +171,15 @@ def _run(env_key: str, name: str, body) -> int:
                 fh.write(json.dumps({"monitor": got}, ensure_ascii=False) + "\n")
         except Exception as exc:                         # noqa: BLE001
             fh.write("monitor: %s\n" % type(exc).__name__)
+        # ★Keep the auto-loaded index under its target★ (§indextrim) — only when the person turned
+        #   `index_trim.auto` on; only what the audit calls safe; never what decides this job's success.
+        try:
+            from brain import indextrim
+            got = indextrim.auto()
+            if "skipped" not in got:
+                fh.write(json.dumps({"index_trim": got}, ensure_ascii=False) + "\n")
+        except Exception as exc:                         # noqa: BLE001
+            fh.write("index_trim: %s\n" % type(exc).__name__)
         fh.write("-- end\n")
         fh.flush()
     finally:
