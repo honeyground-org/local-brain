@@ -66,11 +66,6 @@ EXCERPT_MIN = 160           # a hit shorter than this takes the segments after i
 FORMAT = 2                  # bump when the generated documents change shape (forces a rebuild)
 MARKER = "generated: team-ledger"
 
-_AGENT = re.compile(r"\A\s*<agent-message\b([^>]*)>(.*?)(?:</agent-message>|\Z)", re.S)
-_FROM = re.compile(r"""\bfrom\s*=\s*["']([^"']*)["']""")
-_TASK = re.compile(r"\A\s*<task-notification>(.*?)(?:</task-notification>(.*))?\Z", re.S)
-_AGENT_SUMMARY = re.compile(r'Agent\s+"([^"]+)"')
-_TAGS = re.compile(r"<[^>\n]{1,80}>")
 _ID = re.compile(r"(?<![A-Za-z0-9])([A-Z]{1,3}\d{1,5})(?![A-Za-z0-9])")
 _SEGMENT = re.compile(r"(?:\n+|(?=[①-⑳])|(?<=[.!?])\s+)")
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -78,33 +73,21 @@ _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 # ── reports ─────────────────────────────────────────────────────────────────────────────────────
 
-def _tag(text: str, name: str) -> str:
-    m = re.search(r"<%s>(.*?)</%s>" % (name, name), text, re.S)
-    return m.group(1).strip() if m else ""
-
-
-def report_of(prompt: str) -> Optional[dict]:
+def report_of(prompt: str, host=None) -> Optional[dict]:
     """A teammate's message or a background agent's result, or None for anything a person typed.
 
-    Only a prompt that ★starts with★ the host's wrapper counts — a person quoting one mid-sentence is
-    still asking something."""
+    ★The wrapper is the host's fact★ (§hosts.Host.report_of): each host delivers another agent's words in its
+    own envelope, so the host adapter that knows the envelope decides. A host whose envelope was never
+    measured answers None, and its prompts are searched exactly as before."""
     if not prompt or "<" not in prompt[:64]:
         return None
-    m = _AGENT.match(prompt)
-    if m:
-        f = _FROM.search(m.group(1))
-        return {"kind": "agent-message", "from": (f.group(1).strip() if f else "") or "agent",
-                "status": "", "text": m.group(2).strip()}
-    m = _TASK.match(prompt)
-    if m:
-        inner, after = m.group(1), (m.group(2) or "")
-        summary = _tag(inner, "summary")
-        named = _AGENT_SUMMARY.search(summary)
-        text = _tag(inner, "result") or _TAGS.sub(" ", after).strip() or summary
-        return {"kind": "task-notification",
-                "from": (named.group(1) if named else summary[:60]).strip() or "task",
-                "status": _tag(inner, "status"), "text": text.strip()}
-    return None
+    if host is None:
+        from brain import hosts
+        host = hosts.active()
+    try:
+        return host.report_of(prompt)
+    except Exception:                                    # noqa: BLE001
+        return None
 
 
 def settings(cfg: Optional[dict] = None) -> dict:

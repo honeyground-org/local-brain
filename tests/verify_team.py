@@ -42,7 +42,9 @@ os.environ["BRAIN_CONFIG"] = CONFIG
 for d in (HOME, APP, NOTES):
     os.makedirs(d, exist_ok=True)
 
-from brain import hook, store, team  # noqa: E402
+from brain import hook, hosts, store, team  # noqa: E402
+
+hosts.pin("claude-code")       # the envelope below is Claude Code's (§hosts.ClaudeCode.report_of)
 
 FAILS: list = []
 
@@ -109,6 +111,10 @@ try:
     check("a person quoting a wrapper mid-sentence is not a report",
           team.report_of('what does <agent-message from="x"> mean here?') is None)
     check("pasted text is not a report", team.report_of("<pasted>some log</pasted> what is this") is None)
+    envelope = '<agent-message from="fixer-17">\n① D7 chips done.\n</agent-message>'
+    check("a host that never measured an envelope says no report (searched as before)",
+          team.report_of(envelope, host=hosts.Host()) is None
+          and team.report_of(envelope, host=[h for h in hosts.all_hosts() if h.name == "codex"][0]) is None)
 
     print()
     print("② the hook records a report and attaches nothing")
