@@ -72,6 +72,10 @@ WATCHDOG_MARGIN_SEC = 1.0
 
 
 
+# The host's payload for this prompt (§_read_prompt) — the session and working folder a report came from.
+_PAYLOAD: dict = {}
+
+
 def _read_prompt() -> str:
     try:
         raw = sys.stdin.read()
@@ -85,6 +89,8 @@ def _read_prompt() -> str:
         return raw.strip()
     if not isinstance(data, dict):
         return ""
+    _PAYLOAD.clear()
+    _PAYLOAD.update(data)
     # Field names can differ between versions — known names are checked in order.
     for key in ("prompt", "user_prompt", "userPrompt", "message", "text", "display"):
         v = data.get(key)
@@ -216,8 +222,42 @@ def lexical(db, prompt: str) -> list:
     """
     from brain import calibrate, search
     min_score = calibrate.threshold(db, measure=False)
-    rows = search.recall(db, prompt[:MAX_PROMPT_CHARS], k=MAX_ITEMS + 2, log=False, bridge_floor=min_score)
+    rows = search.recall(db, prompt[:MAX_PROMPT_CHARS], k=MAX_ITEMS + 2, log=False, bridge_floor=min_score,
+                         sources=_hook_sources())
     return select(rows, min_score)
+
+
+def _report(prompt: str):
+    """A teammate's message or a background agent's result (§team.report_of), or None."""
+    try:
+        from brain import team
+        return team.report_of(prompt)
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
+def _capture(report: dict) -> None:
+    """Record a report (§team.capture — off unless configured). A failure here never blocks the prompt."""
+    try:
+        from brain import team
+        team.capture(report, session=str(_PAYLOAD.get("session_id") or ""), cwd=str(_PAYLOAD.get("cwd") or ""))
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
+def _hook_sources():
+    """The sources the hook may attach from on its own — every source, unless the generated team documents
+    are configured but not turned on for the hook (§team.hook_enabled). None keeps recall unfiltered, exactly
+    as before, so a person without a team source sees no change at all."""
+    try:
+        from brain import store, team
+        cfg = store.load_config(tolerant=True)
+        names = [s.get("name") for s in cfg.get("sources", []) or [] if s.get("name")]
+        if "team" not in names or team.hook_enabled(cfg):
+            return None
+        return [n for n in names if n != "team"]
+    except Exception:                                    # noqa: BLE001
+        return None
 
 
 def fallback(db, prompt: str, strict: bool = False, cache: bool = True,
@@ -326,6 +366,16 @@ def main() -> int:
     # rate computed over them says nothing about the prompts that never reached a search.
     if not prompt:
         return _excluded("empty", t0)
+    # ★A teammate's report is not the person's question★ (2026-11-25 · §brain/team.py). A lead session gets
+    # its teammates' messages and its background agents' results as prompts; searching with them attached
+    # unrelated memories (one session: 11 of 18 attachments unrelated, 9 of those from reports — a long report
+    # matches dozens of ordinary words). So a report is recorded, never searched with.
+    report = _report(prompt)
+    if report is not None:
+        _capture(report)
+        _excluded("report", t0)
+        _after()
+        return 0
     if prompt[:1] in hosts.active().command_prefixes():
         return _excluded("command", t0)
     if os.environ.get("BRAIN_HOOK_DISABLED"):
@@ -433,6 +483,9 @@ def _answer(prompt: str, state: dict):
         # the judge is asked only if it can answer before the watchdog's wall (§judgegate)
         keep = fallback(db, prompt, observe=state["judge"],
                         deadline=state["t0"] + HOOK_TIMEOUT_SEC - WATCHDOG_MARGIN_SEC)
+        allowed = _hook_sources()
+        if allowed is not None:
+            keep = [r for r in keep if r.get("source") in allowed]
         state["fb"] = state["t"]["fallback"] = round(time.time() - t, 3)
         state["fb_hit"] = bool(keep)
 

@@ -20,6 +20,7 @@
 /brain/i18n.py @wangjacsi
 /brain/jobs.py @wangjacsi
 /brain/tail.py @wangjacsi
+/brain/team.py @wangjacsi
 /brain/guard.py @wangjacsi
 /brain/hosts.py @wangjacsi
 /brain/locales/ @wangjacsi
