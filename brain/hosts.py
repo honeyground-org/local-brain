@@ -289,6 +289,13 @@ class ClaudeCode(Host):
     # `<agent-message from="name">…</agent-message>`, a background agent's result as `<task-notification>…`
     # with <status>, <summary> and <result> inside. Only a prompt that ★starts with★ the envelope counts — a
     # person quoting one mid-sentence is still asking something.
+    # A message from another Claude Code session arrives as the line "Another Claude session sent a message:" and
+    # then `<teammate-message teammate_id="name" …>…</teammate-message>`, its body a JSON object ({"type", "from",
+    # "result" …}) or plain text, and a note after it. Measured the same 7 days: 237 such turns, none recognised by
+    # the two envelopes above, and 169 [brain] attachments searched with them.
+    _PEER = re.compile(r"\A\s*Another Claude session sent a message:\s*<teammate-message\b([^>]*)>(.*?)"
+                       r"(?:</teammate-message>|\Z)", re.S)
+    _TEAMMATE = re.compile(r"""\bteammate_id\s*=\s*["']([^"']*)["']""")
     _AGENT = re.compile(r"\A\s*<agent-message\b([^>]*)>(.*?)(?:</agent-message>|\Z)", re.S)
     _FROM = re.compile(r"""\bfrom\s*=\s*["']([^"']*)["']""")
     _TASK = re.compile(r"\A\s*<task-notification>(.*?)(?:</task-notification>(.*))?\Z", re.S)
@@ -315,6 +322,20 @@ class ClaudeCode(Host):
             return {"kind": "task-notification",
                     "from": (named.group(1) if named else summary[:60]).strip() or "task",
                     "status": self._tag(inner, "status"), "text": text.strip()}
+        m = self._PEER.match(prompt or "")
+        if m:
+            f = self._TEAMMATE.search(m.group(1))
+            body, status = m.group(2).strip(), ""
+            try:
+                data = json.loads(body)
+            except ValueError:
+                data = None
+            if isinstance(data, dict):
+                status = str(data.get("type") or "")
+                body = next((str(data[k]) for k in ("result", "message", "text", "summary")
+                             if isinstance(data.get(k), str) and data[k].strip()), body)
+            return {"kind": "teammate-message", "from": (f.group(1).strip() if f else "") or "peer",
+                    "status": status, "text": body.strip()}
         return None
 
     def autoloaded_index(self, memory_dir: str) -> str:
