@@ -62,7 +62,8 @@ SENDER_LINE_CHARS = 600     # one report inside its sender's document
 ITEM_REPORTS = 5            # newest reports kept per item
 SENDER_REPORTS = 10         # newest reports kept per sender
 EVENT_MONTHS = 2            # months of the event log read back
-FORMAT = 1                  # bump when the generated documents change shape (forces a rebuild)
+EXCERPT_MIN = 160           # a hit shorter than this takes the segments after it (a heading alone says nothing)
+FORMAT = 2                  # bump when the generated documents change shape (forces a rebuild)
 MARKER = "generated: team-ledger"
 
 _AGENT = re.compile(r"\A\s*<agent-message\b([^>]*)>(.*?)(?:</agent-message>|\Z)", re.S)
@@ -211,11 +212,29 @@ def _text(v, n: int) -> str:
 
 
 def _excerpt(text: str, token: str) -> str:
-    """The segments of a report that mention one id — its core for that item, not the whole report."""
+    """The segments of a report that mention one id — its core for that item, not the whole report.
+
+    ★A hit that is only a heading takes the segments after it★ (2026-11-25): a report that opens with
+    "fixer-17 D297 ①② done" is cut before each circled number, and the hit alone was "fixer-17 D297" — the
+    item got the name of the report and none of what it said. So a short hit runs on into the following
+    segments until it says something, and stops before a segment that names another id (that one belongs to
+    another item's excerpt)."""
     parts = [p.strip() for p in _SEGMENT.split(text or "") if p and p.strip()]
     pat = re.compile(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(token))
-    hit = [p for p in parts if pat.search(p)]
-    return _clip(" · ".join(hit) if hit else text, EXCERPT_CHARS)
+    picked, used = [], set()
+    for i, p in enumerate(parts):
+        if i in used or not pat.search(p):
+            continue
+        seg, j = [p], i + 1
+        used.add(i)
+        while sum(len(s) + 1 for s in seg) < EXCERPT_MIN and j < len(parts):
+            if any(t != token for t in _ids_in(parts[j])):
+                break
+            seg.append(parts[j])
+            used.add(j)
+            j += 1
+        picked.append(" ".join(seg))
+    return _clip(" · ".join(picked) if picked else text, EXCERPT_CHARS)
 
 
 def _slug(name: str) -> str:
@@ -345,11 +364,34 @@ def _ledgers(cfg: dict) -> List[dict]:
     return [l for l in (settings(cfg).get("ledgers") or []) if isinstance(l, dict) and l.get("name")]
 
 
-def _group_of(ev: dict, ledgers: List[dict]) -> str:
+def _ledger_of(ev: dict, ledgers: List[dict]) -> str:
     for led in ledgers:
         if _under(ev.get("cwd", ""), led.get("folders") or []):
             return _slug(str(led.get("name")))
-    return _slug(os.path.basename(os.path.normpath(ev.get("cwd") or "")) or "other")
+    return ""
+
+
+def _groups(events: List[dict], ledgers: List[dict]) -> Dict[str, List[dict]]:
+    """Which ledger each report belongs to.
+
+    A report's own folder decides first. ★A report from a folder outside every ledger takes the ledger its
+    session was seen under most★ (2026-11-25): a lead session's shell moves between folders, and the host
+    reports the folder it is in at that moment — measured on one lead session, 4 of its 12 reports arrived
+    from other folders and missed their items. A session never seen under a ledger keeps its own folder."""
+    own = [_ledger_of(ev, ledgers) for ev in events]
+    seen: Dict[str, Dict[str, int]] = {}
+    for ev, g in zip(events, own):
+        if g and ev.get("session"):
+            counts = seen.setdefault(ev["session"], {})
+            counts[g] = counts.get(g, 0) + 1
+    out: Dict[str, List[dict]] = {}
+    for ev, g in zip(events, own):
+        if not g:
+            counts = seen.get(ev.get("session") or "")
+            g = (max(counts, key=lambda k: counts[k]) if counts else
+                 _slug(os.path.basename(os.path.normpath(ev.get("cwd") or "")) or "other"))
+        out.setdefault(g, []).append(ev)
+    return out
 
 
 def team_dir(cfg: dict) -> str:
@@ -377,9 +419,7 @@ def _fingerprint(ledgers: List[dict]) -> str:
 def build(cfg: dict) -> Dict[str, str]:
     """Every document this configuration produces, as {relative path: text}. Reads, never writes."""
     ledgers = _ledgers(cfg)
-    groups: Dict[str, List[dict]] = {}
-    for ev in load_events():
-        groups.setdefault(_group_of(ev, ledgers), []).append(ev)
+    groups = _groups(load_events(), ledgers)
     docs: Dict[str, str] = {}
     for led in ledgers:
         name = _slug(str(led["name"]))

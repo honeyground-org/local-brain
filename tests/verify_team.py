@@ -9,7 +9,8 @@ What this holds down:
      masked) only when capture is turned on
   ③ a ledger becomes one bounded document per item — status and next step first, its aliases, the drafts
      that name it and the segment of each report that mentions it — plus a drafts timeline and one document
-     per sender; the ledger file itself is never written
+     per sender; the ledger file itself is never written. A report from another folder of a session seen under
+     a ledger still belongs to it, and a hit that is only a heading takes the lines after it
   ④ only changed files are written, only generated files are removed, and an unchanged input costs nothing
   ⑤ the documents are found by recall, and the hook attaches them on its own only when `team.hook` is on;
      without a `team` source the hook calls recall exactly as before
@@ -143,12 +144,19 @@ try:
     run_hook('<task-notification>\n<status>completed</status>\n<summary>Agent "Check W1" finished</summary>\n'
              '<result>W1 scheduler fixed; D9 evidence green.</result>\n</task-notification>')
     check("a background agent's result is recorded too", len(team.load_events()) == 2)
+    # a lead session's shell moves between folders: the host reports the folder it is in at that moment
+    team.capture({"kind": "agent-message", "from": "fixer-18",
+                  "text": "fixer-18 D8\n① done\n② the growth row now shows the next checkup date, tested on two children."},
+                 session="s-1", cwd=os.path.join(_TMP, "elsewhere"))
+    team.capture({"kind": "agent-message", "from": "stranger", "text": "W1 is not mine"},
+                 session="s-2", cwd=os.path.join(_TMP, "elsewhere"))
+    check("reports from another folder are recorded as they came", len(team.load_events()) == 4)
 
     print()
     print("③ ledger documents")
     stats = team.materialize()
     w1 = open(os.path.join(DOCS, "app", "W1.md"), encoding="utf-8").read()
-    check("one document per item, plus drafts and senders", stats.get("documents") == 3 + 1 + 2, json.dumps(stats))
+    check("one document per item, plus drafts and senders", stats.get("documents") == 3 + 1 + 3 + 1, json.dumps(stats))
     check("status and next step come first", w1.index("- status: waiting") < w1.index("## "))
     check("aliases from the configured field", "also known as: D7, D9" in w1)
     check("the draft that names an alias is attached", "11-25 10:57 D7 feeding interval alert" in w1)
@@ -157,6 +165,11 @@ try:
     check("a background agent's result reaches the item it names", "W1 scheduler fixed" in w1)
     w2 = open(os.path.join(DOCS, "app", "W2.md"), encoding="utf-8").read()
     check("the other segment goes to the other item", "② W2 row needs a second look." in w2)
+    check("a report from another folder of the same session reaches its ledger's item",
+          "fixer-18" in w2, w2[w2.find("## recent"):][:300])
+    check("a hit that is only a heading takes the lines after it", "the next checkup date" in w2)
+    check("a session never seen under a ledger keeps its own folder",
+          os.path.exists(os.path.join(DOCS, "elsewhere", "from", "stranger.md")) and "W1 is not mine" not in w1)
     w3 = open(os.path.join(DOCS, "app", "W3.md"), encoding="utf-8").read()
     body = w3.split("\n---\n", 1)[1]
     check("a long item stays bounded", len(body) <= team.DOC_CHARS + 1, "%d chars" % len(body))
