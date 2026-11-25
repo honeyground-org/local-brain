@@ -150,6 +150,15 @@ class Host:
         `/` is the one both measured hosts share (Claude Code `/clear`, Codex `/fast off`)."""
         return ("/",)
 
+    def report_of(self, prompt: str) -> Optional[dict]:
+        """A prompt this host delivered ★on behalf of another agent★ — a teammate's message or a background
+        agent's result — as {kind, from, status, text}; None for what a person typed.
+
+        Such a prompt is not the person's question (§team): the recall hook records it instead of searching
+        with it. ⛔ Only a host whose envelope was measured may answer anything but None — a guess here would
+        silence a person's real question."""
+        return None
+
     def autoloaded_index(self, memory_dir: str) -> str:
         """The index file this host puts in the model's context ★by itself, every session★, for this
         memory folder — or "" when it loads none. The agent-alone baseline and the search's "already in
@@ -275,6 +284,38 @@ class ClaudeCode(Host):
     def command_prefixes(self) -> tuple:
         # its input syntax: `/` commands · `!` shell mode · `#` add to memory · `@` mention
         return ("/", "!", "@", "#")
+
+    # Measured 2026-11-25 on this machine's transcripts (7 days, 125 sessions): a teammate's message arrives as
+    # `<agent-message from="name">…</agent-message>`, a background agent's result as `<task-notification>…`
+    # with <status>, <summary> and <result> inside. Only a prompt that ★starts with★ the envelope counts — a
+    # person quoting one mid-sentence is still asking something.
+    _AGENT = re.compile(r"\A\s*<agent-message\b([^>]*)>(.*?)(?:</agent-message>|\Z)", re.S)
+    _FROM = re.compile(r"""\bfrom\s*=\s*["']([^"']*)["']""")
+    _TASK = re.compile(r"\A\s*<task-notification>(.*?)(?:</task-notification>(.*))?\Z", re.S)
+    _AGENT_SUMMARY = re.compile(r'Agent\s+"([^"]+)"')
+    _TAGS = re.compile(r"<[^>\n]{1,80}>")
+
+    @staticmethod
+    def _tag(text: str, name: str) -> str:
+        m = re.search(r"<%s>(.*?)</%s>" % (name, name), text, re.S)
+        return m.group(1).strip() if m else ""
+
+    def report_of(self, prompt: str) -> Optional[dict]:
+        m = self._AGENT.match(prompt or "")
+        if m:
+            f = self._FROM.search(m.group(1))
+            return {"kind": "agent-message", "from": (f.group(1).strip() if f else "") or "agent",
+                    "status": "", "text": m.group(2).strip()}
+        m = self._TASK.match(prompt or "")
+        if m:
+            inner, after = m.group(1), (m.group(2) or "")
+            summary = self._tag(inner, "summary")
+            named = self._AGENT_SUMMARY.search(summary)
+            text = self._tag(inner, "result") or self._TAGS.sub(" ", after).strip() or summary
+            return {"kind": "task-notification",
+                    "from": (named.group(1) if named else summary[:60]).strip() or "task",
+                    "status": self._tag(inner, "status"), "text": text.strip()}
+        return None
 
     def autoloaded_index(self, memory_dir: str) -> str:
         # Claude Code's own memory: `<root>/projects/<project>/memory/MEMORY.md` is loaded each session.

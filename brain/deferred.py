@@ -289,6 +289,13 @@ def run(db) -> dict:
     start = pending(db)
     todo = start.get("work") or []
     out = {"work": todo}
+    # ★A team's ledger and reports become documents before the index looks★ (§team) — cheap when nothing
+    # changed (a fingerprint of the inputs), and off unless a source named `team` is configured.
+    try:
+        from brain import team
+        out["team"] = team.materialize()
+    except Exception as exc:                             # noqa: BLE001
+        out["team"] = {"error": type(exc).__name__}
     stats = store.reindex(db, recalibrate=False, queue_embedding=False)
     out["changed"] = sum(int(stats.get(k) or 0) for k in ("added", "updated", "removed"))
     ok = not any(v == "error" for v in (stats.get("stores") or {}).values())
