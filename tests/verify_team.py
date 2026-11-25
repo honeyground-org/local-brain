@@ -206,7 +206,9 @@ try:
     db = store.connect()
     store.reindex(db)
     from brain import search
-    names = [r["name"] for r in search.recall(db, "feeding interval alert D7", k=5, log=False)]
+    # A document's name carries its path under the source with the OS separator (§store.doc_name), so
+    # Windows names it team:app\W1 — what is checked here is that recall reaches W1, not the separator.
+    names = [r["name"].replace("\\", "/") for r in search.recall(db, "feeding interval alert D7", k=5, log=False)]
     check("recall finds the item through its alias and draft", "team:app/W1" in names, str(names))
     check("hook off: the hook may not attach team documents", hook._hook_sources() == ["memory"])
     rows = search.recall(db, "feeding interval alert D7", k=5, log=False, sources=hook._hook_sources())
