@@ -456,7 +456,12 @@ def _needles(led: dict) -> List[str]:
         home = _project_of(os.path.dirname(p))
         if home:
             out.append(os.path.join(os.path.basename(home), os.path.relpath(p, home)))
-    return list(dict.fromkeys(x.replace(os.sep, "/") for x in out if x))
+    # A log line is JSON: a path is there as the system writes it (escaped, so `\\` doubles), and a tool or a
+    # person may also write it with `/` (Windows accepts both).
+    forms: List[str] = []
+    for x in out:
+        forms += [x, x.replace("\\", "/"), json.dumps(x)[1:-1]]
+    return list(dict.fromkeys(f for f in forms if f))
 
 
 def _folders_path(cfg: dict) -> str:
