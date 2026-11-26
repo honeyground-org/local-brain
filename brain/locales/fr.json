@@ -891,5 +891,9 @@
  "it.reason.applied": "✅ Écrit.",
  "it.dry_run": "Rien d'écrit pour l'instant — lancez `brain index-trim --apply` pour l'écrire (une sauvegarde est gardée).",
  "it.backup": "Sauvegarde du fichier précédent : {path}",
- "ia.size.trim": "\n   `brain index-trim` raccourcit ou retire seulement les lignes que l'audit juge sûres (config `index_trim.auto` le fait chaque jour)."
+ "ia.size.trim": "\n   `brain index-trim` raccourcit ou retire seulement les lignes que l'audit juge sûres (config `index_trim.auto` le fait chaque jour).",
+ "hook.reference_header": "[brain · référence] Trouvé dans le registre de travail d'une équipe, à part des souvenirs ci-dessus. À titre de référence seulement — le registre et le jugement de la personne qui coordonne décident ; lis le registre avant d'agir.",
+ "hook.reference_entry": "\n· {name}  [{why}]\n  {desc}\n  {excerpt}",
+ "hook.reference_named": "{id} nommé",
+ "hook.reference_scored": "score {score} ≥ seuil de l'index du registre {threshold}"
 }

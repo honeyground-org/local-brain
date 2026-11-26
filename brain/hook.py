@@ -245,6 +245,38 @@ def _capture(report: dict) -> None:
         pass
 
 
+def _reference(prompt: str, state: dict) -> list:
+    """What the reference lane offers (§team.reference) — [] unless `team.reference` is on, and [] once the
+    host's wall is near: the answer is already decided, and the lane must never be the reason it is lost."""
+    t = time.time()
+    rows = []
+    if t - state["t0"] < HOOK_TIMEOUT_SEC - WATCHDOG_MARGIN_SEC - 0.5:
+        try:
+            from brain import team
+            rows = team.reference(prompt[:MAX_PROMPT_CHARS], cwd=str(_PAYLOAD.get("cwd") or ""))
+        except Exception:                                # noqa: BLE001
+            rows = []
+    state["t"]["reference"] = round(time.time() - t, 3)
+    state["reference"] = len(rows)
+    return rows
+
+
+def _format_reference(rows) -> str:
+    """The reference block — a header that says it is not the answer, then one entry per document."""
+    if not rows:
+        return ""
+    lines = [i18n.t("hook.reference_header")]
+    for r in rows:
+        if r.get("named"):
+            why = i18n.t("hook.reference_named", id=r["named"].upper())
+        else:
+            why = i18n.t("hook.reference_scored", score="%.1f" % (r.get("score") or 0.0),
+                         threshold="%.1f" % (r.get("threshold") or 0.0))
+        lines.append(i18n.t("hook.reference_entry", name=r["name"], why=why,
+                            desc=r.get("description") or r.get("title") or "", excerpt=r.get("excerpt") or ""))
+    return "\n".join(lines)
+
+
 def _hook_sources():
     """The sources the hook may attach from on its own — every source, unless the generated team documents
     are configured but not turned on for the hook (§team.hook_enabled). None keeps recall unfiltered, exactly
@@ -416,10 +448,15 @@ def main() -> int:
         wd.cancel()
     if not mine:
         return 0                                         # the watchdog is answering, then exits
+    # ★The reference lane comes after the answer, never inside it★ (2026-11-25 · §brain/lane.py) — a team's
+    # ledger is offered in a block of its own, so the answer above is exactly what it would have been.
+    block = _format_reference(_reference(prompt, state))
     if keep:
-        _emit(_format(keep))
+        _emit(_format(keep) + (("\n\n" + block) if block else ""))
         state["hit"] = True
         state["shown"] = list(keep)
+    elif block:
+        _emit(block)
     _record(state)
     _after()
     return 0
@@ -583,6 +620,7 @@ def _record(state: dict) -> None:
             "t": dict(state.get("t") or {}), "reindex": state.get("reindex"),
             "attached": _sources(state.get("shown")),
             "judge": _judge_record(state),
+            "reference": int(state.get("reference") or 0),
         }, to=_timing_path())
     except Exception:                                    # noqa: BLE001
         pass                                             # a record must never cost the answer

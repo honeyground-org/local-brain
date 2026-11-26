@@ -63,7 +63,7 @@ import os
 import shutil
 import re
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 
 def utf8_stdio() -> None:
@@ -130,6 +130,13 @@ class Host:
         """★real user turns★, most recent first. ⛔ empty list if none — never invents any.
         `recent_files` bounds how many of the newest logs are read (None = all) — the calibration sample
         keeps the default; a report that wants every turn passes None."""
+        return []
+
+    def sessions(self, needles: Sequence[str] = (), recent_files: Optional[int] = 300) -> List[Tuple[str, bool]]:
+        """(folder, named) for each recent session, newest first: the folder the session worked in most, and
+        whether its log names any of `needles` (paths, say). A brain learns where a piece of work happens from
+        this (§team: a ledger's folders) the way an agent learns a clone — by the work done in it.
+        ⛔ Empty when this host's log does not say where a session worked — a folder must not be guessed."""
         return []
 
     def memory_dirs(self) -> List[str]:
@@ -507,6 +514,40 @@ class ClaudeCode(Host):
             if len(out) >= limit * 3:
                 break
         return out[-limit:] if out else []
+
+    _CWD = re.compile(r'"cwd":"((?:[^"\\]|\\.)*)"')
+
+    def sessions(self, needles: Sequence[str] = (), recent_files: Optional[int] = 300) -> List[Tuple[str, bool]]:
+        """Every line of a session log carries the session's `cwd` (read on this machine's logs, 2026-11-26);
+        the folder named on most lines is where it worked. The needles are matched on the raw lines, so a path a
+        tool read, wrote or printed counts the same as one the person typed."""
+        import glob
+        base = os.path.join(self.root(), "projects")
+        files = sorted(glob.glob(os.path.join(base, "*", "*.jsonl")), key=lambda p: -os.path.getmtime(p))
+        files = files[:recent_files] if recent_files else files
+        needles = [n for n in needles or () if n]
+        out: List[Tuple[str, bool]] = []
+        for path in files:
+            seen: Dict[str, int] = {}
+            named = False
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        m = self._CWD.search(line)
+                        if m:
+                            try:
+                                cwd = json.loads('"%s"' % m.group(1))
+                            except ValueError:
+                                cwd = ""
+                            if cwd:
+                                seen[cwd] = seen.get(cwd, 0) + 1
+                        if not named and needles and any(n in line for n in needles):
+                            named = True
+            except OSError:
+                continue
+            if seen:
+                out.append((max(seen, key=lambda k: seen[k]), named))
+        return out
 
 
 class Codex(Host):

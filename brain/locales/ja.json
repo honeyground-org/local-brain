@@ -891,5 +891,9 @@
  "it.reason.applied": "✅ 書いた。",
  "it.dry_run": "まだ書いていない — 書くには `brain index-trim --apply`(バックアップを残す)。",
  "it.backup": "以前のファイルのバックアップ: {path}",
- "ia.size.trim": "\n   `brain index-trim` は監査が安全とした行だけを短くするか外す(config `index_trim.auto` なら毎日行う)。"
+ "ia.size.trim": "\n   `brain index-trim` は監査が安全とした行だけを短くするか外す(config `index_trim.auto` なら毎日行う)。",
+ "hook.reference_header": "[brain · 参考] チームの作業台帳から見つけた。上の記憶とは別に探したもの。参考にとどめよ — 正本は台帳と統括の判断だ。これを根拠に動く前に台帳を直接読め。",
+ "hook.reference_entry": "\n· {name}  [{why}]\n  {desc}\n  {excerpt}",
+ "hook.reference_named": "{id} が呼ばれた",
+ "hook.reference_scored": "スコア {score} ≥ 台帳索引のしきい値 {threshold}"
 }

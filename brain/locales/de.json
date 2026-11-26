@@ -891,5 +891,9 @@
  "it.reason.applied": "✅ Geschrieben.",
  "it.dry_run": "Noch nichts geschrieben — `brain index-trim --apply` schreibt es (eine Sicherung bleibt).",
  "it.backup": "Sicherung der vorherigen Datei: {path}",
- "ia.size.trim": "\n   `brain index-trim` kürzt oder entfernt nur Zeilen, die das Audit sicher nennt (Config `index_trim.auto` tut es täglich)."
+ "ia.size.trim": "\n   `brain index-trim` kürzt oder entfernt nur Zeilen, die das Audit sicher nennt (Config `index_trim.auto` tut es täglich).",
+ "hook.reference_header": "[brain · Referenz] Im Arbeitsbuch eines Teams gefunden, getrennt von den Erinnerungen oben. Nur zur Orientierung — maßgeblich sind das Arbeitsbuch und das Urteil der Leitung; lies das Arbeitsbuch, bevor du danach handelst.",
+ "hook.reference_entry": "\n· {name}  [{why}]\n  {desc}\n  {excerpt}",
+ "hook.reference_named": "{id} genannt",
+ "hook.reference_scored": "Wert {score} ≥ Schwelle des Arbeitsbuch-Index {threshold}"
 }
