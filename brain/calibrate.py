@@ -535,7 +535,11 @@ def measure(db: sqlite3.Connection) -> dict:
 #                    message:") is a report too: the hook records it instead of searching with it, and calibration
 #                    no longer counts it among the person's real prompts. Bumped because `hosts` and `calibrate`
 #                    are ruler modules.
-CODE_GENERATION = 112
+#   113 (2026-11-26) the reference lane (§lane, §team.reference): after the answer is final, the hook may add a
+#                    block from a team's work ledger, kept apart and marked for reference only; `hosts.sessions`
+#                    tells where each recent session worked, so a ledger learns which projects its work is in.
+#                    The answer itself is unchanged; bumped because `hook` and `hosts` are ruler modules.
+CODE_GENERATION = 113
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

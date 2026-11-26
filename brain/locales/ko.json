@@ -891,5 +891,9 @@
  "it.reason.applied": "✅ 썼다.",
  "it.dry_run": "아직 쓰지 않았다 — 쓰려면 `brain index-trim --apply` (백업을 남긴다).",
  "it.backup": "이전 파일 백업: {path}",
- "ia.size.trim": "\n   `brain index-trim` 은 감사가 안전하다고 한 줄만 줄이거나 뺀다(config `index_trim.auto` 면 매일 한다)."
+ "ia.size.trim": "\n   `brain index-trim` 은 감사가 안전하다고 한 줄만 줄이거나 뺀다(config `index_trim.auto` 면 매일 한다).",
+ "hook.reference_header": "[brain · 참고용] 팀 작업 장부에서 찾았다. 위 기억과는 따로 찾은 것이다. 참고만 하라 — 정본은 장부와 총괄의 판단이다. 이걸 근거로 움직이기 전에 장부를 직접 읽어라.",
+ "hook.reference_entry": "\n· {name}  [{why}]\n  {desc}\n  {excerpt}",
+ "hook.reference_named": "{id} 를 불렀다",
+ "hook.reference_scored": "점수 {score} ≥ 장부 색인 문턱 {threshold}"
 }

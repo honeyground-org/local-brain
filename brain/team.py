@@ -39,10 +39,11 @@ source named `team`, so the indexer, recall and the hook need nothing new.
       "capture": true,
       "hook": false,
       "ledgers": [{"name": "app", "items": "/path/plan/work.json", "drafts": "/path/drafts.json",
-                   "folders": ["/path/app"], "alias_fields": ["links.tracker"]}]
+                   "alias_fields": ["links.tracker"]}]
     }
 
-`folders` decides which reports belong to a ledger (the working folder of the session that received them).
+Where a ledger answers — and which reports belong to it — is the project its `items` file lives in plus the
+projects its work is learned in from the host's session logs (§learn); `folders` is optional and only adds to them.
 `alias_fields` name item fields whose values carry other ids for the same item (`"task:D7"` → `D7`).
 Run by hand: `python3 -m brain.team [--force]`.
 """
@@ -105,6 +106,17 @@ def settings(cfg: Optional[dict] = None) -> dict:
 def hook_enabled(cfg: Optional[dict] = None) -> bool:
     """May the hook attach generated documents on its own (recall finds them regardless)."""
     return bool(settings(cfg).get("hook"))
+
+
+def reference_enabled(cfg: Optional[dict] = None) -> bool:
+    """Is the reference lane on — the documents searched in an index of their own and offered after the
+    hook's answer, never ranked with memories (§brain/lane.py)."""
+    return bool(settings(cfg).get("reference"))
+
+
+def lane_path() -> str:
+    from brain import store
+    return os.path.join(store.brain_home(), "team", "lane.db")
 
 
 def events_dir() -> str:
@@ -333,6 +345,14 @@ def _sender_doc(sender: str, rows: List[dict]) -> str:
     return _front("team", desc) + _bounded(head, [("newest first", lines)]) + "\n"
 
 
+def _above(path: str, folders: List[str]) -> bool:
+    """Is `path` a folder that holds one of `folders` — a parent workspace."""
+    if not path:
+        return False
+    p = os.path.normpath(os.path.expanduser(path)).rstrip(os.sep) + os.sep
+    return any(os.path.normpath(os.path.expanduser(f)).startswith(p) for f in folders or [])
+
+
 def _under(path: str, folders: List[str]) -> bool:
     if not path:
         return False
@@ -378,11 +398,202 @@ def _groups(events: List[dict], ledgers: List[dict]) -> Dict[str, List[dict]]:
     return out
 
 
+
+# ── where a ledger's work happens ──────────────────────────────────────────────────────────────────
+
+LEARN_FILES = 300           # newest session logs read: 3.0 s for 298 here (2026-11-26)
+LEARN_MIN = 3               # sessions in one folder that named the ledger, at least
+LEARN_SHARE = 0.5           # ... and at least this share of that folder's sessions
+LEARN_HOURS = 1             # how long what was learned is kept before the logs are read again (a new clone is known within the hour)
+FOLDERS_FILE = "folders.json"
+
+
+def _is_workspace(path: str) -> bool:
+    """A folder that holds other repositories (a workspace checkout of many projects), not a project itself."""
+    try:
+        with os.scandir(path) as it:
+            return any(e.is_dir() and os.path.exists(os.path.join(e.path, ".git")) for e in it)
+    except OSError:
+        return False
+
+
+def _project_of(path: str) -> str:
+    """The project a folder belongs to: its repository root — or, when that root is a workspace holding other
+    repositories, the workspace's child the folder sits in. ★A clone is a project the moment it exists★; what
+    it is about is learned from the work done in it (§learn), never from a list someone keeps."""
+    p = os.path.normpath(os.path.expanduser(path or ""))
+    if not p or p == os.sep:
+        return ""
+    q = p
+    while True:
+        if os.path.exists(os.path.join(q, ".git")):
+            break
+        up = os.path.dirname(q)
+        if up == q:
+            return p
+        q = up
+    if q != p and _is_workspace(q):
+        return os.path.join(q, os.path.relpath(p, q).split(os.sep)[0])
+    return q
+
+
+def _home(led: dict) -> str:
+    """The project the ledger file lives in — a ledger always answers there."""
+    items = led.get("items") or ""
+    return _project_of(os.path.dirname(os.path.expanduser(items))) if items else ""
+
+
+def _needles(led: dict) -> List[str]:
+    """How a session log names the ledger's files: the full path, and the path from the project's folder name
+    (`app/plan/work.json`) — a session working inside that project names it relatively."""
+    out: List[str] = []
+    for key in ("items", "drafts"):
+        p = led.get(key)
+        if not p:
+            continue
+        p = os.path.normpath(os.path.expanduser(p))
+        out.append(p)
+        home = _project_of(os.path.dirname(p))
+        if home:
+            out.append(os.path.join(os.path.basename(home), os.path.relpath(p, home)))
+    return list(dict.fromkeys(x.replace(os.sep, "/") for x in out if x))
+
+
+def _folders_path(cfg: dict) -> str:
+    d = team_dir(cfg)
+    return os.path.join(d, FOLDERS_FILE) if d else ""
+
+
+def learned(cfg: dict) -> Dict[str, List[str]]:
+    """What `learn` found last time, per ledger — read only (the hook calls this on every prompt)."""
+    path = _folders_path(cfg)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return {k: [str(f) for f in v] for k, v in (data.get("learned") or {}).items() if isinstance(v, list)}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def learn(cfg: dict, force: bool = False) -> dict:
+    """Which projects each ledger's work happens in, read off the host's session logs.
+
+    ★Nobody has to say where the work is★ (2026-11-26): the ledger's `folders` were written by hand, the work
+    moved to another repository, and the lane went on answering the old folder only — the questions typed in the
+    new one were counted as unrelated. A project is learned when at least `LEARN_MIN` of its recent sessions,
+    and `LEARN_SHARE` of them, named the ledger's file (measured here: 40 of 48 sessions in the repository the
+    work moved to, against 58 of 207 in the workspace above it and 1 or 2 in a few others). A workspace that
+    holds the ledger's project is never learned — it holds every other project too."""
+    path = _folders_path(cfg)
+    ledgers = _ledgers(cfg)
+    if not path or not ledgers:
+        return {"skipped": "no ledger"}
+    key = hashlib.sha1(json.dumps([[l.get("name"), _needles(l)] for l in ledgers], sort_keys=True).encode()).hexdigest()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            old = json.load(fh)
+        if not force and old.get("key") == key and time.time() - float(old.get("at") or 0) < LEARN_HOURS * 3600:
+            return {"unchanged": True, "learned": old.get("learned") or {}}
+    except (OSError, ValueError, AttributeError):
+        pass
+    from brain import hosts
+    host = hosts.active()
+    out_learned: Dict[str, List[str]] = {}
+    evidence: Dict[str, Dict[str, List[int]]] = {}
+    for led in ledgers:
+        name = _slug(str(led["name"]))
+        keep = [f for f in [_home(led)] + list(led.get("folders") or []) if f]
+        counts: Dict[str, List[int]] = {}
+        for folder, named in host.sessions(_needles(led), recent_files=LEARN_FILES):
+            proj = _project_of(folder)
+            if proj:
+                c = counts.setdefault(proj, [0, 0])
+                c[0] += int(bool(named))
+                c[1] += 1
+        evidence[name] = {p: c for p, c in sorted(counts.items(), key=lambda kv: -kv[1][0]) if c[0]}
+        out_learned[name] = sorted(p for p, (hit, n) in counts.items()
+                                   if hit >= LEARN_MIN and hit >= LEARN_SHARE * n
+                                   and not _under(p, keep) and not _above(p, keep))
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"key": key, "at": time.time(), "learned": out_learned, "named": evidence}, fh,
+                  ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+    return {"learned": out_learned}
+
+
+def folders_of(led: dict, found: Optional[Dict[str, List[str]]] = None) -> List[str]:
+    """Where a ledger answers: the folders the person named, the project its file lives in, and the projects its
+    work was learned in (§learn)."""
+    out = list(led.get("folders") or []) + [_home(led)] + list((found or {}).get(_slug(str(led["name"])), []))
+    return list(dict.fromkeys(os.path.normpath(os.path.expanduser(f)) for f in out if f))
+
+
+def _effective(cfg: dict) -> List[dict]:
+    found = learned(cfg)
+    return [dict(led, folders=folders_of(led, found)) for led in _ledgers(cfg)]
+
+
 def team_dir(cfg: dict) -> str:
+    """Where the generated documents go: the `team` source's folder when the person indexes them with their
+    memories; otherwise, with the reference lane on, `team.docs` or `<brain home>/team/docs` — a folder no
+    source reads, so the main index never sees them. "" when neither is configured (nothing is generated)."""
     for s in (cfg or {}).get("sources", []) or []:
         if s.get("name") == "team" and s.get("path"):
             return os.path.expanduser(s["path"])
+    t = settings(cfg)
+    if t.get("reference"):
+        if t.get("docs"):
+            return os.path.expanduser(str(t["docs"]))
+        from brain import store
+        return os.path.join(store.brain_home(), "team", "docs")
     return ""
+
+
+_HEAD_ID = re.compile(r"^# (\S+) ", re.M)
+_ALIAS_LINE = re.compile(r"^- also known as: (.+)$", re.M)
+
+
+def _doc_ids(rel: str, text: str) -> List[str]:
+    """The identifiers an item document answers to exactly: its own id (the heading) and its aliases."""
+    out: List[str] = []
+    m = _HEAD_ID.search(text)
+    if m and _ID.fullmatch(m.group(1)):
+        out.append(m.group(1))
+    a = _ALIAS_LINE.search(text)
+    if a:
+        out += [x for x in _ids_in(a.group(1))]
+    return out
+
+
+def reference(prompt: str, cwd: str = "", cfg: Optional[dict] = None, k: int = 2) -> List[dict]:
+    """What the reference lane offers for this prompt — [] unless `team.reference` is on.
+
+    ★Only the ledgers of the folder the person works in★: a ledger with `folders` answers only a session under
+    one of them (a ledger without `folders` answers everywhere), and reports grouped by a folder answer only
+    that folder. An identifier the prompt names (an item id or alias) is a lookup and passes regardless of score;
+    anything else must clear the lane's own threshold (§lane)."""
+    if cfg is None:
+        from brain import store
+        cfg = store.load_config(tolerant=True)
+    if not reference_enabled(cfg):
+        return []
+    groups = set()
+    for led in _effective(cfg):
+        if not led.get("folders") or _under(cwd, led.get("folders") or []):
+            groups.add(_slug(str(led["name"])))
+    if cwd:
+        # reports grouped by the folder they arrived in (§_groups) answer that folder — ★never under a ledger's
+        # name★: measured 2026-11-25, two sessions in worktrees ending in `apps/lumi` (outside the ledger's
+        # folders) got the `lumi` ledger because the folder name equalled the ledger name.
+        own = _slug(os.path.basename(os.path.normpath(cwd)))
+        if own not in {_slug(str(l["name"])) for l in _ledgers(cfg)}:
+            groups.add(own)
+    if not groups:
+        return []
+    from brain import lane
+    return lane.search(lane_path(), prompt, k=k, groups=sorted(groups), ids=_ids_in(prompt))
 
 
 def _fingerprint(ledgers: List[dict]) -> str:
@@ -402,7 +613,7 @@ def _fingerprint(ledgers: List[dict]) -> str:
 
 def build(cfg: dict) -> Dict[str, str]:
     """Every document this configuration produces, as {relative path: text}. Reads, never writes."""
-    ledgers = _ledgers(cfg)
+    ledgers = _effective(cfg)
     groups = _groups(load_events(), ledgers)
     docs: Dict[str, str] = {}
     for led in ledgers:
@@ -480,10 +691,16 @@ def materialize(cfg: Optional[dict] = None, force: bool = False) -> dict:
     if not out_dir:
         return {"skipped": "no team source"}
     state_path = os.path.join(out_dir, ".state.json")
-    fp = _fingerprint(_ledgers(cfg))
+    try:
+        learnt = learn(cfg, force=force)
+    except Exception as exc:                             # noqa: BLE001 — a log that cannot be read keeps what was known
+        learnt = {"error": type(exc).__name__}
+    fp = _fingerprint(_effective(cfg))
     try:
         with open(state_path, encoding="utf-8") as fh:
             if not force and json.load(fh).get("fingerprint") == fp:
+                if reference_enabled(cfg):
+                    return {"unchanged": True, "folders": learnt.get("learned", learnt), "lane": _rebuild_lane(out_dir)}
                 return {"unchanged": True}
     except (OSError, ValueError):
         pass
@@ -511,7 +728,19 @@ def materialize(cfg: Optional[dict] = None, force: bool = False) -> dict:
             removed += 1
     with open(state_path, "w", encoding="utf-8") as fh:
         json.dump({"fingerprint": fp, "documents": len(docs), "at": time.strftime("%Y-%m-%dT%H:%M:%S")}, fh)
-    return {"documents": len(docs), "written": written, "removed": removed}
+    out = {"documents": len(docs), "written": written, "removed": removed, "folders": learnt.get("learned", learnt)}
+    if reference_enabled(cfg):
+        out["lane"] = _rebuild_lane(out_dir, force=bool(force or written or removed))
+    return out
+
+
+def _rebuild_lane(out_dir: str, force: bool = False) -> dict:
+    """Index the generated documents into the reference lane — when they changed, or the lane is missing."""
+    from brain import lane
+    if not force and lane.info(lane_path()).get("folder") == out_dir:
+        return {"unchanged": True}
+    m = lane.build(out_dir, lane_path(), ids_of=_doc_ids)
+    return {k: m.get(k) for k in ("docs", "floor", "threshold", "seconds")}
 
 
 def main() -> int:

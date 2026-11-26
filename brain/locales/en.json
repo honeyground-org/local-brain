@@ -893,5 +893,9 @@
  "it.reason.applied": "✅ Written.",
  "it.dry_run": "Nothing written yet — run `brain index-trim --apply` to write it (a backup is kept).",
  "it.backup": "Backup of the previous file: {path}",
- "ia.size.trim": "\n   `brain index-trim` shortens or drops only the lines the audit calls safe (config `index_trim.auto` does it daily)."
+ "ia.size.trim": "\n   `brain index-trim` shortens or drops only the lines the audit calls safe (config `index_trim.auto` does it daily).",
+ "hook.reference_header": "[brain · reference] Found in a team's work ledger, kept apart from the memories above. For reference only — the ledger and the lead's own judgement decide; read the ledger before acting on it.",
+ "hook.reference_entry": "\n· {name}  [{why}]\n  {desc}\n  {excerpt}",
+ "hook.reference_named": "named {id}",
+ "hook.reference_scored": "score {score} ≥ lane threshold {threshold}"
 }
