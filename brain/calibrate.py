@@ -271,13 +271,16 @@ def _real_prompts(limit: int = 120) -> List[str]:
     import random as _random
 
     from brain import hosts
-    raw = hosts.active().prompts(limit=limit * 8)
+    host = hosts.active()
+    raw = host.prompts(limit=limit * 8)
     out: List[str] = []
     for c in raw:
         c = (c or "").strip()
-        # ⛔ Keep only ★natural language a human typed★ — slash commands, shell and system notices are not controls
+        # ⛔ Keep only ★natural language a human typed★ — slash commands, shell and system notices are not controls,
+        #    and neither is another agent's message the host delivered as a prompt (§hosts.Host.report_of): one
+        #    envelope opens with plain words, not "<", and was counted as the person's question until 2026-11-25
         if 12 <= len(c) <= 600 and not c.startswith(("/", "!", "<")) \
-                and "system-reminder" not in c:
+                and "system-reminder" not in c and not host.report_of(c):
             out.append(c)
     out = list(dict.fromkeys(out))
     if not out:
@@ -528,7 +531,11 @@ def measure(db: sqlite3.Connection) -> dict:
 #                    (§team.report_of): it records it, and attaches generated team documents only when
 #                    `team.hook` is on (`_hook_sources`). Without a `team` source recall is called exactly
 #                    as before; bumped because `hook` is a ruler module.
-CODE_GENERATION = 111
+#   112 (2026-11-25) another Claude Code session's message (`<teammate-message>` after "Another Claude session sent a
+#                    message:") is a report too: the hook records it instead of searching with it, and calibration
+#                    no longer counts it among the person's real prompts. Bumped because `hosts` and `calibrate`
+#                    are ruler modules.
+CODE_GENERATION = 112
 
 # ★What actually decides the ruler★ — the modules `measure()` and `_bench()` reach through.
 # Read off the call graph, not guessed: measure → search.recall → textindex · translit · lexicon ·

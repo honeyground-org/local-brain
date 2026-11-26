@@ -5,8 +5,9 @@
 A person working with a team of agents does not write the team's state down as memories. The state
 already lives somewhere else, and the brain never read it:
 
-- **reports** — a lead session receives its teammates' messages (`<agent-message from="...">`) and its
-  background agents' results (`<task-notification>`) as prompts. They are not the person's question.
+- **reports** — a lead session receives its teammates' messages (`<agent-message from="...">`, or another
+  session's `<teammate-message>`) and its background agents' results (`<task-notification>`) as prompts. They
+  are not the person's question; the host adapter knows each envelope (§hosts.Host.report_of).
   Searching with them attached unrelated memories (measured 2026-11-25 on one lead session: 18 attachments,
   11 unrelated, 9 of those from teammate reports — a 600-character report matches dozens of ordinary words,
   so the longest memory scored 5.8 times the threshold while covering 31% of the query).
